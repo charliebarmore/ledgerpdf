@@ -288,7 +288,21 @@ def main() -> int:
     dark = np.count_nonzero(np.all(region < 120, axis=2))
     check("C3 tape appearance renders", dark > 40, f"dark px in tape region: {dark}")
 
+    write_fingerprint()
     return report()
+
+
+def write_fingerprint() -> None:
+    """Record the binder's hash so downstream checks can detect external
+    mutation. Learned the hard way: opening the binder in macOS Preview can
+    rewrite it in place (flattens /Rotate, moves annotation /Rects, re-authors
+    appearance streams) — and then every geometry assertion mysteriously fails
+    against a file nobody thinks changed. See spike/README.md.
+    """
+    import hashlib
+
+    digest = hashlib.sha256(BINDER_PDF.read_bytes()).hexdigest()
+    (OUT_DIR / "binder.sha256").write_text(digest + "\n")
 
 
 def report() -> int:
@@ -302,7 +316,10 @@ def report() -> int:
     print(f"\n{len(RESULTS) - failures}/{len(RESULTS)} checks passed")
     if failures == 0:
         print(f"\nBinder: {BINDER_PDF}")
-        print("Manual viewer matrix: open in macOS Preview + Chrome now; Acrobat/Edge on the Windows box later.")
+        print("Next: engine/.venv/bin/python spike/check_preview.py  (macOS Preview engine)")
+        print("Remaining manual: Acrobat Reader on the real Windows x64 box.")
+        print("NOTE: do not open this binder in the Preview *app* — it rewrites the")
+        print("      file in place and invalidates the fixture. See spike/README.md.")
     return 1 if failures else 0
 
 

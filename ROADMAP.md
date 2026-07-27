@@ -12,7 +12,7 @@ Use Now / Next / Later to avoid false precision. Do not turn uncertain ideas int
 
 Committed work — part-time, ~2 weeks total. This is the entire current commitment.
 
-- **Phase 0 — compatibility spike. ✅ DONE 2026-07-27 (20/20 checks — see `spike/README.md`).** Appearance streams, CropBox normalization, rotation compensation, stable-ID reorder, nested/retargeted bookmarks, links, legacy-annotation survival, `qpdf --check`, spawnable JSON sidecar — all proven on synthetic fixtures. Remaining from the original checklist (tracked, non-blocking for Phase 1): manual Preview pass · Acrobat/Edge on a real Windows box · sidecar AV/SmartScreen packaging test (needs Windows hardware). Stage gate outcome: **no commercial SDK needed — proceed.**
+- **Phase 0 — compatibility spike. ✅ DONE 2026-07-27 (20/20 engine + 19/19 macOS Preview checks — see `spike/README.md`).** Appearance streams, CropBox normalization, rotation compensation, stable-ID reorder, nested/retargeted bookmarks, links, legacy-annotation survival, `qpdf --check`, spawnable JSON sidecar — all proven on synthetic fixtures in **two independent render engines** (pdfium = Chrome/Edge, PDFKit = macOS Preview). Stage gate outcome: **no commercial SDK needed — proceed.** Remaining from the checklist, non-blocking for Phase 1: Acrobat Reader on a real Windows x64 box · sidecar AV/SmartScreen packaging test (needs that hardware).
 - **Phase 1 — binder organizer (~1 week).** Import + drag-drop · thumbnail rail · reorder/rotate/delete · filename bookmarks nested with imported outlines · stable page IDs · versioned session save/reopen · export merged binder that never touches source files.
 - **Vertical-slice checkpoint** (defined in the gate above) — the go/no-go artifact.
 
@@ -26,6 +26,7 @@ Only after the gate passes. Sequenced, with review amendments baked in.
 - Phase 4 — links & navigation: page links, external URLs, broken-link detection, hideable indicators
 - Session-file format versioning + migration story (before design partners keep real binders in it)
 - One-page data-flow doc (local-only, no telemetry, storage locations) to ship with the first beta
+- **Preview-rewrites-binders mitigation** (finding from Phase 0 — see `spike/README.md`): the macOS Preview app rewrote an exported binder in place with no explicit save, flattening `/Rotate` and moving annotation `/Rect`s. A binder is a *record*, so decide the response: user-facing warning · guidance to keep the canonical binder in-app and export copies for distribution · possibly an integrity check (store a hash with the session and flag externally-modified exports). Also worth deliberately reproducing to confirm attribution.
 
 ## Later
 
