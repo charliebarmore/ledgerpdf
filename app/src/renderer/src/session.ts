@@ -152,6 +152,76 @@ export function deletePages(session: Session, ids: string[]): Session {
 
 // ------------------------------------------------------------------ bookmarks
 
+export interface BookmarkOptions {
+  /**
+   * Append "(N pages)" to every bookmark — the span from its page up to the
+   * next bookmark's page. Replicates the count preparers type by hand.
+   */
+  pageCounts?: boolean
+  /**
+   * When a single source supplies the whole binder AND already has its own
+   * outline, skip the redundant file-level wrapper. Default true.
+   */
+  collapseSingleSource?: boolean
+}
+
+const PAGE_COUNT_SUFFIX = /\s*\(\s*\d+\s*(?:page|pages|p)\s*\)\s*$/i
+
+/** Drop a hand-typed "(2 pages)" so a generated count can't double up. */
+function stripPageCount(title: string): string {
+  return title.replace(PAGE_COUNT_SUFFIX, '').trim()
+}
+
+function stripPdfExt(name: string): string {
+  return name.replace(/\.pdf$/i, '')
+}
+
+/**
+ * Annotate LEAF bookmarks with the number of binder pages they cover: from the
+ * bookmark's own page up to the next bookmark's page (in binder order), or to
+ * the end of the binder for the last one.
+ *
+ * Leaves only, deliberately. In real workpaper files the count is a property of
+ * a *document* ("General_Ledger (2 pages)" on page 3, next bookmark on page 5),
+ * never of a section heading — and a heading whose first child sits on the same
+ * page would otherwise be labelled "(1 page)" while covering a dozen.
+ */
+function applyPageCounts(
+  nodes: BookmarkNode[],
+  indexOf: Map<string, number>,
+  totalPages: number
+): BookmarkNode[] {
+  const targets = new Set<number>()
+  const collect = (ns: BookmarkNode[]): void => {
+    for (const n of ns) {
+      const i = indexOf.get(n.page)
+      if (i !== undefined) targets.add(i)
+      collect(n.children)
+    }
+  }
+  collect(nodes)
+  const sorted = [...targets].sort((a, b) => a - b)
+
+  const spanAt = (i: number): number => {
+    const next = sorted.find((t) => t > i)
+    return (next ?? totalPages) - i
+  }
+
+  const walk = (ns: BookmarkNode[]): BookmarkNode[] =>
+    ns.map((n) => {
+      const base = stripPageCount(n.title)
+      const i = indexOf.get(n.page)
+      const isLeaf = n.children.length === 0
+      if (!isLeaf || i === undefined) {
+        return { ...n, title: base, children: walk(n.children) }
+      }
+      const span = spanAt(i)
+      return { ...n, title: `${base} (${span} ${span === 1 ? 'page' : 'pages'})`, children: [] }
+    })
+
+  return walk(nodes)
+}
+
 /**
  * File-level bookmark per source (in binder order), with that source's own
  * imported outline nested beneath, retargeted to surviving pages.
@@ -160,7 +230,8 @@ export function deletePages(session: Session, ids: string[]): Session {
  * but its children are hoisted, so a deleted parent page never silently
  * removes navigation to pages that are still present.
  */
-export function buildBookmarks(session: Session): BookmarkNode[] {
+export function buildBookmarks(session: Session, opts: BookmarkOptions = {}): BookmarkNode[] {
+  const { pageCounts = false, collapseSingleSource = true } = opts
   const firstPageOf = new Map<string, string>()
   for (const p of session.pages) {
     if (!firstPageOf.has(p.source)) firstPageOf.set(p.source, p.id)
@@ -179,17 +250,39 @@ export function buildBookmarks(session: Session): BookmarkNode[] {
 
   // Order sources by where they first appear in the binder.
   const order = [...firstPageOf.keys()]
-  return order.flatMap((sourceId) => {
+  const perSource = order.flatMap((sourceId) => {
     const source = session.sources.find((s) => s.id === sourceId)
     const page = firstPageOf.get(sourceId)
     if (!source || !page) return []
-    return [{ title: source.name, page, children: mapNodes(sourceId, source.outline) }]
+    const children = mapNodes(sourceId, source.outline)
+    return [{ source, page, children }]
   })
+
+  let tree: BookmarkNode[]
+  if (collapseSingleSource && perSource.length === 1 && perSource[0].children.length > 0) {
+    // One source that already carries its own outline: the filename wrapper is
+    // a dead level the user has to expand past.
+    tree = perSource[0].children
+  } else {
+    tree = perSource.map(({ source, page, children }) => ({
+      title: stripPdfExt(source.name),
+      page,
+      children
+    }))
+  }
+
+  if (!pageCounts) return tree
+  const indexOf = new Map(session.pages.map((p, i) => [p.id, i]))
+  return applyPageCounts(tree, indexOf, session.pages.length)
 }
 
 // --------------------------------------------------------------------- export
 
-export function toExportSpec(session: Session, output: string): ExportSpec {
+export function toExportSpec(
+  session: Session,
+  output: string,
+  bookmarkOpts: BookmarkOptions = {}
+): ExportSpec {
   const used = new Set(session.pages.map((p) => p.source))
   const sources: Record<string, string> = {}
   for (const s of session.sources) {
@@ -203,7 +296,7 @@ export function toExportSpec(session: Session, output: string): ExportSpec {
       index: p.index,
       rotate: p.rotate
     })),
-    bookmarks: buildBookmarks(session),
+    bookmarks: buildBookmarks(session, bookmarkOpts),
     output
   }
 }

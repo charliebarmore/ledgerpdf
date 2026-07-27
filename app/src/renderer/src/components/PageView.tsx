@@ -1,6 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { pageProvenance, sourceOf, type BinderPage, type Session } from '../session'
-import { renderInto } from '../pdf'
+import { renderInto, type Sizing } from '../pdf'
+
+/** Zoom state: a fit mode, or an absolute scale where 1 = 100%. */
+type Zoom = { mode: 'fitWidth' } | { mode: 'fitPage' } | { mode: 'scale'; factor: number }
+
+const STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8]
+const PAD = 40
+
+function stepFrom(current: number, dir: 1 | -1): number {
+  if (dir > 0) return STEPS.find((s) => s > current + 0.001) ?? STEPS[STEPS.length - 1]
+  return [...STEPS].reverse().find((s) => s < current - 0.001) ?? STEPS[0]
+}
 
 export function PageView({
   session,
@@ -11,15 +22,19 @@ export function PageView({
 }): React.JSX.Element {
   const holder = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
-  const [width, setWidth] = useState(760)
+  const [box, setBox] = useState({ w: 800, h: 900 })
+  const [zoom, setZoom] = useState<Zoom>({ mode: 'fitWidth' })
+  const [effective, setEffective] = useState(1)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const el = holder.current
     if (!el) return
     const ro = new ResizeObserver(([entry]) => {
-      const w = Math.max(240, Math.floor(entry.contentRect.width - 48))
-      setWidth(Math.min(w, 1100))
+      setBox({
+        w: Math.max(200, Math.floor(entry.contentRect.width - PAD)),
+        h: Math.max(200, Math.floor(entry.contentRect.height - PAD))
+      })
     })
     ro.observe(el)
     return () => ro.disconnect()
@@ -28,21 +43,107 @@ export function PageView({
   useEffect(() => {
     const src = page ? sourceOf(session, page) : undefined
     if (!page || !src || !canvas.current) return
+    const sizing: Sizing =
+      zoom.mode === 'scale'
+        ? { mode: 'scale', factor: zoom.factor }
+        : zoom.mode === 'fitWidth'
+          ? { mode: 'fitWidth', boxW: box.w }
+          : { mode: 'fitPage', boxW: box.w, boxH: box.h }
     setError(null)
-    renderInto(canvas.current, src.id, src.path, page.index, page.rotate, width).catch((e) =>
-      setError(String(e?.message ?? e))
-    )
-  }, [page?.id, page?.rotate, width, session.sources])
+    renderInto(canvas.current, src.id, src.path, page.index, page.rotate, sizing)
+      .then(setEffective)
+      .catch((e) => setError(String(e?.message ?? e)))
+  }, [page?.id, page?.rotate, box.w, box.h, zoom, session.sources])
+
+  /** Zoom steps operate on whatever is currently on screen. */
+  const nudgeZoom = useCallback(
+    (dir: 1 | -1) => setZoom({ mode: 'scale', factor: stepFrom(effective, dir) }),
+    [effective]
+  )
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault()
+        nudgeZoom(1)
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault()
+        nudgeZoom(-1)
+      } else if (e.key === '0') {
+        e.preventDefault()
+        setZoom({ mode: 'fitWidth' })
+      } else if (e.key === '9') {
+        e.preventDefault()
+        setZoom({ mode: 'fitPage' })
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [nudgeZoom])
+
+  /** Ctrl/⌘ + wheel = continuous zoom, like every other document viewer. */
+  const onWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      e.preventDefault()
+      const next = Math.min(8, Math.max(0.1, effective * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
+      setZoom({ mode: 'scale', factor: next })
+    },
+    [effective]
+  )
+
+  const isFit = zoom.mode !== 'scale'
 
   return (
-    <div className="pageview" ref={holder}>
+    <div className="pageview" ref={holder} onWheel={onWheel}>
       {page ? (
         <>
-          <div className="pageview-caption">
-            {pageProvenance(session, page)}
-            {page.rotate !== 0 && <span className="tag">rotated {page.rotate}°</span>}
+          <div className="pageview-bar">
+            <span className="pageview-caption" title={pageProvenance(session, page)}>
+              {pageProvenance(session, page)}
+              {page.rotate !== 0 && <span className="tag">rotated {page.rotate}°</span>}
+            </span>
+            <span className="zoom">
+              <button onClick={() => nudgeZoom(-1)} title="Zoom out  ⌘−">
+                −
+              </button>
+              <span className="zoom-pct" title="Current zoom">
+                {Math.round(effective * 100)}%
+              </span>
+              <button onClick={() => nudgeZoom(1)} title="Zoom in  ⌘+">
+                +
+              </button>
+              <button
+                className={zoom.mode === 'fitWidth' ? 'on' : ''}
+                onClick={() => setZoom({ mode: 'fitWidth' })}
+                title="Fit width  ⌘0"
+              >
+                Fit W
+              </button>
+              <button
+                className={zoom.mode === 'fitPage' ? 'on' : ''}
+                onClick={() => setZoom({ mode: 'fitPage' })}
+                title="Fit page  ⌘9"
+              >
+                Fit P
+              </button>
+              <button
+                className={zoom.mode === 'scale' && Math.abs(zoom.factor - 1) < 0.01 ? 'on' : ''}
+                onClick={() => setZoom({ mode: 'scale', factor: 1 })}
+                title="Actual size"
+              >
+                100%
+              </button>
+            </span>
           </div>
-          {error ? <div className="error">{error}</div> : <canvas ref={canvas} className="sheet" />}
+          <div className={`sheet-scroll${isFit ? '' : ' is-zoomed'}`}>
+            {error ? (
+              <div className="error">{error}</div>
+            ) : (
+              <canvas ref={canvas} className="sheet" />
+            )}
+          </div>
         </>
       ) : (
         <div className="pageview-empty">No page selected</div>

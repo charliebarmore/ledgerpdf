@@ -118,7 +118,7 @@ async function main(): Promise<number> {
   const before = buildBookmarks(s)
   check(
     'bookmarks: 2 file-level, B first (binder order)',
-    before.length === 2 && before[0].title === 'fixture_b.pdf' && before[1].title === 'fixture_a.pdf',
+    before.length === 2 && before[0].title === 'fixture_b' && before[1].title === 'fixture_a',
     before.map((b) => b.title).join(',')
   )
   check(
@@ -126,6 +126,56 @@ async function main(): Promise<number> {
     before[0].children.map((c) => c.title).join(',') === 'Schedule X,Schedule Y' &&
       before[0].children[0].children.map((c) => c.title).join(',') === 'Detail X-1',
     JSON.stringify(before[0].children.map((c) => [c.title, c.children.map((g) => g.title)]))
+  )
+
+  // --- single-source collapse: the filename wrapper is a dead level when one
+  //     source already carries its own outline (real-file finding)
+  let solo: Session = newSession()
+  solo = addSource(solo, pb.probe as ProbeWire)
+  const collapsed = buildBookmarks(solo)
+  check(
+    'single source with own outline: wrapper collapsed',
+    collapsed.length === 2 && collapsed[0].title === 'Schedule X',
+    collapsed.map((b) => b.title).join(',')
+  )
+  const kept = buildBookmarks(solo, { collapseSingleSource: false })
+  check(
+    'wrapper kept when asked, .pdf stripped',
+    kept.length === 1 && kept[0].title === 'fixture_b',
+    kept.map((b) => b.title).join(',')
+  )
+  let soloA: Session = newSession()
+  soloA = addSource(soloA, pa.probe as ProbeWire)
+  check(
+    'single source WITHOUT outline keeps its file bookmark',
+    buildBookmarks(soloA).length === 1 && buildBookmarks(soloA)[0].title === 'fixture_a',
+    buildBookmarks(soloA).map((b) => b.title).join(',')
+  )
+
+  // --- page counts land on LEAVES only (the real-file convention): Schedule X
+  //     is a section heading so it stays bare; its child and Schedule Y count.
+  const counted = buildBookmarks(solo, { pageCounts: true })
+  check(
+    'page counts on leaves only, from bookmark spans',
+    counted[0].title === 'Schedule X' &&
+      counted[0].children[0].title === 'Detail X-1 (2 pages)' &&
+      counted[1].title === 'Schedule Y (2 pages)',
+    JSON.stringify([counted[0].title, counted[0].children[0].title, counted[1].title])
+  )
+  // a hand-typed count must be replaced, not doubled
+  const handTyped: Session = {
+    ...solo,
+    sources: [
+      {
+        ...solo.sources[0],
+        outline: [{ title: 'Schedule X (7 pages)', destPage: 0, children: [] }]
+      }
+    ]
+  }
+  check(
+    'existing "(N pages)" suffix replaced, not doubled',
+    buildBookmarks(handTyped, { pageCounts: true })[0].title === 'Schedule X (3 pages)',
+    buildBookmarks(handTyped, { pageCounts: true })[0].title
   )
 
   // --- delete the page two imported bookmarks point at (B index 1)
@@ -187,9 +237,9 @@ async function main(): Promise<number> {
   //   fixture_a.pdf -> 2 (A has no outline of its own)
   const got = flatten(out.probe.outline)
   const want: Array<[number, string, number | null]> = [
-    [0, 'fixture_b.pdf', 0],
+    [0, 'fixture_b', 0],
     [1, 'Schedule X', 0],
-    [0, 'fixture_a.pdf', 2]
+    [0, 'fixture_a', 2]
   ]
   check('exported bookmarks retargeted', JSON.stringify(got) === JSON.stringify(want), JSON.stringify(got))
 

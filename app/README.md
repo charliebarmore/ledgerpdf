@@ -59,6 +59,9 @@ This app holds client tax documents, so the boundaries are deliberate:
 
 | Keys | Action |
 |---|---|
+| `⌘/Ctrl +` `−` | zoom in / out |
+| `⌘/Ctrl 0` · `9` | fit width · fit page |
+| `⌘/Ctrl` + scroll | continuous zoom |
 | `↑` `↓` | move the cursor |
 | `⌘/Ctrl ↑ ↓` | move the selected page(s) in the binder |
 | `[` `]` | rotate left / right |
@@ -79,6 +82,21 @@ Dev builds only (ignored when packaged), used by `npm run smoke`:
 | `WPT_DEV_EXPORT` | export to this path (pre-authorized, no dialog) |
 | `WPT_DEV_SHOT` | capture the window to this PNG once loaded |
 | `WPT_DEV_EXIT` | quit after capturing |
+
+## Bookmark behavior
+
+- One bookmark per source file, with that source's own imported outline nested
+  beneath and retargeted to final binder positions.
+- The file-level wrapper is **suppressed** when a single source supplies the
+  whole binder and already has its own outline — otherwise it's a dead level.
+- `.pdf` is stripped from file-level titles.
+- **Page counts** (`counts` toggle, on by default) append `(N pages)` to **leaf**
+  bookmarks only — the span from that bookmark's page to the next one. Leaves
+  only because in real workpaper files the count describes a *document*, not a
+  section heading; a heading whose first child shares its page would otherwise
+  read "(1 page)" while covering a dozen. A hand-typed `(N pages)` in an imported
+  title is replaced, never doubled.
+- A bookmark whose target page is deleted is dropped and its children hoisted.
 
 ## Known gaps (tracked in ../ROADMAP.md)
 

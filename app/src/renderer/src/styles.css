@@ -125,8 +125,19 @@ button.link {
 
 .body {
   display: grid;
-  grid-template-columns: 172px 1fr 264px;
+  grid-template-columns: 172px minmax(0, 1fr) 5px var(--side-w, 300px);
   min-height: 0;
+}
+
+/* draggable divider before the side panel */
+.splitter {
+  cursor: col-resize;
+  background: var(--border);
+}
+
+.splitter:hover,
+.splitter:active {
+  background: var(--primary);
 }
 
 .body:has(.dropzone) {
@@ -221,13 +232,21 @@ button.link {
 /* page view */
 
 .pageview {
-  overflow: auto;
-  padding: var(--lg);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--md);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
+}
+
+/* caption + zoom controls */
+.pageview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--md);
+  padding: var(--xs) var(--md);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
 }
 
 .pageview-caption {
@@ -236,6 +255,51 @@ button.link {
   display: flex;
   gap: var(--sm);
   align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.zoom button {
+  padding: 2px 7px;
+  font-size: 12px;
+}
+
+.zoom button.on {
+  background: #e4efef;
+  border-color: #a9cccd;
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.zoom-pct {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 44px;
+  text-align: center;
+}
+
+/* the scrolling sheet area */
+.sheet-scroll {
+  overflow: auto;
+  padding: var(--lg);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+/* when zoomed past the viewport, don't center-clip the top-left */
+.sheet-scroll.is-zoomed {
+  justify-content: safe center;
 }
 
 .tag {
@@ -274,6 +338,10 @@ button.link {
 }
 
 .panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sm);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -314,6 +382,20 @@ button.link {
   font-variant-numeric: tabular-nums;
   color: var(--muted);
   flex: none;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  cursor: default;
+}
+
+.toggle input {
+  margin: 0;
 }
 
 .stats {

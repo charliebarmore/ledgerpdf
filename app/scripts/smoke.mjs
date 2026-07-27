@@ -94,11 +94,11 @@ if (existsSync(OUT_PDF)) {
     check('6 pages from 2 sources', probed.probe.n_pages === 6, `n_pages=${probed.probe.n_pages}`)
     const got = flat(probed.probe.outline)
     const want = [
-      'fixture_a.pdf -> 0',
-      'fixture_b.pdf -> 3',
+      'fixture_a (3 pages) -> 0',
+      'fixture_b -> 3',
       '  Schedule X -> 3',
-      '    Detail X-1 -> 4',
-      '  Schedule Y -> 4'
+      '    Detail X-1 (2 pages) -> 4',
+      '  Schedule Y (2 pages) -> 4'
     ]
     check('bookmarks nested + retargeted', JSON.stringify(got) === JSON.stringify(want), got.join(' | '))
   }

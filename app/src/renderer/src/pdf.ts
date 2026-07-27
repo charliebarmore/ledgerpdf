@@ -95,6 +95,16 @@ export async function renderThumb(
  */
 const inFlight = new WeakMap<HTMLCanvasElement, { cancel: () => void }>()
 
+/**
+ * How big to draw the page.
+ *  - `fitWidth` / `fitPage` — scale to the given viewport box
+ *  - `scale` — absolute zoom, where 1 = 100% (one PDF point per CSS pixel)
+ */
+export type Sizing =
+  | { mode: 'fitWidth'; boxW: number }
+  | { mode: 'fitPage'; boxW: number; boxH: number }
+  | { mode: 'scale'; factor: number }
+
 /** Render one page into a canvas at fit-width for the main view. */
 export async function renderInto(
   canvas: HTMLCanvasElement,
@@ -102,8 +112,8 @@ export async function renderInto(
   filePath: string,
   index: number,
   rotate: number,
-  cssWidth: number
-): Promise<void> {
+  sizing: Sizing
+): Promise<number> {
   inFlight.get(canvas)?.cancel()
 
   const doc = await getDoc(sourceId, filePath)
@@ -111,15 +121,23 @@ export async function renderInto(
   const rotation = totalRotation(page.rotate, rotate)
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
   const base = page.getViewport({ scale: 1, rotation })
-  const scale = (cssWidth * dpr) / base.width
-  const viewport = page.getViewport({ scale, rotation })
+
+  // Effective zoom: 1 = 100% (one PDF point per CSS pixel).
+  const zoom =
+    sizing.mode === 'scale'
+      ? sizing.factor
+      : sizing.mode === 'fitWidth'
+        ? sizing.boxW / base.width
+        : Math.min(sizing.boxW / base.width, sizing.boxH / base.height)
+
+  const viewport = page.getViewport({ scale: zoom * dpr, rotation })
 
   canvas.width = Math.ceil(viewport.width)
   canvas.height = Math.ceil(viewport.height)
-  canvas.style.width = `${cssWidth}px`
-  canvas.style.height = `${Math.ceil(viewport.height / dpr)}px`
+  canvas.style.width = `${Math.ceil(base.width * zoom)}px`
+  canvas.style.height = `${Math.ceil(base.height * zoom)}px`
   const ctx = canvas.getContext('2d')
-  if (!ctx) return
+  if (!ctx) return zoom
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
   // A newer render may have started while we awaited the page.
@@ -134,4 +152,5 @@ export async function renderInto(
   } finally {
     if (inFlight.get(canvas) === task) inFlight.delete(canvas)
   }
+  return zoom
 }

@@ -25,6 +25,8 @@ export default function App(): React.JSX.Element {
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [status, setStatus] = useState('Add PDFs to start a binder.')
   const [busy, setBusy] = useState(false)
+  const [pageCounts, setPageCounts] = useState(true)
+  const [sideW, setSideW] = useState(300)
   const past = useRef<Session[]>([])
   const future = useRef<Session[]>([])
 
@@ -184,7 +186,7 @@ export default function App(): React.JSX.Element {
     setBusy(true)
     setStatus('Exporting…')
     try {
-      const res = await window.wpt.exportBinder(toExportSpec(target, out))
+      const res = await window.wpt.exportBinder(toExportSpec(target, out, { pageCounts }))
       if (res.ok) {
         const r = res.result as { pages: number; check_problems: string[] }
         const clean = r.check_problems.length === 0
@@ -198,7 +200,7 @@ export default function App(): React.JSX.Element {
     } finally {
       setBusy(false)
     }
-  }, [])
+  }, [pageCounts])
 
   const exportBinder = useCallback(async () => {
     if (!pages.length) return setStatus('Nothing to export.')
@@ -302,6 +304,21 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [undo, redo, rotate, remove, step, nudge, saveSession, openSession, addViaDialog, exportBinder])
 
+  /** Drag the divider to widen the bookmark panel — real titles are long. */
+  const startResize = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = sideW
+    const onMove = (ev: PointerEvent): void =>
+      setSideW(Math.max(200, Math.min(720, startW + (startX - ev.clientX))))
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [sideW])
+
   // ---------------------------------------------------------------- drag-drop
 
   const onDrop = useCallback(
@@ -366,7 +383,7 @@ export default function App(): React.JSX.Element {
         </button>
       </header>
 
-      <div className="body">
+      <div className="body" style={{ ['--side-w' as string]: `${sideW}px` }}>
         {pages.length === 0 ? (
           <div className="dropzone">
             <div className="dropzone-inner">
@@ -387,9 +404,17 @@ export default function App(): React.JSX.Element {
               onReorder={(ids, before) => apply(movePages(session, ids, before), 'Reordered.')}
             />
             <PageView session={session} page={current} />
+            <div
+              className="splitter"
+              onPointerDown={startResize}
+              title="Drag to resize"
+              role="separator"
+            />
             <aside className="side">
               <BookmarkPanel
                 session={session}
+                pageCounts={pageCounts}
+                onTogglePageCounts={setPageCounts}
                 onJump={(id) => {
                   setCurrentId(id)
                   setSelected(new Set([id]))
