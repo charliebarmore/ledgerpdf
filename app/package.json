@@ -1,0 +1,34 @@
+{
+  "name": "workpaper-tool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tax workpaper binder \u2014 organize, mark up, and export PDF binders locally",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "verify:model": "esbuild scripts/verify-model.ts --bundle --platform=node --format=cjs --outfile=out/verify-model.cjs --log-level=warning && node out/verify-model.cjs",
+    "prepare:assets": "node scripts/copy-pdfjs-assets.mjs",
+    "predev": "npm run prepare:assets",
+    "prebuild": "npm run prepare:assets",
+    "smoke": "node scripts/smoke.mjs",
+    "verify": "npm run typecheck && npm run verify:model && npm run smoke"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^6.1.200",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^43.2.0",
+    "electron-vite": "^5.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
+  }
+}

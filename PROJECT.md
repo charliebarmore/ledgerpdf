@@ -74,7 +74,8 @@ Firms pay twice for workpaper markup: Adobe Acrobat (subscription, ~$240/user/yr
 
 | Metric | Baseline | Target | How measured |
 | --- | --- | --- | --- |
-| Phase 0 gate: portable annotations on real tax PDFs | unknown | pass in 4 viewers + `qpdf --check` | spike checklist in source-materials.md |
+| Phase 0 gate: portable annotations on real tax PDFs | unknown | pass in 4 viewers + `qpdf --check` | ✅ 2026-07-27 — 2 engines automated (pdfium, PDFKit); Acrobat/Windows pending |
+| Phase 1: organize + export a binder from the GUI | Adobe today | working app | ✅ 2026-07-27 — `app/` + `npm run verify` (29 automated checks) |
 | Charlie prepares a real binder start-to-finish in the tool | Adobe today | 1 real workpaper set via Phase 1 build | dogfood log |
 | Bookmark/mark integrity through reorder | manual in GUI tools | 0 detached marks across test corpus | regression fixtures |
 | Part-time budget respected | — | ≤ ~2 wks part-time through Phase 1 | honest calendar check at the gate |
@@ -84,8 +85,8 @@ Firms pay twice for workpaper markup: Adobe Acrobat (subscription, ~$240/user/yr
 | Question | Owner | Blocking? | Notes |
 | --- | --- | --- | --- |
 | Real product name | Charlie | No | "workpaper-tool" is the working name; decide before design partners see it |
-| Sidecar packaging: PyInstaller vs Nuitka vs qpdf-CLI-only | Phase 0 spike | Yes (for Phase 1) | Decided by AV/SmartScreen behavior on the real Windows box |
-| Commercial PDF SDK fallback needed? | Phase 0 spike | Yes | Only if annotations can't be made reliably portable (the stage gate) |
+| Sidecar packaging: PyInstaller vs Nuitka vs qpdf-CLI-only | Phase 5 | No (dev runs from the venv) | Decided by AV/SmartScreen behavior on the real Windows box |
+| ~~Commercial PDF SDK fallback needed?~~ | — | **Resolved 2026-07-27: No** | pikepdf/qpdf produced portable annotations in both pdfium and PDFKit; stage gate passed |
 | Real Windows x64 test hardware | Charlie | No (Phase 1), Yes (beta) | Mini PC vs. a design partner's workstation |
 | Which 2–3 TCR members are the design partners | Charlie | No | From the TCR thread responses; confirm before Phase 2 |
 | Business model if gate passes | Charlie | No | Decide WITH August revenue data, not before |

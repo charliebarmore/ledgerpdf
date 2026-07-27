@@ -78,11 +78,19 @@ def export_binder(spec: dict) -> dict:
         out = stack.enter_context(pikepdf.new())
 
         # 1. Assemble pages in final order; record page_id -> final index.
+        #    `rotate` is the user's DELTA on top of the source page's own
+        #    /Rotate, applied here so annotation geometry (step 3) sees the
+        #    final displayed orientation.
         final_index: dict[str, int] = {}
         for i, entry in enumerate(spec["pages"]):
             src = sources[entry["source"]]
             out.pages.append(src.pages[entry["index"]])
             final_index[entry["id"]] = i
+            delta = int(entry.get("rotate", 0)) % 360
+            if delta:
+                page_obj = out.pages[i].obj
+                current = int(page_obj.get(Name.Rotate, 0))
+                page_obj.Rotate = (current + delta) % 360
 
         # 2. Normalize pre-existing annotations on imported pages: repoint /P
         #    at the new page so no annotation references its old document.

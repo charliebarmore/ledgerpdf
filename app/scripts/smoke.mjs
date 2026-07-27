@@ -1,0 +1,117 @@
+/**
+ * Phase 1 GUI smoke test — drives the real Electron app end to end with no
+ * human clicking, then verifies the artifact it produced.
+ *
+ *   import two fixture PDFs  ->  render  ->  export through IPC + engine
+ *   ->  assert page count, nested/retargeted bookmarks, qpdf --check clean
+ *   ->  capture a PNG of the window for eyeballing
+ *
+ * Uses the dev-only WPT_DEV_* seams in src/main/index.ts. Synthetic fixtures
+ * only — never client documents.
+ *
+ *   npm run smoke
+ */
+
+import { spawn } from 'node:child_process'
+import { existsSync, rmSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const here = path.dirname(fileURLToPath(import.meta.url))
+const APP = path.resolve(here, '..')
+const REPO = path.resolve(APP, '..')
+const ENGINE = path.join(REPO, 'engine')
+const PY = path.join(ENGINE, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
+const FIXTURES = path.join(REPO, 'spike', 'fixtures')
+const OUT_PDF = path.join(REPO, 'spike', 'out', 'app_smoke_binder.pdf')
+const SHOT = path.join(REPO, 'spike', 'out', 'app_smoke_window.png')
+
+const checks = []
+const check = (name, ok, detail = '') => checks.push([name, !!ok, detail])
+
+function run(cmd, args, opts = {}) {
+  return new Promise((resolve) => {
+    const c = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = ''
+    let err = ''
+    c.stdout.on('data', (d) => (out += d))
+    c.stderr.on('data', (d) => (err += d))
+    c.on('close', (code) => resolve({ code, out, err }))
+  })
+}
+
+function engine(command) {
+  return new Promise((resolve, reject) => {
+    const c = spawn(PY, ['-m', 'workpaper_engine.cli'], {
+      cwd: ENGINE,
+      env: { ...process.env, PYTHONPATH: ENGINE }
+    })
+    let out = ''
+    c.stdout.on('data', (d) => (out += d))
+    c.on('error', reject)
+    c.on('close', () => {
+      try {
+        resolve(JSON.parse(out.trim()))
+      } catch {
+        reject(new Error('engine gave no JSON'))
+      }
+    })
+    c.stdin.end(JSON.stringify(command))
+  })
+}
+
+const flat = (nodes, depth = 0) =>
+  nodes.flatMap((n) => [`${'  '.repeat(depth)}${n.title} -> ${n.dest_page}`, ...flat(n.children ?? [], depth + 1)])
+
+const a = path.join(FIXTURES, 'fixture_a.pdf')
+const b = path.join(FIXTURES, 'fixture_b.pdf')
+if (!existsSync(a) || !existsSync(b)) {
+  console.error('fixtures missing — run: engine/.venv/bin/python spike/run_spike.py')
+  process.exit(1)
+}
+rmSync(OUT_PDF, { force: true })
+rmSync(SHOT, { force: true })
+
+console.log('launching app…')
+const app = await run('npm', ['run', 'dev'], {
+  cwd: APP,
+  env: {
+    ...process.env,
+    WPT_DEV_OPEN: [a, b].join(path.delimiter),
+    WPT_DEV_EXPORT: OUT_PDF,
+    WPT_DEV_SHOT: SHOT,
+    WPT_DEV_EXIT: '1'
+  }
+})
+check('app ran and exited cleanly', app.code === 0, `exit=${app.code}`)
+check('window snapshot captured', existsSync(SHOT), SHOT)
+check('binder exported', existsSync(OUT_PDF), OUT_PDF)
+
+if (existsSync(OUT_PDF)) {
+  const probed = await engine({ cmd: 'probe', path: OUT_PDF })
+  check('exported binder parses', probed.ok === true)
+  if (probed.ok) {
+    check('6 pages from 2 sources', probed.probe.n_pages === 6, `n_pages=${probed.probe.n_pages}`)
+    const got = flat(probed.probe.outline)
+    const want = [
+      'fixture_a.pdf -> 0',
+      'fixture_b.pdf -> 3',
+      '  Schedule X -> 3',
+      '    Detail X-1 -> 4',
+      '  Schedule Y -> 4'
+    ]
+    check('bookmarks nested + retargeted', JSON.stringify(got) === JSON.stringify(want), got.join(' | '))
+  }
+  const qpdf = await run(PY, ['-c', `import pikepdf,sys; j=pikepdf.Job(['qpdf','--check',${JSON.stringify(OUT_PDF)}]); j.run(); sys.exit(j.exit_code)`])
+  check('qpdf --check clean', qpdf.code === 0, `exit=${qpdf.code}`)
+}
+
+console.log('\n=== Phase 1 GUI smoke ===')
+let fails = 0
+for (const [name, ok, detail] of checks) {
+  if (!ok) fails++
+  console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name}${detail ? `  — ${detail}` : ''}`)
+}
+console.log(`\n${checks.length - fails}/${checks.length} checks passed`)
+if (!fails) console.log(`window: ${SHOT}`)
+process.exit(fails ? 1 : 0)

@@ -1,0 +1,389 @@
+/* Tokens from DESIGN.md. A professional instrument: dense, quiet, keyboard-first.
+   Verify legibility at 100% scale on a 1080p Windows monitor, not just Retina. */
+
+:root {
+  --bg: #f7f6f2;
+  --surface: #ffffff;
+  --border: #d4d1ca;
+  --text: #28251d;
+  --muted: #7a7974;
+  --primary: #01696f;
+  --warning: #964219;
+  --error: #a12c7b;
+
+  --xs: 4px;
+  --sm: 8px;
+  --md: 12px;
+  --lg: 20px;
+
+  --r-sm: 4px;
+  --r-md: 8px;
+
+  --ui: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--ui);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+/* ------------------------------------------------------------------ toolbar */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sm);
+  padding: var(--sm) var(--md);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-right: var(--sm);
+}
+
+.toolbar .sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 var(--xs);
+}
+
+.toolbar .spacer {
+  flex: 1;
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 5px 10px;
+  cursor: default;
+}
+
+button:hover:not(:disabled) {
+  background: #f1efe9;
+}
+
+button:active:not(:disabled) {
+  background: #e8e5dd;
+}
+
+button:disabled {
+  opacity: 0.4;
+}
+
+button.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  font-weight: 500;
+}
+
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------- body */
+
+.body {
+  display: grid;
+  grid-template-columns: 172px 1fr 264px;
+  min-height: 0;
+}
+
+.body:has(.dropzone) {
+  grid-template-columns: 1fr;
+}
+
+/* thumbnail rail */
+
+.rail {
+  overflow-y: auto;
+  padding: var(--sm);
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+.thumb {
+  position: relative;
+  padding: var(--xs);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  margin-bottom: var(--sm);
+}
+
+.thumb.is-selected {
+  background: #e4efef;
+  border-color: #a9cccd;
+}
+
+.thumb.is-current {
+  border-color: var(--primary);
+}
+
+.thumb.drop-before::before,
+.thumb.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--primary);
+}
+
+.thumb.drop-before::before {
+  top: -5px;
+}
+
+.thumb.drop-after::after {
+  bottom: -5px;
+}
+
+.thumb-frame {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+}
+
+.thumb-img {
+  display: block;
+  max-width: 100%;
+}
+
+.thumb-placeholder {
+  width: 100%;
+  height: 170px;
+  background: repeating-linear-gradient(45deg, #fbfaf7, #fbfaf7 6px, #f3f1ec 6px, #f3f1ec 12px);
+}
+
+.thumb-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.thumb-num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.thumb-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--warning);
+}
+
+/* page view */
+
+.pageview {
+  overflow: auto;
+  padding: var(--lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--md);
+  min-width: 0;
+}
+
+.pageview-caption {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  gap: var(--sm);
+  align-items: center;
+}
+
+.tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--warning);
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  padding: 0 3px;
+}
+
+.sheet {
+  background: #fff;
+  border: 1px solid var(--border);
+}
+
+.pageview-empty,
+.panel-empty {
+  color: var(--muted);
+  padding: var(--md);
+}
+
+/* side panels */
+
+.side {
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel {
+  border-bottom: 1px solid var(--border);
+  padding: var(--sm) 0;
+}
+
+.panel-head {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 0 var(--md) var(--sm);
+}
+
+.bm-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.bm-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sm);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  padding: 3px var(--md) 3px 8px;
+  width: 100%;
+}
+
+.bm-row:hover {
+  background: #f1efe9;
+}
+
+.bm-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bm-page {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  flex: none;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--sm);
+  margin: 0;
+  padding: 0 var(--md);
+}
+
+.stats dt {
+  color: var(--muted);
+}
+
+.stats dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* dropzone */
+
+.dropzone {
+  display: grid;
+  place-items: center;
+  padding: var(--lg);
+}
+
+.dropzone-inner {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  padding: 56px 72px;
+  text-align: center;
+}
+
+.dz-title {
+  margin: 0 0 var(--xs);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.dz-sub {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* status bar */
+
+.statusbar {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--md);
+  padding: var(--xs) var(--md);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.working {
+  color: var(--primary);
+}
+
+.error {
+  color: var(--error);
+  font-family: var(--mono);
+  font-size: 12px;
+}

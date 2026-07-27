@@ -18,3 +18,7 @@ fixtures/local/
 references/client-docs/
 spike/out/
 spike/fixtures/
+app/src/renderer/public/pdfjs/
+app/out/
+app/dist/
+*.tsbuildinfo

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Local-only tool: no remote origin is permitted. `connect-src` allows the
+      Vite dev server websocket only; there is no https: source anywhere, so the
+      renderer cannot reach the network even if something tried.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ws://localhost:* http://localhost:*; object-src 'none'; base-uri 'none'"
+    />
+    <title>Workpaper Binder</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
