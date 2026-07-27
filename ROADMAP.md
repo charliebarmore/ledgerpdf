@@ -12,7 +12,7 @@ Use Now / Next / Later to avoid false precision. Do not turn uncertain ideas int
 
 Committed work — part-time, ~2 weeks total. This is the entire current commitment.
 
-- **Phase 0 — compatibility spike (2–4 days).** Full checklist in `references/source-materials.md`. Weighted toward: appearance streams rendering identically in all 4 viewers · importing already-annotated PDFs and surviving merge/reorder · sidecar builds/spawns/survives AV on a real Windows machine · CropBox-normalized coordinates on real tax-software output. Stage gate: if annotations can't be made portable, evaluate a commercial PDF SDK before writing any UI.
+- **Phase 0 — compatibility spike. ✅ DONE 2026-07-27 (20/20 checks — see `spike/README.md`).** Appearance streams, CropBox normalization, rotation compensation, stable-ID reorder, nested/retargeted bookmarks, links, legacy-annotation survival, `qpdf --check`, spawnable JSON sidecar — all proven on synthetic fixtures. Remaining from the original checklist (tracked, non-blocking for Phase 1): manual Preview pass · Acrobat/Edge on a real Windows box · sidecar AV/SmartScreen packaging test (needs Windows hardware). Stage gate outcome: **no commercial SDK needed — proceed.**
 - **Phase 1 — binder organizer (~1 week).** Import + drag-drop · thumbnail rail · reorder/rotate/delete · filename bookmarks nested with imported outlines · stable page IDs · versioned session save/reopen · export merged binder that never touches source files.
 - **Vertical-slice checkpoint** (defined in the gate above) — the go/no-go artifact.
 

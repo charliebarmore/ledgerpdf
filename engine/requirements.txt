@@ -1,0 +1,6 @@
+# Engine runtime
+pikepdf>=10.10        # MPL-2.0 — PDF assembly, outlines, annotations (bundles qpdf, Apache-2.0)
+# Spike / test harness only (not shipped in the sidecar)
+pypdfium2>=4          # pdfium == Chrome/Edge PDF engine; render verification
+pillow>=10            # pixel assertions on rendered pages
+# LICENSE GUARD: never add MuPDF/mutool/PyMuPDF (AGPL) — see references/source-materials.md

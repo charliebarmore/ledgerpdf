@@ -16,3 +16,5 @@ __pycache__/
 # Never commit real client documents — synthetic fixtures only
 fixtures/local/
 references/client-docs/
+spike/out/
+spike/fixtures/
