@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { pageProvenance, sourceOf, type BinderPage, type Session } from '../session'
 import { renderThumb } from '../pdf'
 
@@ -40,6 +40,15 @@ export function ThumbnailRail({
   onReorder
 }: Props): React.JSX.Element {
   const [dropAt, setDropAt] = useState<number | null>(null)
+  const railRef = useRef<HTMLDivElement>(null)
+
+  // Keep the current page visible. On a 62-page binder, navigating with the
+  // keyboard or the page controls otherwise scrolls the selection off-screen.
+  useEffect(() => {
+    if (!currentId || !railRef.current) return
+    const el = railRef.current.querySelector(`[data-page-id="${currentId}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [currentId])
 
   const dragIds = (id: string): string[] =>
     selected.has(id) ? session.pages.filter((p) => selected.has(p.id)).map((p) => p.id) : [id]
@@ -47,6 +56,7 @@ export function ThumbnailRail({
   return (
     <div
       className="rail"
+      ref={railRef}
       onDragLeave={(e) => {
         if (e.currentTarget === e.target) setDropAt(null)
       }}
@@ -54,6 +64,7 @@ export function ThumbnailRail({
       {session.pages.map((page, i) => (
         <div
           key={page.id}
+          data-page-id={page.id}
           className={[
             'thumb',
             selected.has(page.id) ? 'is-selected' : '',

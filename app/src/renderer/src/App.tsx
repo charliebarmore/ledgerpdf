@@ -181,6 +181,24 @@ export default function App(): React.JSX.Element {
     [currentId, pages]
   )
 
+  const currentIndex = useMemo(
+    () => pages.findIndex((p) => p.id === current?.id),
+    [pages, current]
+  )
+
+  /** Navigate to a binder position (clamped). Distinct from moving a page. */
+  const goto = useCallback(
+    (index: number) => {
+      if (!pages.length) return
+      const target = pages[Math.min(pages.length - 1, Math.max(0, index))]
+      if (!target) return
+      setCurrentId(target.id)
+      setSelected(new Set([target.id]))
+      setSelectedMarkId(null)
+    },
+    [pages]
+  )
+
   const step = useCallback(
     (dir: -1 | 1) => {
       if (!pages.length) return
@@ -462,6 +480,13 @@ export default function App(): React.JSX.Element {
   )
 
   const count = selected.size || (current ? 1 : 0)
+  // Boundaries for the move buttons, so they disable instead of silently
+  // no-opping at the ends of the binder.
+  const activeIdxs = (selected.size ? [...selected] : current ? [current.id] : []).map((id) =>
+    pages.findIndex((p) => p.id === id)
+  )
+  const minSelectedIndex = activeIdxs.length ? Math.min(...activeIdxs) : -1
+  const maxSelectedIndex = activeIdxs.length ? Math.max(...activeIdxs) : -1
 
   return (
     <div
@@ -483,11 +508,21 @@ export default function App(): React.JSX.Element {
         <button onClick={() => rotate(90)} disabled={!count} title="Rotate right  ]">
           ⟳
         </button>
-        <button onClick={() => nudge(-1)} disabled={!count} title={`Move up  ${MOD}↑`}>
-          ↑
+        <button
+          className="move"
+          onClick={() => nudge(-1)}
+          disabled={!count || minSelectedIndex <= 0}
+          title={`Move the selected page(s) earlier in the binder  ${MOD}↑`}
+        >
+          Move ↑
         </button>
-        <button onClick={() => nudge(1)} disabled={!count} title={`Move down  ${MOD}↓`}>
-          ↓
+        <button
+          className="move"
+          onClick={() => nudge(1)}
+          disabled={!count || maxSelectedIndex >= pages.length - 1}
+          title={`Move the selected page(s) later in the binder  ${MOD}↓`}
+        >
+          Move ↓
         </button>
         <button onClick={remove} disabled={!count} title="Delete (undoable)  ⌫">
           Delete
@@ -577,6 +612,9 @@ export default function App(): React.JSX.Element {
             <PageView
               session={session}
               page={current}
+              pageIndex={currentIndex}
+              pageCount={pages.length}
+              onGoto={goto}
               armed={armed}
               selectedMarkId={selectedMarkId}
               onPlaceMark={placeMark}

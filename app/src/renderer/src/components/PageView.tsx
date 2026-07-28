@@ -24,6 +24,9 @@ function stepFrom(current: number, dir: 1 | -1): number {
 export function PageView({
   session,
   page,
+  pageIndex,
+  pageCount,
+  onGoto,
   armed,
   selectedMarkId,
   onPlaceMark,
@@ -32,6 +35,10 @@ export function PageView({
 }: {
   session: Session
   page: BinderPage | null
+  /** 0-based position of `page` in the binder, and the total, for navigation. */
+  pageIndex: number
+  pageCount: number
+  onGoto: (index: number) => void
   armed: { kind: MarkKind; text?: string } | null
   selectedMarkId: string | null
   onPlaceMark: (nx: number, ny: number) => void
@@ -123,6 +130,32 @@ export function PageView({
       {page ? (
         <>
           <div className="pageview-bar">
+            <span className="pagenav">
+              <button
+                onClick={() => onGoto(pageIndex - 1)}
+                disabled={pageIndex <= 0}
+                title="Previous page  ↑"
+              >
+                ‹
+              </button>
+              <input
+                className="pagenum"
+                value={pageIndex + 1}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value.replace(/\D/g, ''), 10)
+                  if (!Number.isNaN(n)) onGoto(n - 1)
+                }}
+                title="Jump to binder page"
+              />
+              <span className="pagetotal">/ {pageCount}</span>
+              <button
+                onClick={() => onGoto(pageIndex + 1)}
+                disabled={pageIndex >= pageCount - 1}
+                title="Next page  ↓"
+              >
+                ›
+              </button>
+            </span>
             <span className="pageview-caption" title={pageProvenance(session, page)}>
               {pageProvenance(session, page)}
               {page.rotate !== 0 && <span className="tag">rotated {page.rotate}°</span>}

@@ -322,6 +322,51 @@ button.link {
   padding: var(--md);
 }
 
+/* page navigation */
+
+.pagenav {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+
+.pagenav button {
+  padding: 1px 8px;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.pagenum {
+  font: inherit;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  width: 46px;
+  text-align: right;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+}
+
+.pagenum:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.pagetotal {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.toolbar button.move {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* mark palette + overlay */
 
 .palette {

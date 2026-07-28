@@ -62,8 +62,8 @@ This app holds client tax documents, so the boundaries are deliberate:
 | `⌘/Ctrl +` `−` | zoom in / out |
 | `⌘/Ctrl 0` · `9` | fit width · fit page |
 | `⌘/Ctrl` + scroll | continuous zoom |
-| `↑` `↓` | move the cursor |
-| `⌘/Ctrl ↑ ↓` | move the selected page(s) in the binder |
+| `↑` `↓` | go to the previous / next page |
+| `⌘/Ctrl ↑ ↓` | **move** the selected page(s) within the binder |
 | `[` `]` | rotate left / right |
 | `⌫` | delete (undoable — no confirmation dialog, per DESIGN.md) |
 | `⌘/Ctrl Z` / `⇧⌘Z` | undo / redo |
@@ -76,6 +76,12 @@ This app holds client tax documents, so the boundaries are deliberate:
 
 Click selects, `⌘/Ctrl`-click toggles, `⇧`-click selects a range. Drag thumbnails
 to reorder; drop PDFs onto the window to import.
+
+**Navigating vs. moving are different actions.** `‹ 3 / 62 ›` in the page bar
+navigates (and the page number is editable — type to jump). The `Move ↑` /
+`Move ↓` toolbar buttons reorder the selected page and deliberately leave you on
+it; they disable at the ends of the binder rather than silently doing nothing.
+The thumbnail rail scrolls to keep the current page visible.
 
 ## Dev seams
 
