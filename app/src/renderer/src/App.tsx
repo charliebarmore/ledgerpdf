@@ -11,6 +11,7 @@ import {
   newSession,
   parseSession,
   rotatePages,
+  setBookmarkTitle,
   toExportSpec,
   type ProbeWire,
   type Session
@@ -415,6 +416,12 @@ export default function App(): React.JSX.Element {
                 session={session}
                 pageCounts={pageCounts}
                 onTogglePageCounts={setPageCounts}
+                onRename={(key, title) =>
+                  apply(
+                    setBookmarkTitle(session, key, title),
+                    title ? 'Bookmark renamed.' : 'Bookmark title reverted.'
+                  )
+                }
                 onJump={(id) => {
                   setCurrentId(id)
                   setSelected(new Set([id]))

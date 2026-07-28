@@ -44,9 +44,21 @@ export interface Session {
   pages: BinderPage[]
   /** Monotonic id counter — keeps ids unique and stable across save/reopen. */
   seq: number
+  /** User-renamed bookmarks, keyed by BookmarkNode.key. Absent = use the
+   *  imported/derived title. */
+  titles?: Record<string, string>
 }
 
 export interface BookmarkNode {
+  /**
+   * Stable identity for user renames. Derived from where the bookmark comes
+   * from, NOT from its position in the binder:
+   *   `f:<sourceId>`             the file-level bookmark
+   *   `o:<sourceId>:<0.1.2>`     a node in that source's imported outline
+   * Reordering, rotating, or deleting pages never changes it, so a rename
+   * sticks. The engine ignores this field on export.
+   */
+  key: string
   title: string
   page: string
   children: BookmarkNode[]
@@ -168,8 +180,25 @@ export interface BookmarkOptions {
 const PAGE_COUNT_SUFFIX = /\s*\(\s*\d+\s*(?:page|pages|p)\s*\)\s*$/i
 
 /** Drop a hand-typed "(2 pages)" so a generated count can't double up. */
-function stripPageCount(title: string): string {
+export function stripPageCount(title: string): string {
   return title.replace(PAGE_COUNT_SUFFIX, '').trim()
+}
+
+/**
+ * Rename a bookmark, or pass null/'' to revert it to its imported title.
+ * Renames live on the session, so they persist across save/reopen and survive
+ * any amount of page reordering.
+ */
+export function setBookmarkTitle(
+  session: Session,
+  key: string,
+  title: string | null
+): Session {
+  const titles = { ...(session.titles ?? {}) }
+  const next = title?.trim() ?? ''
+  if (next === '') delete titles[key]
+  else titles[key] = next
+  return { ...session, titles }
 }
 
 function stripPdfExt(name: string): string {
@@ -240,12 +269,23 @@ export function buildBookmarks(session: Session, opts: BookmarkOptions = {}): Bo
   const pageIdFor = (sourceId: string, index: number): string | null =>
     session.pages.find((p) => p.source === sourceId && p.index === index)?.id ?? null
 
-  const mapNodes = (sourceId: string, nodes: OutlineNode[]): BookmarkNode[] =>
-    nodes.flatMap((n) => {
-      const children = mapNodes(sourceId, n.children)
+  /** User rename wins over the imported title. */
+  const titled = (key: string, fallback: string): string => session.titles?.[key] ?? fallback
+
+  const mapNodes = (
+    sourceId: string,
+    nodes: OutlineNode[],
+    prefix: number[] = []
+  ): BookmarkNode[] =>
+    nodes.flatMap((n, i) => {
+      const path = [...prefix, i]
+      const key = `o:${sourceId}:${path.join('.')}`
+      const children = mapNodes(sourceId, n.children, path)
       const target = n.destPage === null ? null : pageIdFor(sourceId, n.destPage)
+      // Target page deleted: drop this bookmark but keep its children (which
+      // retain their own keys, so their renames survive too).
       if (!target) return children
-      return [{ title: n.title, page: target, children }]
+      return [{ key, title: titled(key, n.title), page: target, children }]
     })
 
   // Order sources by where they first appear in the binder.
@@ -264,11 +304,10 @@ export function buildBookmarks(session: Session, opts: BookmarkOptions = {}): Bo
     // a dead level the user has to expand past.
     tree = perSource[0].children
   } else {
-    tree = perSource.map(({ source, page, children }) => ({
-      title: stripPdfExt(source.name),
-      page,
-      children
-    }))
+    tree = perSource.map(({ source, page, children }) => {
+      const key = `f:${source.id}`
+      return { key, title: titled(key, stripPdfExt(source.name)), page, children }
+    })
   }
 
   if (!pageCounts) return tree
@@ -324,7 +363,8 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
       formatVersion: SESSION_FORMAT_VERSION,
       sources: s.sources,
       pages: s.pages.map((p) => ({ ...p, rotate: p.rotate ?? 0 })),
-      seq
+      seq,
+      ...(s.titles && typeof s.titles === 'object' ? { titles: s.titles } : {})
     }
   }
 }

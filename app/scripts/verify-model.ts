@@ -21,6 +21,7 @@ import {
   newSession,
   parseSession,
   rotatePages,
+  setBookmarkTitle,
   toExportSpec,
   type ProbeWire,
   type Session
@@ -176,6 +177,47 @@ async function main(): Promise<number> {
     'existing "(N pages)" suffix replaced, not doubled',
     buildBookmarks(handTyped, { pageCounts: true })[0].title === 'Schedule X (3 pages)',
     buildBookmarks(handTyped, { pageCounts: true })[0].title
+  )
+
+  // --- renaming bookmarks
+  const scheduleXKey = buildBookmarks(solo)[0].key
+  let renamed = setBookmarkTitle(solo, scheduleXKey, 'Sch. X — Interest Income')
+  check(
+    'rename overrides the imported title',
+    buildBookmarks(renamed)[0].title === 'Sch. X — Interest Income',
+    buildBookmarks(renamed)[0].title
+  )
+  check(
+    'rename survives a reorder (key is not positional)',
+    buildBookmarks(movePages(renamed, [renamed.pages[2].id], 0))[0].title ===
+      'Sch. X — Interest Income'
+  )
+  check(
+    'rename composes with generated page counts',
+    buildBookmarks(renamed, { pageCounts: true })[0].children[0].title === 'Detail X-1 (2 pages)' &&
+      buildBookmarks(renamed, { pageCounts: true })[0].title === 'Sch. X — Interest Income',
+    buildBookmarks(renamed, { pageCounts: true })[0].title
+  )
+  const rtRenamed = parseSession(JSON.parse(JSON.stringify(renamed)))
+  check(
+    'renames persist through save/reopen',
+    'session' in rtRenamed && buildBookmarks(rtRenamed.session)[0].title === 'Sch. X — Interest Income'
+  )
+  renamed = setBookmarkTitle(renamed, scheduleXKey, '')
+  check(
+    'empty rename reverts to the imported title',
+    buildBookmarks(renamed)[0].title === 'Schedule X' && renamed.titles?.[scheduleXKey] === undefined
+  )
+  // a rename on a child whose PARENT bookmark gets dropped must still apply
+  const detailKey = buildBookmarks(solo)[0].children[0].key
+  const childRenamed = setBookmarkTitle(solo, detailKey, 'Detail (renamed)')
+  const parentGone = deletePages(childRenamed, [
+    childRenamed.pages.find((p) => p.index === 0)!.id
+  ])
+  check(
+    'rename survives its parent bookmark being dropped',
+    buildBookmarks(parentGone).some((b) => b.title === 'Detail (renamed)'),
+    buildBookmarks(parentGone).map((b) => b.title).join(',')
   )
 
   // --- delete the page two imported bookmarks point at (B index 1)

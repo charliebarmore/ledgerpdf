@@ -96,7 +96,13 @@ Dev builds only (ignored when packaged), used by `npm run smoke`:
   section heading; a heading whose first child shares its page would otherwise
   read "(1 page)" while covering a dozen. A hand-typed `(N pages)` in an imported
   title is replaced, never doubled.
-- A bookmark whose target page is deleted is dropped and its children hoisted.
+- **Rename** any bookmark by double-clicking it; `↺` reverts to the imported
+  title. Renames are keyed to the bookmark's *origin* (`f:<source>` or
+  `o:<source>:<outline path>`), never its position, so they survive reordering,
+  rotation, deletion of other pages, and save/reopen. A renamed title still gets
+  a generated page count appended if counts are on.
+- A bookmark whose target page is deleted is dropped and its children hoisted —
+  and those children keep their own renames.
 
 ## Known gaps (tracked in ../ROADMAP.md)
 

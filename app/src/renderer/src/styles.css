@@ -375,6 +375,37 @@ button.link {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+}
+
+.bm-row.is-renamed .bm-title {
+  font-style: italic;
+}
+
+.bm-revert {
+  flex: none;
+  color: var(--muted);
+  padding: 0 3px;
+}
+
+.bm-revert:hover {
+  color: var(--primary);
+}
+
+.bm-row.is-editing {
+  padding-top: 1px;
+  padding-bottom: 1px;
+  padding-right: var(--md);
+}
+
+.bm-input {
+  font: inherit;
+  width: 100%;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--primary);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
 }
 
 .bm-page {
