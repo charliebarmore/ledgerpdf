@@ -2,20 +2,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookmarkPanel } from './components/BookmarkPanel'
 import { PageView } from './components/PageView'
 import { ThumbnailRail } from './components/ThumbnailRail'
+import { MARK_COLOR } from './components/MarkLayer'
 import { forgetDoc } from './pdf'
 import {
+  MARK_SIZE_DEFAULT,
+  addBookmark,
+  addMark,
   addSource,
   baseName,
   deletePages,
   movePages,
   newSession,
-  parseSession,
-  addBookmark,
   nudgeBookmarkDepth,
+  parseSession,
   removeBookmark,
+  removeMarks,
   rotatePages,
   setBookmarkTitle,
   toExportSpec,
+  updateMark,
+  type MarkKind,
   type ProbeWire,
   type Session
 } from './session'
@@ -32,6 +38,10 @@ export default function App(): React.JSX.Element {
   const [pageCounts, setPageCounts] = useState(true)
   const [sideW, setSideW] = useState(300)
   const [autoEditKey, setAutoEditKey] = useState<string | null>(null)
+  const [armed, setArmed] = useState<{ kind: MarkKind; text?: string } | null>(null)
+  const [selectedMarkId, setSelectedMarkId] = useState<string | null>(null)
+  const [markSize] = useState(MARK_SIZE_DEFAULT)
+  const reviewerInitials = session.reviewer ?? ''
   const past = useRef<Session[]>([])
   const future = useRef<Session[]>([])
 
@@ -192,6 +202,50 @@ export default function App(): React.JSX.Element {
     setAutoEditKey(key)
   }, [current, session, apply])
 
+  // -------------------------------------------------------------------- marks
+
+  const placeMark = useCallback(
+    (nx: number, ny: number) => {
+      if (!current || !armed) return
+      const { session: next, id } = addMark(session, {
+        page: current.id,
+        kind: armed.kind,
+        nx,
+        ny,
+        size: markSize,
+        ...(armed.text ? { text: armed.text } : {})
+      })
+      apply(next, `${armed.kind === 'text' ? armed.text : armed.kind} placed.`)
+      setSelectedMarkId(id)
+    },
+    [current, armed, session, markSize, apply]
+  )
+
+  const moveMark = useCallback(
+    (id: string, nx: number, ny: number) => {
+      // Dragging fires continuously; collapse the whole gesture into the undo
+      // entry created when it started rather than one per pointer event.
+      setSession((prev) => updateMark(prev, id, { nx, ny }))
+    },
+    []
+  )
+
+  const resizeMark = useCallback(
+    (delta: number) => {
+      if (!selectedMarkId) return
+      const cur = (session.marks ?? []).find((m) => m.id === selectedMarkId)
+      if (!cur) return
+      apply(updateMark(session, selectedMarkId, { size: cur.size + delta }), 'Mark resized.')
+    },
+    [selectedMarkId, session, apply]
+  )
+
+  const deleteMark = useCallback(() => {
+    if (!selectedMarkId) return
+    apply(removeMarks(session, [selectedMarkId]), `Mark deleted. ${MOD}Z to undo.`)
+    setSelectedMarkId(null)
+  }, [selectedMarkId, session, apply])
+
   // --------------------------------------------------------------- persistence
 
   /** Core export. Takes the session explicitly — never reads render-time state. */
@@ -262,8 +316,30 @@ export default function App(): React.JSX.Element {
   const devRefs = useRef({ importPaths, exportSession })
   devRefs.current = { importPaths, exportSession }
   useEffect(() => {
-    window.wpt.onDevOpen(async ({ paths, exportTo }) => {
-      const imported = await devRefs.current.importPaths(paths)
+    window.wpt.onDevOpen(async ({ paths, exportTo, seedMarks }) => {
+      let imported = await devRefs.current.importPaths(paths)
+      if (imported && seedMarks) {
+        // Exercise the same model the palette uses, so the smoke test covers
+        // place -> render -> export without simulating pointer events.
+        imported = { ...imported, reviewer: 'CJB' }
+        imported = addMark(imported, {
+          page: imported.pages[0].id,
+          kind: 'tick',
+          nx: 0.72,
+          ny: 0.3,
+          size: 24
+        }).session
+        imported = addMark(imported, {
+          page: imported.pages[0].id,
+          kind: 'text',
+          nx: 0.4,
+          ny: 0.45,
+          size: 24,
+          text: 'F'
+        }).session
+        setSession(imported)
+        setSelectedMarkId(null)
+      }
       if (exportTo && imported) await devRefs.current.exportSession(imported, exportTo, false)
       window.wpt.devRendered()
     })
@@ -303,11 +379,30 @@ export default function App(): React.JSX.Element {
         void exportBinder()
         return
       }
+      // Mark tools. Plain keys, so they stay out of the way of the browser's
+      // and OS's modifier shortcuts.
+      if (!mod && !e.repeat) {
+        if (e.key === 'Escape') {
+          setArmed(null)
+          setSelectedMarkId(null)
+          return
+        }
+        if (e.key === 'v' || e.key === 'V') {
+          setArmed(null)
+          return
+        }
+        if (e.key === 't' || e.key === 'T') return setArmed({ kind: 'tick' })
+        if (e.key === 'x' || e.key === 'X') return setArmed({ kind: 'cross' })
+        if (e.key === 'f' || e.key === 'F') return setArmed({ kind: 'text', text: 'F' })
+        if (e.key === '+' || e.key === '=') return resizeMark(4)
+        if (e.key === '_' || e.key === '-') return resizeMark(-4)
+      }
       if (e.key === '[') return rotate(-90)
       if (e.key === ']') return rotate(90)
       if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault()
-        return remove()
+        // A selected mark is the more specific target; fall through to pages.
+        return selectedMarkId ? deleteMark() : remove()
       }
       if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
         e.preventDefault()
@@ -331,7 +426,10 @@ export default function App(): React.JSX.Element {
     openSession,
     addViaDialog,
     exportBinder,
-    addBookmarkHere
+    addBookmarkHere,
+    resizeMark,
+    deleteMark,
+    selectedMarkId
   ])
 
   /** Drag the divider to widen the bookmark panel — real titles are long. */
@@ -395,6 +493,49 @@ export default function App(): React.JSX.Element {
           Delete
         </button>
         <span className="sep" />
+        <span className="palette" title="Review marks — click a tool, then click the page">
+          <button
+            className={!armed ? 'on' : ''}
+            onClick={() => setArmed(null)}
+            title="Select / move marks  (V)"
+          >
+            ↖
+          </button>
+          <button
+            className={armed?.kind === 'tick' ? 'on' : ''}
+            style={{ color: MARK_COLOR.tick }}
+            onClick={() => setArmed({ kind: 'tick' })}
+            title="Tick — agreed  (T)"
+          >
+            ✓
+          </button>
+          <button
+            className={armed?.kind === 'cross' ? 'on' : ''}
+            style={{ color: MARK_COLOR.cross }}
+            onClick={() => setArmed({ kind: 'cross' })}
+            title="Cross — does not agree  (X)"
+          >
+            ✕
+          </button>
+          <button
+            className={armed?.kind === 'text' && armed.text === 'F' ? 'on' : ''}
+            style={{ color: MARK_COLOR.text }}
+            onClick={() => setArmed({ kind: 'text', text: 'F' })}
+            title="Footed  (F)"
+          >
+            F
+          </button>
+          <button
+            className={armed?.kind === 'text' && armed.text === reviewerInitials ? 'on' : ''}
+            style={{ color: MARK_COLOR.text }}
+            onClick={() => setArmed({ kind: 'text', text: reviewerInitials })}
+            disabled={!reviewerInitials}
+            title="Stamp your initials"
+          >
+            {reviewerInitials || '—'}
+          </button>
+        </span>
+        <span className="sep" />
         <button onClick={undo} title={`Undo  ${MOD}Z`}>
           Undo
         </button>
@@ -433,7 +574,15 @@ export default function App(): React.JSX.Element {
               onSelect={select}
               onReorder={(ids, before) => apply(movePages(session, ids, before), 'Reordered.')}
             />
-            <PageView session={session} page={current} />
+            <PageView
+              session={session}
+              page={current}
+              armed={armed}
+              selectedMarkId={selectedMarkId}
+              onPlaceMark={placeMark}
+              onSelectMark={setSelectedMarkId}
+              onMoveMark={moveMark}
+            />
             <div
               className="splitter"
               onPointerDown={startResize}
@@ -465,7 +614,35 @@ export default function App(): React.JSX.Element {
                 }}
               />
               <div className="panel">
-                <div className="panel-head">Binder</div>
+                <div className="panel-head">
+                  <span className="panel-title">Review</span>
+                </div>
+                <div className="reviewer">
+                  <label htmlFor="rev">Initials</label>
+                  <input
+                    id="rev"
+                    className="rev-input"
+                    value={reviewerInitials}
+                    maxLength={4}
+                    placeholder="CJB"
+                    title="Stamped as the author of every mark you place"
+                    onChange={(e) =>
+                      setSession((prev) => ({
+                        ...prev,
+                        reviewer: e.target.value.toUpperCase().slice(0, 4)
+                      }))
+                    }
+                  />
+                </div>
+                <dl className="stats">
+                  <dt>Marks</dt>
+                  <dd>{session.marks?.length ?? 0}</dd>
+                </dl>
+              </div>
+              <div className="panel">
+                <div className="panel-head">
+                  <span className="panel-title">Binder</span>
+                </div>
                 <dl className="stats">
                   <dt>Pages</dt>
                   <dd>{pages.length}</dd>

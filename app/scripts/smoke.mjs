@@ -80,6 +80,7 @@ const app = await run('npm', ['run', 'dev'], {
     WPT_DEV_OPEN: [a, b].join(path.delimiter),
     WPT_DEV_EXPORT: OUT_PDF,
     WPT_DEV_SHOT: SHOT,
+    WPT_DEV_MARKS: '1',
     WPT_DEV_EXIT: '1'
   }
 })
@@ -102,6 +103,29 @@ if (existsSync(OUT_PDF)) {
     ]
     check('bookmarks nested + retargeted', JSON.stringify(got) === JSON.stringify(want), got.join(' | '))
   }
+  const marks = probed.ok
+    ? probed.probe.pages.flatMap((p) => (p.annotations ?? []).filter((a) => a.wpt_kind))
+    : []
+  check(
+    'review marks placed in the app land in the exported PDF',
+    marks.length === 2 &&
+      marks.every((m) => m.has_ap && m.wpt_data?.author === 'CJB') &&
+      marks.some((m) => m.wpt_data?.text === 'F'),
+    JSON.stringify(marks.map((m) => [m.wpt_kind, m.wpt_data?.author, m.wpt_data?.text]))
+  )
+
+  // The Phase 2 property that actually matters: a mark must export exactly
+  // where the UI showed it. Rendered with pdfium (Chrome/Edge's engine).
+  const pos = await run(PY, [
+    path.join(REPO, 'spike', 'check_mark_positions.py'),
+    OUT_PDF, '0', 'green', '0.72', '0.30', 'blue', '0.40', '0.45'
+  ])
+  check(
+    'marks export exactly where they were placed',
+    pos.code === 0,
+    pos.out.trim().split('\n').join(' | ')
+  )
+
   const qpdf = await run(PY, ['-c', `import pikepdf,sys; j=pikepdf.Job(['qpdf','--check',${JSON.stringify(OUT_PDF)}]); j.run(); sys.exit(j.exit_code)`])
   check('qpdf --check clean', qpdf.code === 0, `exit=${qpdf.code}`)
 }

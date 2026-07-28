@@ -1,0 +1,86 @@
+"""Verify that a mark lands in the exported PDF where the UI showed it.
+
+This is the Phase 2 correctness property: the app places marks in normalized
+display coordinates, and the engine converts them to PDF user space using the
+CropBox and page rotation. If those two ever disagree, a reviewer's tick silently
+moves — pointing at the wrong number on a workpaper, which is worse than useless.
+
+    python spike/check_mark_positions.py <pdf> <page> <color> <nx> <ny> [...]
+
+`color` is "green" (tick) or "blue" (lettered mark). Repeat the color/nx/ny
+triple to check several marks on one page. Exit 0 if every mark is within
+tolerance of where it was placed.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pypdfium2 as pdfium
+
+TOLERANCE = 0.03  # fraction of page width/height
+
+
+def render(path: str, index: int, scale: float = 2.0) -> np.ndarray:
+    doc = pdfium.PdfDocument(path)
+    try:
+        page = doc[index]
+        bmp = page.render(scale=scale, draw_annots=True)
+        return np.asarray(bmp.to_pil().convert("RGB")).copy()
+    finally:
+        doc.close()
+
+
+def mask_for(img: np.ndarray, color: str) -> np.ndarray:
+    r = img[:, :, 0].astype(int)
+    g = img[:, :, 1].astype(int)
+    b = img[:, :, 2].astype(int)
+    if color == "green":
+        return (g > 90) & (g > r + 30) & (g > b + 30)
+    if color == "blue":
+        return (b > 90) & (b > r + 30) & (b > g + 20)
+    raise SystemExit(f"unknown color {color!r}")
+
+
+def centroid(mask: np.ndarray) -> tuple[float, float, int] | None:
+    ys, xs = np.nonzero(mask)
+    if len(xs) < 15:
+        return None
+    h, w = mask.shape
+    return (float(xs.mean()) / w, float(ys.mean()) / h, int(len(xs)))
+
+
+def main() -> int:
+    if len(sys.argv) < 6 or (len(sys.argv) - 3) % 3 != 0:
+        print(__doc__)
+        return 2
+    pdf = sys.argv[1]
+    if not Path(pdf).exists():
+        print(f"not found: {pdf}")
+        return 1
+    page = int(sys.argv[2])
+    img = render(pdf, page)
+
+    failures = 0
+    args = sys.argv[3:]
+    for i in range(0, len(args), 3):
+        color, nx, ny = args[i], float(args[i + 1]), float(args[i + 2])
+        got = centroid(mask_for(img, color))
+        if got is None:
+            print(f"FAIL {color}: no pixels found on page {page}")
+            failures += 1
+            continue
+        cx, cy, n = got
+        ok = abs(cx - nx) < TOLERANCE and abs(cy - ny) < TOLERANCE
+        print(
+            f"{'PASS' if ok else 'FAIL'} {color}: placed ({nx:.3f},{ny:.3f}) "
+            f"-> exported ({cx:.3f},{cy:.3f}) px={n}"
+        )
+        failures += 0 if ok else 1
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -67,6 +67,10 @@ This app holds client tax documents, so the boundaries are deliberate:
 | `[` `]` | rotate left / right |
 | `⌫` | delete (undoable — no confirmation dialog, per DESIGN.md) |
 | `⌘/Ctrl Z` / `⇧⌘Z` | undo / redo |
+| `T` `X` `F` | arm the tick / cross / footed mark tool |
+| `V` or `Esc` | back to the select tool |
+| `+` `−` | resize the selected mark |
+| `⌫` | delete the selected mark (else the selected pages) |
 | `⌘/Ctrl B` | add a bookmark on the current page |
 | `⌘/Ctrl I` · `E` · `S` · `O` | add PDFs · export · save session · open session |
 
@@ -83,6 +87,26 @@ Dev builds only (ignored when packaged), used by `npm run smoke`:
 | `WPT_DEV_EXPORT` | export to this path (pre-authorized, no dialog) |
 | `WPT_DEV_SHOT` | capture the window to this PNG once loaded |
 | `WPT_DEV_EXIT` | quit after capturing |
+
+## Review marks (Phase 2)
+
+Arm a tool in the toolbar palette, then click the page. Marks are dragged to
+move, `+`/`−` to resize, `⌫` to delete, and every change is undoable. Your
+initials (Review panel) are stamped as the mark's author along with an ISO
+timestamp — part of the review record, carried into the PDF as private metadata
+alongside a standard `/Stamp` annotation.
+
+Kinds: `tick` (agreed), `cross` (does not agree), and `text` (a short lettered
+stamp — `F` for footed, or your initials). Adding another is an appearance
+stream in `engine/workpaper_engine/appearance.py` plus a palette entry.
+
+**Coordinates are the whole ballgame.** Marks are stored normalized against the
+page *as displayed* (CropBox-relative, rotation applied) — exactly what a click
+on the rendered canvas produces and exactly what the engine's geometry module
+consumes, so there is no conversion step to get wrong. `npm run smoke` asserts
+the round trip: a mark placed at (0.72, 0.30) must render at (0.72, 0.30) in the
+exported PDF, checked in pdfium. If that ever drifts, a reviewer's tick moves to
+the wrong number, which is worse than no tick at all.
 
 ## Bookmark behavior
 

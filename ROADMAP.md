@@ -22,7 +22,8 @@ Committed work — part-time, ~2 weeks total. This is the entire current commitm
 
 Only after the gate passes. Sequenced, with review amendments baked in.
 
-- Phase 2 — review marks: tick palette, custom stamps, place/move/resize/delete, keyboard shortcuts, reviewer initials + timestamps, undo/redo
+- **Phase 2 — review marks. ✅ FIRST PASS DONE 2026-07-28** (built ahead of the gate at Charlie's direction). Palette (tick / cross / lettered `F` / initials stamp), click-to-place, drag-to-move, resize, delete, keyboard tools, reviewer initials + ISO timestamps, all undoable and persisted. Verified end-to-end: 54 model checks, 24 engine spike checks (incl. pixel checks on the new glyphs), and a 9-check GUI smoke that places marks in the real app, exports, and asserts they land **at the exact coordinates placed**.
+  - Phase 2 remainder: user-defined custom stamps (arbitrary text//initials beyond the fixed palette) · a mark inspector (edit note/author after the fact) · marks visible in the thumbnail rail · flatten-on-export.
 - Windows code signing (Azure Trusted Signing) — BEFORE any build goes to a design partner, not Phase 5
 - Phase 3 — calculator tape (keyboard-first; spec it from a screen-share watching 2 TCR members drive TicTie — do not guess the keystroke feel)
 - Phase 4 — links & navigation: page links, external URLs, broken-link detection, hideable indicators

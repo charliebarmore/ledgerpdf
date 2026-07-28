@@ -49,6 +49,35 @@ export interface UserBookmark {
   depth: number
 }
 
+/** The review-mark palette. Colors and glyphs are defined by the engine. */
+export type MarkKind = 'tick' | 'cross' | 'text'
+
+/**
+ * A review mark placed on a page. Coordinates are normalized against the page
+ * as DISPLAYED (CropBox-relative, rotation applied), with nx left→right and
+ * ny top→bottom — exactly what a click on the rendered canvas gives, and
+ * exactly what the engine's geometry module consumes.
+ */
+export interface Mark {
+  id: string
+  page: string
+  kind: MarkKind
+  nx: number
+  ny: number
+  /** Displayed size in points. */
+  size: number
+  /** For kind 'text' — the letters, e.g. "F", "T", or reviewer initials. */
+  text?: string
+  author?: string
+  note?: string
+  /** ISO timestamp — part of the review record. */
+  created?: string
+}
+
+export const MARK_SIZE_DEFAULT = 24
+export const MARK_SIZE_MIN = 10
+export const MARK_SIZE_MAX = 72
+
 export interface Session {
   formatVersion: number
   sources: SourceDoc[]
@@ -61,6 +90,10 @@ export interface Session {
   titles?: Record<string, string>
   /** Bookmarks the user added. Merged into the imported outline by page order. */
   bookmarks?: UserBookmark[]
+  /** Review marks (ticks, crosses, lettered stamps), anchored to page ids. */
+  marks?: Mark[]
+  /** Reviewer initials, stamped as the author of new marks. */
+  reviewer?: string
 }
 
 export interface BookmarkNode {
@@ -82,6 +115,8 @@ export interface ExportSpec {
   sources: Record<string, string>
   pages: Array<{ id: string; source: string; index: number; rotate: number }>
   bookmarks: BookmarkNode[]
+  /** Engine-side annotation specs — review marks today, tapes/links later. */
+  annotations: Array<Record<string, unknown>>
   output: string
 }
 
@@ -187,7 +222,65 @@ export function deletePages(session: Session, ids: string[]): Session {
   const pages = session.pages.filter((p) => !idSet.has(p.id))
   // Drop sources that no longer contribute any page.
   const used = new Set(pages.map((p) => p.source))
-  return { ...session, pages, sources: session.sources.filter((s) => used.has(s.id)) }
+  return {
+    ...session,
+    pages,
+    sources: session.sources.filter((s) => used.has(s.id)),
+    // Anything anchored to a deleted page goes with it (undo restores both).
+    ...(session.marks ? { marks: session.marks.filter((m) => !idSet.has(m.page)) } : {}),
+    ...(session.bookmarks
+      ? { bookmarks: session.bookmarks.filter((b) => !idSet.has(b.page)) }
+      : {})
+  }
+}
+
+// ---------------------------------------------------------------------- marks
+
+/** Place a mark on a page at normalized display coordinates. */
+export function addMark(
+  session: Session,
+  mark: Omit<Mark, 'id' | 'created' | 'author'> & { author?: string }
+): { session: Session; id: string } {
+  const seq = session.seq + 1
+  const id = `mk_${seq}`
+  const next: Mark = {
+    ...mark,
+    id,
+    author: mark.author ?? session.reviewer ?? '',
+    created: new Date().toISOString()
+  }
+  return { session: { ...session, seq, marks: [...(session.marks ?? []), next] }, id }
+}
+
+export function updateMark(session: Session, id: string, patch: Partial<Mark>): Session {
+  return {
+    ...session,
+    marks: (session.marks ?? []).map((m) =>
+      m.id === id
+        ? {
+            ...m,
+            ...patch,
+            // keep a mark on its page and inside it
+            nx: patch.nx === undefined ? m.nx : Math.min(1, Math.max(0, patch.nx)),
+            ny: patch.ny === undefined ? m.ny : Math.min(1, Math.max(0, patch.ny)),
+            size:
+              patch.size === undefined
+                ? m.size
+                : Math.min(MARK_SIZE_MAX, Math.max(MARK_SIZE_MIN, patch.size))
+          }
+        : m
+    )
+  }
+}
+
+export function removeMarks(session: Session, ids: string[]): Session {
+  const set = new Set(ids)
+  return { ...session, marks: (session.marks ?? []).filter((m) => !set.has(m.id)) }
+}
+
+export function marksOnPage(session: Session, pageId: string | null): Mark[] {
+  if (!pageId) return []
+  return (session.marks ?? []).filter((m) => m.page === pageId)
 }
 
 // ------------------------------------------------------------------ bookmarks
@@ -500,6 +593,20 @@ export function toExportSpec(
       rotate: p.rotate
     })),
     bookmarks: buildBookmarks(session, bookmarkOpts),
+    // Marks whose page survived; the engine reads these as annotations.
+    annotations: (session.marks ?? [])
+      .filter((m) => session.pages.some((p) => p.id === m.page))
+      .map((m) => ({
+        kind: m.kind,
+        page: m.page,
+        nx: m.nx,
+        ny: m.ny,
+        size: m.size,
+        ...(m.text ? { text: m.text } : {}),
+        ...(m.author ? { author: m.author } : {}),
+        ...(m.note ? { note: m.note } : {}),
+        ...(m.created ? { created: m.created } : {})
+      })),
     output
   }
 }
@@ -532,7 +639,11 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
       ...(s.titles && typeof s.titles === 'object' ? { titles: s.titles } : {}),
       ...(Array.isArray(s.bookmarks)
         ? { bookmarks: s.bookmarks.filter((b) => pageIds.has(b.page)) }
-        : {})
+        : {}),
+      ...(Array.isArray(s.marks)
+        ? { marks: s.marks.filter((m) => pageIds.has(m.page)) }
+        : {}),
+      ...(typeof s.reviewer === 'string' ? { reviewer: s.reviewer } : {})
     }
   }
 }

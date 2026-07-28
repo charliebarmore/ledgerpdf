@@ -116,12 +116,8 @@ def export_binder(spec: dict) -> dict:
             page_obj = out.pages[idx].obj
             geom = _page_geom(page_obj)
             nm = f"wpt-{a['kind']}-{i:04d}"
-            if a["kind"] == "tick":
-                annot = appearance.make_tick(
-                    out, geom, a["nx"], a["ny"], nm,
-                    author=a.get("author", ""), note=a.get("note", "Tick mark"),
-                    size=a.get("size", appearance.TICK_SIZE),
-                )
+            if a["kind"] in ("tick", "cross", "text"):
+                annot = appearance.make_mark(out, geom, a, nm)
             elif a["kind"] == "tape":
                 annot = appearance.make_tape(
                     out, geom, a["nx"], a["ny"], a["lines"], a.get("tape", {}),

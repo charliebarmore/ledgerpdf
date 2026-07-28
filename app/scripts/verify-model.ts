@@ -15,6 +15,7 @@ import path from 'node:path'
 import {
   SESSION_FORMAT_VERSION,
   addBookmark,
+  addMark,
   addSource,
   buildBookmarks,
   deletePages,
@@ -22,10 +23,13 @@ import {
   newSession,
   nudgeBookmarkDepth,
   parseSession,
+  marksOnPage,
   removeBookmark,
+  removeMarks,
   rotatePages,
   sanitizeTitle,
   setBookmarkTitle,
+  updateMark,
   stripPageCount,
   toExportSpec,
   type ProbeWire,
@@ -362,9 +366,60 @@ async function main(): Promise<number> {
   const dangling = parseSession({ ...s, sources: [] })
   check('dangling source rejected', 'error' in dangling)
 
+  // --- Phase 2: review marks
+  let marked: Session = { ...s, reviewer: 'CJB' }
+  const m1 = addMark(marked, { page: marked.pages[0].id, kind: 'tick', nx: 0.5, ny: 0.4, size: 24 })
+  marked = m1.session
+  const m2 = addMark(marked, {
+    page: marked.pages[0].id,
+    kind: 'text',
+    nx: 0.3,
+    ny: 0.6,
+    size: 24,
+    text: 'F',
+    note: 'Footed'
+  })
+  marked = m2.session
+  check(
+    'marks carry reviewer initials and a timestamp',
+    marksOnPage(marked, marked.pages[0].id).every(
+      (m) => m.author === 'CJB' && typeof m.created === 'string'
+    ),
+    JSON.stringify(marksOnPage(marked, marked.pages[0].id).map((m) => [m.author, !!m.created]))
+  )
+  check('marks are scoped to their page', marksOnPage(marked, marked.pages[1].id).length === 0)
+
+  marked = updateMark(marked, m1.id, { nx: 0.9, ny: 0.1 })
+  check(
+    'moving a mark updates its coordinates',
+    marksOnPage(marked, marked.pages[0].id).find((m) => m.id === m1.id)?.nx === 0.9
+  )
+  check(
+    'coordinates are clamped to the page',
+    updateMark(marked, m1.id, { nx: 5, ny: -2 }).marks!.find((m) => m.id === m1.id)!.nx === 1
+  )
+  check(
+    'size is clamped to the allowed range',
+    updateMark(marked, m1.id, { size: 999 }).marks!.find((m) => m.id === m1.id)!.size === 72
+  )
+  check(
+    'marks survive save/reopen',
+    (() => {
+      const rt = parseSession(JSON.parse(JSON.stringify(marked)))
+      return 'session' in rt && rt.session.marks?.length === 2 && rt.session.reviewer === 'CJB'
+    })()
+  )
+  check(
+    'deleting a page removes its marks',
+    deletePages(marked, [marked.pages[0].id]).marks?.length === 0
+  )
+  check('removeMarks drops just the named ones', removeMarks(marked, [m2.id]).marks?.length === 1)
+
   // --- the real thing: export through the engine and re-probe
-  const spec = toExportSpec(s, OUT)
+  const spec = toExportSpec(marked, OUT)
   check('spec only lists used sources', Object.keys(spec.sources).length === 2)
+  check('spec carries the marks as annotations', spec.annotations.length === 2,
+    JSON.stringify(spec.annotations.map((a) => a.kind)))
   const exported = await runEngine({ cmd: 'export', binder: spec })
   check('engine accepts app-built spec', exported.ok === true, String(exported.error ?? '').slice(0, 300))
   if (!exported.ok) return report()
@@ -401,6 +456,18 @@ async function main(): Promise<number> {
     [0, 'fixture_a', 2]
   ]
   check('exported bookmarks retargeted', JSON.stringify(got) === JSON.stringify(want), JSON.stringify(got))
+
+  // marks made it into the PDF with their structured payload intact
+  const exportedMarks = out.probe.pages.flatMap((p: any) =>
+    (p.annotations ?? []).filter((a: any) => a.wpt_kind)
+  )
+  check(
+    'marks land in the exported PDF with metadata',
+    exportedMarks.length === 2 &&
+      exportedMarks.every((m: any) => m.has_ap && m.wpt_data?.author === 'CJB') &&
+      exportedMarks.some((m: any) => m.wpt_data?.text === 'F'),
+    JSON.stringify(exportedMarks.map((m: any) => [m.wpt_kind, m.wpt_data?.author, m.wpt_data?.text]))
+  )
 
   return report()
 }

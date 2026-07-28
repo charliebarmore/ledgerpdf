@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { pageProvenance, sourceOf, type BinderPage, type Session } from '../session'
+import {
+  marksOnPage,
+  pageProvenance,
+  sourceOf,
+  type BinderPage,
+  type MarkKind,
+  type Session
+} from '../session'
 import { renderInto, type Sizing } from '../pdf'
+import { MarkLayer } from './MarkLayer'
 
 /** Zoom state: a fit mode, or an absolute scale where 1 = 100%. */
 type Zoom = { mode: 'fitWidth' } | { mode: 'fitPage' } | { mode: 'scale'; factor: number }
@@ -15,16 +23,27 @@ function stepFrom(current: number, dir: 1 | -1): number {
 
 export function PageView({
   session,
-  page
+  page,
+  armed,
+  selectedMarkId,
+  onPlaceMark,
+  onSelectMark,
+  onMoveMark
 }: {
   session: Session
   page: BinderPage | null
+  armed: { kind: MarkKind; text?: string } | null
+  selectedMarkId: string | null
+  onPlaceMark: (nx: number, ny: number) => void
+  onSelectMark: (id: string | null) => void
+  onMoveMark: (id: string, nx: number, ny: number) => void
 }): React.JSX.Element {
   const holder = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
   const [box, setBox] = useState({ w: 800, h: 900 })
   const [zoom, setZoom] = useState<Zoom>({ mode: 'fitWidth' })
   const [effective, setEffective] = useState(1)
+  const [canvasBox, setCanvasBox] = useState({ w: 0, h: 0 })
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -51,7 +70,11 @@ export function PageView({
           : { mode: 'fitPage', boxW: box.w, boxH: box.h }
     setError(null)
     renderInto(canvas.current, src.id, src.path, page.index, page.rotate, sizing)
-      .then(setEffective)
+      .then((zoom) => {
+        setEffective(zoom)
+        const el = canvas.current
+        if (el) setCanvasBox({ w: el.clientWidth, h: el.clientHeight })
+      })
       .catch((e) => setError(String(e?.message ?? e)))
   }, [page?.id, page?.rotate, box.w, box.h, zoom, session.sources])
 
@@ -141,7 +164,20 @@ export function PageView({
             {error ? (
               <div className="error">{error}</div>
             ) : (
-              <canvas ref={canvas} className="sheet" />
+              <div className="sheet-stack">
+                <canvas ref={canvas} className="sheet" />
+                <MarkLayer
+                  marks={marksOnPage(session, page.id)}
+                  width={canvasBox.w}
+                  height={canvasBox.h}
+                  scale={effective}
+                  armed={armed}
+                  selectedId={selectedMarkId}
+                  onPlace={onPlaceMark}
+                  onSelect={onSelectMark}
+                  onMove={onMoveMark}
+                />
+              </div>
             )}
           </div>
         </>

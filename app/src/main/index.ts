@@ -240,7 +240,11 @@ function createWindow(): void {
         ? path.resolve(process.env.WPT_DEV_EXPORT)
         : undefined
       if (exportTo) allowedOutputs.add(exportTo)
-      win.webContents.send('dev:open', { paths, exportTo })
+      win.webContents.send('dev:open', {
+        paths,
+        exportTo,
+        seedMarks: !!process.env.WPT_DEV_MARKS
+      })
     }
   })
 

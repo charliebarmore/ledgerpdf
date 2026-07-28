@@ -39,7 +39,9 @@ const api = {
   pathForFile: (file: File): string => webUtils.getPathForFile(file),
 
   /** Dev seam (WPT_DEV_OPEN) — preload a binder without clicking dialogs. */
-  onDevOpen: (cb: (arg: { paths: string[]; exportTo?: string }) => void): void => {
+  onDevOpen: (
+    cb: (arg: { paths: string[]; exportTo?: string; seedMarks?: boolean }) => void
+  ): void => {
     ipcRenderer.on('dev:open', (_e, arg) => cb(arg))
   },
 

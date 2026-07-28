@@ -175,6 +175,11 @@ def main() -> int:
             {"kind": "tick", "page": "b1", "nx": 0.75, "ny": 0.25, "author": "CB", "note": "Agreed to 1099"},
             {"kind": "tape", "page": "b0", "nx": 0.60, "ny": 0.62, "lines": tape_lines,
              "tape": tape_struct, "author": "CB"},
+            # Phase 2 review marks
+            {"kind": "cross", "page": "a2", "nx": 0.30, "ny": 0.25, "author": "CB",
+             "created": "2026-07-28T00:00:00Z"},
+            {"kind": "text", "page": "a2", "nx": 0.60, "ny": 0.25, "text": "F",
+             "author": "CB", "note": "Footed", "created": "2026-07-28T00:00:00Z"},
         ],
         "links": [
             {"page": "a0", "rect_n": [0.10, 0.86, 0.45, 0.90], "target_page": "b0"},
@@ -274,6 +279,29 @@ def main() -> int:
         f"rendered {img4.shape[1]}x{img4.shape[0]}",
     )
     check_tick(img4, "rotated pg /Rotate 90", 0.75, 0.25)
+
+    # C2b: the Phase 2 mark kinds render and carry their metadata
+    marks = [a for a in pages[3]["annotations"] if a.get("wpt_kind")]
+    kinds = sorted(m["wpt_kind"] for m in marks)
+    check("Phase 2 marks present", kinds == ["cross", "text"], f"kinds={kinds}")
+    text_mark = next((m for m in marks if m["wpt_kind"] == "text"), None)
+    check(
+        "text mark keeps its structured payload",
+        bool(text_mark) and text_mark["wpt_data"].get("text") == "F"
+        and text_mark["wpt_data"].get("author") == "CB",
+        json.dumps(text_mark["wpt_data"] if text_mark else None)[:160],
+    )
+    img3 = render_page(BINDER_PDF, 3)
+    h3, w3 = img3.shape[:2]
+
+    def _ink(cx, cy, half=0.06):
+        y0, y1 = int((cy - half) * h3), int((cy + half) * h3)
+        x0, x1 = int((cx - half) * w3), int((cx + half) * w3)
+        reg = img3[y0:y1, x0:x1]
+        return int(np.count_nonzero(np.all(reg < 200, axis=2)))
+
+    check("cross mark renders", _ink(0.30, 0.25) > 40, f"ink={_ink(0.30, 0.25)}")
+    check("text mark renders", _ink(0.60, 0.25) > 30, f"ink={_ink(0.60, 0.25)}")
 
     img2 = render_page(BINDER_PDF, 2)
     ratio = img2.shape[1] / img2.shape[0]
