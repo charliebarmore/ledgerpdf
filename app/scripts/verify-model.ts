@@ -24,6 +24,7 @@ import {
   parseSession,
   removeBookmark,
   rotatePages,
+  sanitizeTitle,
   setBookmarkTitle,
   stripPageCount,
   toExportSpec,
@@ -181,6 +182,38 @@ async function main(): Promise<number> {
     'existing "(N pages)" suffix replaced, not doubled',
     buildBookmarks(handTyped, { pageCounts: true })[0].title === 'Schedule X (3 pages)',
     buildBookmarks(handTyped, { pageCounts: true })[0].title
+  )
+
+  // --- REGRESSION: real tax software wrote a NUL after every bookmark title,
+  //     which is invisible, defeats end-of-string matching, and survived trim.
+  //     Symptom was "General_Ledger (2 pages) (2 pages)". Titles are now
+  //     scrubbed of control characters at import.
+  const NUL = String.fromCharCode(0)
+  check(
+    'control characters are stripped from imported titles',
+    sanitizeTitle(`General_Ledger (2 pages)${NUL}`) === 'General_Ledger (2 pages)' &&
+      sanitizeTitle(`Continuing Education ${NUL}`) === 'Continuing Education' &&
+      sanitizeTitle(`Revenue – Triland Partners LLC${NUL}`) === 'Revenue – Triland Partners LLC',
+    JSON.stringify(sanitizeTitle(`Continuing Education ${NUL}`))
+  )
+  const nulSession: Session = {
+    ...solo,
+    sources: [
+      {
+        ...solo.sources[0],
+        outline: [
+          { title: sanitizeTitle(`General_Ledger (2 pages)${NUL}`), destPage: 0, children: [] },
+          { title: sanitizeTitle(`Continuing Education ${NUL}`), destPage: 1, children: [] }
+        ]
+      }
+    ]
+  }
+  const nulTree = buildBookmarks(nulSession, { pageCounts: true })
+  check(
+    'NUL-suffixed titles get exactly one page count',
+    nulTree[0].title === 'General_Ledger (1 page)' &&
+      nulTree[1].title === 'Continuing Education (2 pages)',
+    nulTree.map((b) => b.title).join(' | ')
   )
 
   // --- page-count stripping has to survive whatever a human typed in Acrobat

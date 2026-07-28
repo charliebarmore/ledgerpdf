@@ -110,6 +110,20 @@ Dev builds only (ignored when packaged), used by `npm run smoke`:
 - A bookmark whose target page is deleted is dropped and its children hoisted —
   and those children keep their own renames.
 
+## Real-world PDF quirks handled
+
+Findings from dogfooding actual tax-software output, each pinned by a test:
+
+- **NUL-terminated bookmark titles.** One package ends every outline title with
+  `U+0000`. Invisible, but it defeats `$`-anchored matching (page-count suffixes
+  never stripped, so generated counts doubled) and survives `.trim()`. All text
+  decoded from a PDF is now scrubbed of control characters — in the engine on
+  both read and write, and again at the app's model boundary.
+- **Hand-typed page counts** in a variety of shapes (`(2 pages)`, `(6 pgs)`,
+  `(1 page.)`, non-breaking spaces) are recognized and replaced rather than
+  doubled. A parenthetical that isn't a count — `Form 1120S (2024)` — is left
+  alone.
+
 ## Known gaps (tracked in ../ROADMAP.md)
 
 - Packaging is not set up (Phase 5). In particular PDF.js's WASM/cmap assets are

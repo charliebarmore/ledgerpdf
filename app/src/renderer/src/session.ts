@@ -99,9 +99,23 @@ export function newSession(): Session {
   return { formatVersion: SESSION_FORMAT_VERSION, sources: [], pages: [], seq: 0 }
 }
 
+/**
+ * Scrub control characters out of text that came from a PDF.
+ *
+ * Real tax-software output is messy: a 62-page master file produced by one
+ * package ended EVERY bookmark title with a NUL (U+0000) — presumably a
+ * null-terminated string that got written verbatim. Invisible, but it defeats
+ * any `$`-anchored matching, corrupts trimming, and has no business being
+ * written back out into a binder. Legitimate typography (en-dashes, accents)
+ * is preserved.
+ */
+export function sanitizeTitle(raw: string): string {
+  return raw.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim()
+}
+
 function normalizeOutline(nodes: ProbeWire['outline']): OutlineNode[] {
   return (nodes ?? []).map((n) => ({
-    title: String(n.title ?? 'Untitled'),
+    title: sanitizeTitle(String(n.title ?? '')) || 'Untitled',
     destPage: typeof n.dest_page === 'number' ? n.dest_page : null,
     children: normalizeOutline((n.children ?? []) as ProbeWire['outline'])
   }))

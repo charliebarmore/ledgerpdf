@@ -31,6 +31,7 @@ from pikepdf import Array, Name, OutlineItem
 
 from . import appearance
 from .geometry import PageGeom
+from .probe import sanitize_text
 
 
 def _page_geom(page_obj: pikepdf.Object) -> PageGeom:
@@ -55,7 +56,7 @@ def _build_outline_items(
     items: list[OutlineItem] = []
     for node in nodes:
         idx = final_index[node["page"]]
-        item = OutlineItem(node["title"], _fit_dest(out, idx))
+        item = OutlineItem(sanitize_text(str(node["title"])), _fit_dest(out, idx))
         for child in _build_outline_items(out, node.get("children", []), final_index):
             item.children.append(child)
         items.append(item)

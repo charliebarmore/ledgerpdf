@@ -8,9 +8,23 @@ binder spec, and to verify exported binders.
 from __future__ import annotations
 
 import json
+import re
 
 import pikepdf
 from pikepdf import Name
+
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def sanitize_text(value: str) -> str:
+    """Strip control characters from text decoded out of a PDF.
+
+    Observed in the wild: tax software that ends every bookmark title with a
+    NUL. Invisible, but it breaks end-of-string matching downstream and must
+    never be written back into a binder.
+    """
+    return _CONTROL_CHARS.sub("", value).strip()
 
 
 def _page_index_map(pdf: pikepdf.Pdf) -> dict[tuple[int, int], int]:
@@ -43,7 +57,7 @@ def _outline_to_dicts(items, page_map) -> list[dict]:
                 dest = action.get(Name("/D"), None)
         result.append(
             {
-                "title": str(item.title),
+                "title": sanitize_text(str(item.title)),
                 "dest_page": _resolve_dest_page(dest, page_map),
                 "children": _outline_to_dicts(item.children, page_map),
             }
