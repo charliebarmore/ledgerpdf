@@ -191,11 +191,30 @@ export interface BookmarkOptions {
   collapseSingleSource?: boolean
 }
 
-const PAGE_COUNT_SUFFIX = /\s*\(\s*\d+\s*(?:page|pages|p)\s*\)\s*$/i
+/**
+ * A trailing page count. Deliberately permissive: real workpaper titles come
+ * from whatever a human typed in Acrobat years ago, so this tolerates
+ * non-breaking / unicode spaces, full-width parentheses, "pgs", and a trailing
+ * period.
+ */
+const SP = '[\\s\\u00a0\\u2000-\\u200b\\u202f\\u205f\\u3000]'
+const PAGE_COUNT_SUFFIX = new RegExp(
+  `${SP}*[(（]${SP}*\\d+${SP}*(?:pages?|pgs?|p)\\.?${SP}*[)）]${SP}*$`,
+  'i'
+)
 
-/** Drop a hand-typed "(2 pages)" so a generated count can't double up. */
+/**
+ * Drop a hand-typed "(2 pages)" so a generated count can't double up.
+ * Loops, so a title that already picked up two of them collapses back to one.
+ */
 export function stripPageCount(title: string): string {
-  return title.replace(PAGE_COUNT_SUFFIX, '').trim()
+  let out = title
+  for (let i = 0; i < 8; i++) {
+    const next = out.replace(PAGE_COUNT_SUFFIX, '')
+    if (next === out) break
+    out = next
+  }
+  return out.replace(new RegExp(`^${SP}+|${SP}+$`, 'g'), '')
 }
 
 export const USER_BOOKMARK_PREFIX = 'u:'

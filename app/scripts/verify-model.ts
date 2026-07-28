@@ -25,6 +25,7 @@ import {
   removeBookmark,
   rotatePages,
   setBookmarkTitle,
+  stripPageCount,
   toExportSpec,
   type ProbeWire,
   type Session
@@ -180,6 +181,25 @@ async function main(): Promise<number> {
     'existing "(N pages)" suffix replaced, not doubled',
     buildBookmarks(handTyped, { pageCounts: true })[0].title === 'Schedule X (3 pages)',
     buildBookmarks(handTyped, { pageCounts: true })[0].title
+  )
+
+  // --- page-count stripping has to survive whatever a human typed in Acrobat
+  const nasty: Array<[string, string]> = [
+    ['General_Ledger (2 pages)', 'General_Ledger'],
+    ['General_Ledger (2 pages) (2 pages)', 'General_Ledger'], // already doubled
+    ['General_Ledger (2 pages)', 'General_Ledger'], // non-breaking spaces
+    ['CC Annual Report - 2025 (6 pgs)', 'CC Annual Report - 2025'],
+    ['Distributions Detail (1 page.)', 'Distributions Detail'],
+    ['Revenue – Triland Partners LLC (2 Pages)', 'Revenue – Triland Partners LLC'],
+    ['Continuing Education ', 'Continuing Education'],
+    ['Cash_Disbursements_Listing', 'Cash_Disbursements_Listing'],
+    ['Form 1120S (2024)', 'Form 1120S (2024)'] // a YEAR must not be eaten
+  ]
+  const stripFails = nasty.filter(([input, want]) => stripPageCount(input) !== want)
+  check(
+    'page-count stripping handles real-world title noise',
+    stripFails.length === 0,
+    stripFails.map(([i]) => `${JSON.stringify(i)} -> ${JSON.stringify(stripPageCount(i))}`).join(' ; ')
   )
 
   // --- renaming bookmarks
