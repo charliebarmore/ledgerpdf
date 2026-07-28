@@ -67,6 +67,7 @@ This app holds client tax documents, so the boundaries are deliberate:
 | `[` `]` | rotate left / right |
 | `⌫` | delete (undoable — no confirmation dialog, per DESIGN.md) |
 | `⌘/Ctrl Z` / `⇧⌘Z` | undo / redo |
+| `⌘/Ctrl B` | add a bookmark on the current page |
 | `⌘/Ctrl I` · `E` · `S` · `O` | add PDFs · export · save session · open session |
 
 Click selects, `⌘/Ctrl`-click toggles, `⇧`-click selects a range. Drag thumbnails
@@ -96,6 +97,11 @@ Dev builds only (ignored when packaged), used by `npm run smoke`:
   section heading; a heading whose first child shares its page would otherwise
   read "(1 page)" while covering a dozen. A hand-typed `(N pages)` in an imported
   title is replaced, never doubled.
+- **Add** a bookmark on the current page with `+ Add` or `⌘/Ctrl B`; it opens
+  straight into rename, so it's add → type → Enter. Hover a user bookmark for
+  `⇤`/`⇥` to outdent/indent (indenting nests it under the entry above) and `×`
+  to remove. User bookmarks are anchored to a page id, so they move with their
+  page, and they merge into any imported outline by binder page order.
 - **Rename** any bookmark by double-clicking it; `↺` reverts to the imported
   title. Renames are keyed to the bookmark's *origin* (`f:<source>` or
   `o:<source>:<outline path>`), never its position, so they survive reordering,

@@ -1,5 +1,11 @@
-import { useState } from 'react'
-import { buildBookmarks, stripPageCount, type BookmarkNode, type Session } from '../session'
+import { useEffect, useState } from 'react'
+import {
+  USER_BOOKMARK_PREFIX,
+  buildBookmarks,
+  stripPageCount,
+  type BookmarkNode,
+  type Session
+} from '../session'
 
 /**
  * The bookmark tree exactly as it will be written at export: file-level
@@ -11,22 +17,51 @@ import { buildBookmarks, stripPageCount, type BookmarkNode, type Session } from 
  * so they survive reordering, and clearing the field reverts to the imported
  * title.
  */
+function findNode(nodes: BookmarkNode[], key: string): BookmarkNode | null {
+  for (const n of nodes) {
+    if (n.key === key) return n
+    const hit = findNode(n.children, key)
+    if (hit) return hit
+  }
+  return null
+}
+
 export function BookmarkPanel({
   session,
   pageCounts,
   onTogglePageCounts,
   onRename,
-  onJump
+  onJump,
+  onAdd,
+  onRemove,
+  onIndent,
+  canAdd,
+  autoEditKey,
+  onAutoEditDone
 }: {
   session: Session
   pageCounts: boolean
   onTogglePageCounts: (next: boolean) => void
   onRename: (key: string, title: string | null) => void
   onJump: (pageId: string) => void
+  onAdd: () => void
+  onRemove: (key: string) => void
+  onIndent: (key: string, delta: number) => void
+  canAdd: boolean
+  autoEditKey: string | null
+  onAutoEditDone: () => void
 }): React.JSX.Element {
   const [editing, setEditing] = useState<{ key: string; value: string } | null>(null)
   const tree = buildBookmarks(session, { pageCounts })
   const numberOf = new Map(session.pages.map((p, i) => [p.id, i + 1]))
+
+  // A just-added bookmark opens straight into rename — add, type, Enter.
+  useEffect(() => {
+    if (!autoEditKey) return
+    const node = findNode(tree, autoEditKey)
+    setEditing({ key: autoEditKey, value: node ? stripPageCount(node.title) : '' })
+    onAutoEditDone()
+  }, [autoEditKey])
 
   const commit = (): void => {
     if (editing) onRename(editing.key, editing.value)
@@ -36,6 +71,7 @@ export function BookmarkPanel({
   const rows = (nodes: BookmarkNode[], depth = 0): React.JSX.Element[] =>
     nodes.flatMap((n, i) => {
       const pad = 8 + depth * 14
+      const isUser = n.key.startsWith(USER_BOOKMARK_PREFIX)
       const renamed = session.titles?.[n.key] !== undefined
       const isEditing = editing?.key === n.key
 
@@ -58,26 +94,58 @@ export function BookmarkPanel({
         ) : (
           <button
             key={`${n.key}:${i}`}
-            className={`bm-row${renamed ? ' is-renamed' : ''}`}
+            className={`bm-row${renamed ? ' is-renamed' : ''}${isUser ? ' is-user' : ''}`}
             style={{ paddingLeft: pad }}
             onClick={() => onJump(n.page)}
             onDoubleClick={() => setEditing({ key: n.key, value: stripPageCount(n.title) })}
             // Full title in the tooltip — real workpaper names are long and the
             // panel will always truncate some of them.
-            title={`${n.title}\nBinder page ${numberOf.get(n.page) ?? '?'}\nDouble-click to rename`}
+            title={`${n.title}\nBinder page ${numberOf.get(n.page) ?? '?'}\nDouble-click to rename${isUser ? ' · added by you' : ''}`}
           >
             <span className="bm-title">{n.title}</span>
-            {renamed && (
-              <span
-                className="bm-revert"
-                title="Revert to the imported title"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onRename(n.key, null)
-                }}
-              >
-                ↺
+            {isUser ? (
+              <span className="bm-tools">
+                <span
+                  title="Outdent"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onIndent(n.key, -1)
+                  }}
+                >
+                  ⇤
+                </span>
+                <span
+                  title="Indent (nest under the bookmark above)"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onIndent(n.key, 1)
+                  }}
+                >
+                  ⇥
+                </span>
+                <span
+                  title="Remove this bookmark"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRemove(n.key)
+                  }}
+                >
+                  ×
+                </span>
               </span>
+            ) : (
+              renamed && (
+                <span
+                  className="bm-revert"
+                  title="Revert to the imported title"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRename(n.key, null)
+                  }}
+                >
+                  ↺
+                </span>
+              )
             )}
             <span className="bm-page">{numberOf.get(n.page) ?? '—'}</span>
           </button>
@@ -89,9 +157,12 @@ export function BookmarkPanel({
   return (
     <div className="panel">
       <div className="panel-head">
-        <span>
-          Bookmarks <span className="muted">(as exported)</span>
+        <span className="panel-title" title="The outline exactly as it will be written on export">
+          Bookmarks
         </span>
+        <button className="bm-add" onClick={onAdd} disabled={!canAdd} title="Add a bookmark on the current page  ⌘B">
+          + Add
+        </button>
         <label className="toggle" title="Append the page span to each leaf bookmark, e.g. (2 pages)">
           <input
             type="checkbox"
@@ -102,7 +173,7 @@ export function BookmarkPanel({
         </label>
       </div>
       {tree.length === 0 ? (
-        <div className="panel-empty">No pages yet.</div>
+        <div className="panel-empty">No bookmarks yet.</div>
       ) : (
         <div className="bm-list">{rows(tree)}</div>
       )}

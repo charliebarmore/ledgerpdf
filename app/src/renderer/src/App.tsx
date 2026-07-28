@@ -10,6 +10,9 @@ import {
   movePages,
   newSession,
   parseSession,
+  addBookmark,
+  nudgeBookmarkDepth,
+  removeBookmark,
   rotatePages,
   setBookmarkTitle,
   toExportSpec,
@@ -28,6 +31,7 @@ export default function App(): React.JSX.Element {
   const [busy, setBusy] = useState(false)
   const [pageCounts, setPageCounts] = useState(true)
   const [sideW, setSideW] = useState(300)
+  const [autoEditKey, setAutoEditKey] = useState<string | null>(null)
   const past = useRef<Session[]>([])
   const future = useRef<Session[]>([])
 
@@ -180,6 +184,14 @@ export default function App(): React.JSX.Element {
     [pages, current]
   )
 
+  /** Add a bookmark on the current page and drop straight into renaming it. */
+  const addBookmarkHere = useCallback(() => {
+    if (!current) return
+    const { session: next, key } = addBookmark(session, current.id)
+    apply(next, 'Bookmark added — type a name.')
+    setAutoEditKey(key)
+  }, [current, session, apply])
+
   // --------------------------------------------------------------- persistence
 
   /** Core export. Takes the session explicitly — never reads render-time state. */
@@ -281,6 +293,11 @@ export default function App(): React.JSX.Element {
         void addViaDialog()
         return
       }
+      if (mod && e.key.toLowerCase() === 'b') {
+        e.preventDefault()
+        addBookmarkHere()
+        return
+      }
       if (mod && e.key.toLowerCase() === 'e') {
         e.preventDefault()
         void exportBinder()
@@ -303,7 +320,19 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [undo, redo, rotate, remove, step, nudge, saveSession, openSession, addViaDialog, exportBinder])
+  }, [
+    undo,
+    redo,
+    rotate,
+    remove,
+    step,
+    nudge,
+    saveSession,
+    openSession,
+    addViaDialog,
+    exportBinder,
+    addBookmarkHere
+  ])
 
   /** Drag the divider to widen the bookmark panel — real titles are long. */
   const startResize = useCallback((e: React.PointerEvent) => {
@@ -422,6 +451,14 @@ export default function App(): React.JSX.Element {
                     title ? 'Bookmark renamed.' : 'Bookmark title reverted.'
                   )
                 }
+                onAdd={addBookmarkHere}
+                onRemove={(key) => apply(removeBookmark(session, key), 'Bookmark removed.')}
+                onIndent={(key, delta) =>
+                  apply(nudgeBookmarkDepth(session, key, delta), 'Bookmark nesting changed.')
+                }
+                canAdd={!!current}
+                autoEditKey={autoEditKey}
+                onAutoEditDone={() => setAutoEditKey(null)}
                 onJump={(id) => {
                   setCurrentId(id)
                   setSelected(new Set([id]))

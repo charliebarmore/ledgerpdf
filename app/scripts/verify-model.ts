@@ -14,12 +14,15 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import {
   SESSION_FORMAT_VERSION,
+  addBookmark,
   addSource,
   buildBookmarks,
   deletePages,
   movePages,
   newSession,
+  nudgeBookmarkDepth,
   parseSession,
+  removeBookmark,
   rotatePages,
   setBookmarkTitle,
   toExportSpec,
@@ -218,6 +221,67 @@ async function main(): Promise<number> {
     'rename survives its parent bookmark being dropped',
     buildBookmarks(parentGone).some((b) => b.title === 'Detail (renamed)'),
     buildBookmarks(parentGone).map((b) => b.title).join(',')
+  )
+
+  // --- user-created bookmarks (the ALFA case: a PDF with no outline at all)
+  let noOutline: Session = newSession()
+  noOutline = addSource(noOutline, pa.probe as ProbeWire) // fixture_a has no outline
+  check('file with no outline has one bookmark', buildBookmarks(noOutline).length === 1)
+
+  const add1 = addBookmark(noOutline, noOutline.pages[1].id, 'Standard deduction')
+  const add2 = addBookmark(add1.session, noOutline.pages[2].id, 'Payments')
+  let withUser = add2.session
+  const userTree = buildBookmarks(withUser)
+  check(
+    'user bookmarks appear in page order after the file bookmark',
+    userTree.map((b) => b.title).join(' | ') === 'fixture_a | Standard deduction | Payments',
+    userTree.map((b) => b.title).join(' | ')
+  )
+
+  // indent nests under the preceding entry
+  withUser = nudgeBookmarkDepth(withUser, add1.key, 1)
+  const nested = buildBookmarks(withUser)
+  check(
+    'indent nests a user bookmark under the previous one',
+    nested.length === 2 &&
+      nested[0].title === 'fixture_a' &&
+      nested[0].children[0].title === 'Standard deduction',
+    JSON.stringify(nested.map((b) => [b.title, b.children.map((c) => c.title)]))
+  )
+
+  // renaming and removing user bookmarks
+  withUser = setBookmarkTitle(withUser, add2.key, 'Payments & credits')
+  check(
+    'user bookmark renames',
+    buildBookmarks(withUser).some((b) => b.title === 'Payments & credits')
+  )
+  check(
+    'user bookmarks survive save/reopen',
+    (() => {
+      const rt = parseSession(JSON.parse(JSON.stringify(withUser)))
+      return 'session' in rt && rt.session.bookmarks?.length === 2
+    })()
+  )
+  check(
+    'user bookmark on a deleted page is dropped',
+    (() => {
+      const gone = deletePages(withUser, [withUser.pages[2].id])
+      return !buildBookmarks(gone).some((b) => b.title === 'Payments & credits')
+    })()
+  )
+  check(
+    'removeBookmark deletes just that one',
+    buildBookmarks(removeBookmark(withUser, add2.key)).length === 1
+  )
+
+  // a user bookmark must not scramble an imported outline's nesting
+  const inB = addBookmark(solo, solo.pages[2].id, 'Added at the end')
+  const mixed = buildBookmarks(inB.session)
+  check(
+    'user bookmark merges without disturbing imported nesting',
+    mixed.map((b) => b.title).join(' | ') === 'Schedule X | Schedule Y | Added at the end' &&
+      mixed[0].children[0].title === 'Detail X-1',
+    mixed.map((b) => b.title).join(' | ')
   )
 
   // --- delete the page two imported bookmarks point at (B index 1)

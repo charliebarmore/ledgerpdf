@@ -341,7 +341,7 @@ button.link {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--sm);
+  gap: 6px;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -382,6 +382,45 @@ button.link {
   font-style: italic;
 }
 
+.bm-add {
+  padding: 1px 7px;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+  flex: none;
+}
+
+.panel-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* user-added bookmarks read as editable rather than imported */
+.bm-row.is-user .bm-title {
+  color: var(--primary);
+}
+
+.bm-tools {
+  display: none;
+  gap: 2px;
+  flex: none;
+  color: var(--muted);
+}
+
+.bm-row.is-user:hover .bm-tools {
+  display: inline-flex;
+}
+
+.bm-tools > span {
+  padding: 0 3px;
+}
+
+.bm-tools > span:hover {
+  color: var(--primary);
+}
+
 .bm-revert {
   flex: none;
   color: var(--muted);
@@ -419,6 +458,8 @@ button.link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
+  flex: none;
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;

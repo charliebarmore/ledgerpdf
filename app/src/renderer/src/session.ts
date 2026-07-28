@@ -37,6 +37,18 @@ export interface BinderPage {
   rotate: number
 }
 
+/**
+ * A bookmark the user created (as opposed to one imported from a source PDF's
+ * own outline). Anchored to a page id, so it moves with its page.
+ */
+export interface UserBookmark {
+  id: string
+  page: string
+  title: string
+  /** Nesting level in the exported outline. 0 = top level. */
+  depth: number
+}
+
 export interface Session {
   formatVersion: number
   sources: SourceDoc[]
@@ -47,6 +59,8 @@ export interface Session {
   /** User-renamed bookmarks, keyed by BookmarkNode.key. Absent = use the
    *  imported/derived title. */
   titles?: Record<string, string>
+  /** Bookmarks the user added. Merged into the imported outline by page order. */
+  bookmarks?: UserBookmark[]
 }
 
 export interface BookmarkNode {
@@ -184,8 +198,13 @@ export function stripPageCount(title: string): string {
   return title.replace(PAGE_COUNT_SUFFIX, '').trim()
 }
 
+export const USER_BOOKMARK_PREFIX = 'u:'
+
 /**
- * Rename a bookmark, or pass null/'' to revert it to its imported title.
+ * Rename a bookmark. For an imported/file bookmark, null or '' reverts to the
+ * original title. For a user-created one the title is stored directly (and a
+ * blank falls back to "Untitled").
+ *
  * Renames live on the session, so they persist across save/reopen and survive
  * any amount of page reordering.
  */
@@ -194,11 +213,59 @@ export function setBookmarkTitle(
   key: string,
   title: string | null
 ): Session {
-  const titles = { ...(session.titles ?? {}) }
   const next = title?.trim() ?? ''
+
+  if (key.startsWith(USER_BOOKMARK_PREFIX)) {
+    const id = key.slice(USER_BOOKMARK_PREFIX.length)
+    return {
+      ...session,
+      bookmarks: (session.bookmarks ?? []).map((b) =>
+        b.id === id ? { ...b, title: next === '' ? 'Untitled' : next } : b
+      )
+    }
+  }
+
+  const titles = { ...(session.titles ?? {}) }
   if (next === '') delete titles[key]
   else titles[key] = next
   return { ...session, titles }
+}
+
+/** Add a bookmark on a page. Returns the session and the new bookmark's key. */
+export function addBookmark(
+  session: Session,
+  pageId: string,
+  title = 'New bookmark',
+  depth = 0
+): { session: Session; key: string } {
+  const seq = session.seq + 1
+  const id = `bm_${seq}`
+  return {
+    session: {
+      ...session,
+      seq,
+      bookmarks: [...(session.bookmarks ?? []), { id, page: pageId, title, depth }]
+    },
+    key: `${USER_BOOKMARK_PREFIX}${id}`
+  }
+}
+
+export function removeBookmark(session: Session, key: string): Session {
+  if (!key.startsWith(USER_BOOKMARK_PREFIX)) return session
+  const id = key.slice(USER_BOOKMARK_PREFIX.length)
+  return { ...session, bookmarks: (session.bookmarks ?? []).filter((b) => b.id !== id) }
+}
+
+/** Indent (+1) or outdent (-1) a user bookmark. Imported ones keep their level. */
+export function nudgeBookmarkDepth(session: Session, key: string, delta: number): Session {
+  if (!key.startsWith(USER_BOOKMARK_PREFIX)) return session
+  const id = key.slice(USER_BOOKMARK_PREFIX.length)
+  return {
+    ...session,
+    bookmarks: (session.bookmarks ?? []).map((b) =>
+      b.id === id ? { ...b, depth: Math.max(0, Math.min(5, b.depth + delta)) } : b
+    )
+  }
 }
 
 function stripPdfExt(name: string): string {
@@ -310,9 +377,73 @@ export function buildBookmarks(session: Session, opts: BookmarkOptions = {}): Bo
     })
   }
 
-  if (!pageCounts) return tree
   const indexOf = new Map(session.pages.map((p, i) => [p.id, i]))
+  tree = mergeUserBookmarks(tree, session, indexOf)
+
+  if (!pageCounts) return tree
   return applyPageCounts(tree, indexOf, session.pages.length)
+}
+
+interface FlatEntry {
+  key: string
+  title: string
+  page: string
+  depth: number
+}
+
+function flattenTree(nodes: BookmarkNode[], depth = 0): FlatEntry[] {
+  return nodes.flatMap((n) => [
+    { key: n.key, title: n.title, page: n.page, depth },
+    ...flattenTree(n.children, depth + 1)
+  ])
+}
+
+/** Rebuild a nested tree from a flat depth sequence (levels can't be skipped). */
+function rebuildTree(entries: FlatEntry[]): BookmarkNode[] {
+  const root: BookmarkNode[] = []
+  const stack: BookmarkNode[][] = [root]
+  for (const e of entries) {
+    const depth = Math.min(e.depth, stack.length - 1)
+    const node: BookmarkNode = { key: e.key, title: e.title, page: e.page, children: [] }
+    stack[depth].push(node)
+    stack.length = depth + 1
+    stack.push(node.children)
+  }
+  return root
+}
+
+/**
+ * Splice user bookmarks into the imported outline by binder page order.
+ *
+ * The imported entries are deliberately NOT re-sorted: an outline may legally
+ * point a parent at a later page than its child, and sorting by page would
+ * scramble that nesting. Instead each user bookmark is inserted after the last
+ * imported entry that sits on the same page or earlier.
+ */
+function mergeUserBookmarks(
+  tree: BookmarkNode[],
+  session: Session,
+  indexOf: Map<string, number>
+): BookmarkNode[] {
+  const users = (session.bookmarks ?? []).filter((b) => indexOf.has(b.page))
+  if (users.length === 0) return tree
+
+  const entries = flattenTree(tree)
+  for (const b of [...users].sort((x, y) => indexOf.get(x.page)! - indexOf.get(y.page)!)) {
+    const target = indexOf.get(b.page)!
+    let pos = 0
+    for (let i = 0; i < entries.length; i++) {
+      const at = indexOf.get(entries[i].page)
+      if (at !== undefined && at <= target) pos = i + 1
+    }
+    entries.splice(pos, 0, {
+      key: `${USER_BOOKMARK_PREFIX}${b.id}`,
+      title: b.title,
+      page: b.page,
+      depth: b.depth
+    })
+  }
+  return rebuildTree(entries)
 }
 
 // --------------------------------------------------------------------- export
@@ -357,6 +488,7 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
   for (const p of s.pages) {
     if (!known.has(p.source)) return { error: `page ${p.id} references unknown source ${p.source}` }
   }
+  const pageIds = new Set(s.pages.map((p) => p.id))
   const seq = typeof s.seq === 'number' ? s.seq : s.pages.length + s.sources.length
   return {
     session: {
@@ -364,7 +496,10 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
       sources: s.sources,
       pages: s.pages.map((p) => ({ ...p, rotate: p.rotate ?? 0 })),
       seq,
-      ...(s.titles && typeof s.titles === 'object' ? { titles: s.titles } : {})
+      ...(s.titles && typeof s.titles === 'object' ? { titles: s.titles } : {}),
+      ...(Array.isArray(s.bookmarks)
+        ? { bookmarks: s.bookmarks.filter((b) => pageIds.has(b.page)) }
+        : {})
     }
   }
 }
