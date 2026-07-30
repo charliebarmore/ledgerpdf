@@ -108,22 +108,45 @@ if (existsSync(OUT_PDF)) {
     : []
   check(
     'review marks placed in the app land in the exported PDF',
-    marks.length === 2 &&
-      marks.every((m) => m.has_ap && m.wpt_data?.author === 'CJB') &&
+    marks.length === 4 &&
+      marks
+        .filter((m) => m.wpt_kind !== 'tape')
+        .every((m) => m.has_ap && m.wpt_data?.author === 'CJB') &&
       marks.some((m) => m.wpt_data?.text === 'F'),
     JSON.stringify(marks.map((m) => [m.wpt_kind, m.wpt_data?.author, m.wpt_data?.text]))
+  )
+  check(
+    'a user-defined custom stamp exports with its own letters',
+    marks.some((m) => m.wpt_kind === 'text' && m.wpt_data?.text === 'TB'),
+    JSON.stringify(marks.map((m) => m.wpt_data?.text))
+  )
+  const tape = marks.find((m) => m.wpt_kind === 'tape')
+  check(
+    'a tape keyed in the app exports with its addends and total',
+    !!tape &&
+      tape.has_ap &&
+      tape.wpt_data?.entries?.join(',') === '1200,340,-50' &&
+      tape.wpt_data?.total === 1490,
+    JSON.stringify(tape?.wpt_data)
   )
 
   // The Phase 2 property that actually matters: a mark must export exactly
   // where the UI showed it. Rendered with pdfium (Chrome/Edge's engine).
+  const marksScript = path.join(REPO, 'spike', 'check_mark_positions.py')
   const pos = await run(PY, [
-    path.join(REPO, 'spike', 'check_mark_positions.py'),
-    OUT_PDF, '0', 'green', '0.72', '0.30', 'blue', '0.40', '0.45'
+    marksScript, OUT_PDF, '0',
+    'green', '0.72', '0.30', 'blue', '0.40', '0.45', 'brown', '0.68', '0.55'
   ])
   check(
-    'marks export exactly where they were placed',
+    'marks and the tape export exactly where they were placed',
     pos.code === 0,
     pos.out.trim().split('\n').join(' | ')
+  )
+  const stampPos = await run(PY, [marksScript, OUT_PDF, '1', 'blue', '0.55', '0.25'])
+  check(
+    'the custom stamp lands where it was placed',
+    stampPos.code === 0,
+    stampPos.out.trim().split('\n').join(' | ')
   )
 
   const qpdf = await run(PY, ['-c', `import pikepdf,sys; j=pikepdf.Job(['qpdf','--check',${JSON.stringify(OUT_PDF)}]); j.run(); sys.exit(j.exit_code)`])

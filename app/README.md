@@ -23,8 +23,9 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | Script | What it proves |
 |---|---|
 | `typecheck` | main/preload and renderer both typecheck |
-| `verify:model` | 22 checks on the pure session model, ending in a **real engine export + re-probe** (reorder, rotation, bookmark hoisting, session round-trip, version guard) |
-| `smoke` | drives the **actual Electron app** headlessly: imports two fixtures → renders → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, `qpdf --check`, and snapshots the window to a PNG |
+| `verify:model` | 72 checks on the pure session model, ending in **two real engine exports + re-probes** (reorder, rotation, bookmark hoisting, session round-trip, version guard, marks, custom stamps, and a flattened binder pixel-compared against the annotated one) |
+| `verify:mcp` | drives the **MCP server** as a real MCP client through a whole binder build — import, reorder, bookmark, mark, tape, export, save, reopen — plus the error paths, then verifies the PDF it produced |
+| `smoke` | drives the **actual Electron app** headlessly: imports two fixtures → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 
 Both suites use synthetic fixtures only — **never client documents**.
 
@@ -32,12 +33,13 @@ Both suites use synthetic fixtures only — **never client documents**.
 
 ```
 src/main/       main process — ALL filesystem + subprocess access
+src/mcp/        local MCP server — agents drive the same model + engine
 src/preload/    the entire renderer API surface (contextBridge)
 src/renderer/
   src/session.ts    the binder model: stable page ids, bookmarks, export spec (pure)
   src/pdf.ts        PDF.js rendering + per-canvas render cancellation
   src/App.tsx       state, undo/redo, keyboard
-  src/components/   ThumbnailRail · PageView · BookmarkPanel
+  src/components/   ThumbnailRail · PageView · BookmarkPanel · MarkLayer · MarkInspector
 scripts/        asset copy, model verification, smoke test
 ```
 
@@ -68,6 +70,7 @@ This app holds client tax documents, so the boundaries are deliberate:
 | `⌫` | delete (undoable — no confirmation dialog, per DESIGN.md) |
 | `⌘/Ctrl Z` / `⇧⌘Z` | undo / redo |
 | `T` `X` `F` | arm the tick / cross / footed mark tool |
+| `C` | arm the calculator tape |
 | `V` or `Esc` | back to the select tool |
 | `+` `−` | resize the selected mark |
 | `⌫` | delete the selected mark (else the selected pages) |
@@ -76,6 +79,10 @@ This app holds client tax documents, so the boundaries are deliberate:
 
 Click selects, `⌘/Ctrl`-click toggles, `⇧`-click selects a range. Drag thumbnails
 to reorder; drop PDFs onto the window to import.
+
+While the cursor is in a text field, the field owns the keyboard — none of the
+single-key shortcuts fire. Without that, typing initials armed the `F` stamp and
+`⌫` deleted a binder page.
 
 **Navigating vs. moving are different actions.** `‹ 3 / 62 ›` in the page bar
 navigates (and the page number is editable — type to jump). The `Move ↑` /
@@ -103,8 +110,20 @@ timestamp — part of the review record, carried into the PDF as private metadat
 alongside a standard `/Stamp` annotation.
 
 Kinds: `tick` (agreed), `cross` (does not agree), and `text` (a short lettered
-stamp — `F` for footed, or your initials). Adding another is an appearance
-stream in `engine/workpaper_engine/appearance.py` plus a palette entry.
+stamp — `F` for footed, or your initials). Adding another *kind* is an appearance
+stream in `engine/workpaper_engine/appearance.py` plus a palette entry; adding
+another *letter* needs no code at all (see custom stamps below).
+
+**Custom stamps.** Every firm has its own tick-mark legend, so the fixed palette
+can't be the whole story. Type a stamp in the Review panel (`TB`, `PY`, `A/R`, up
+to 8 characters) and it is saved on the session and armed immediately. Saved
+stamps live in the binder, so the legend travels with it. Removing a stamp from
+the palette never touches marks already placed with it.
+
+**Mark inspector.** Select a mark and the side panel exposes its letters, size,
+author and note for editing after the fact — a review record has to be
+correctable without deleting and re-placing the mark. The timestamp is the one
+field that is *not* editable: a record you can backdate is not a record.
 
 **Coordinates are the whole ballgame.** Marks are stored normalized against the
 page *as displayed* (CropBox-relative, rotation applied) — exactly what a click
@@ -113,6 +132,121 @@ consumes, so there is no conversion step to get wrong. `npm run smoke` asserts
 the round trip: a mark placed at (0.72, 0.30) must render at (0.72, 0.30) in the
 exported PDF, checked in pdfium. If that ever drifts, a reviewer's tick moves to
 the wrong number, which is worse than no tick at all.
+
+The thumbnail rail shows a colored dot per mark plus a count badge, so review
+coverage across a 60-page binder is visible without paging through it. Dots, not
+glyphs: at rail scale a ✓ is illegible, and sizing one correctly would need page
+dimensions the rail doesn't have — a dot answers "reviewed, and roughly where"
+without implying precision it doesn't have.
+
+## Calculator tape (Phase 3)
+
+`C` (or the 🖩 button), then click the page. The tape is a **10-key adding
+machine**, because that is the muscle memory every preparer already has:
+
+| Keys | Action |
+|---|---|
+| `0`–`9` `.` | key into the current line |
+| `Enter` | commit the line; the running total updates |
+| `-` / `+` | flip the sign of the line being keyed |
+| `⌫` | take back the keystroke — or, once the buffer is empty, the last committed line |
+| `Esc` | put the tape down (an untouched tape deletes itself rather than leaving an empty card) |
+
+Each committed line is one undo step. The caption field above the numbers is
+optional and is what makes the tape a workpaper artifact rather than a
+calculator — "Repairs" beside a total is the thing a reviewer needs.
+
+**Money is summed in whole cents**, never as floats. `0.1 + 0.2` must be `0.30`
+and a total that doesn't foot to the cent is a defect, not a rounding curiosity.
+
+**Entries are stored structurally, not as the rendered text.** A total on a
+workpaper with no addends is an assertion; a total with its addends is evidence.
+Both go into the PDF: the drawn lines are what any viewer shows, and the entries
+plus total ride along in `/WPT_Data` — which is the seam the AI tie-out layer
+reads later.
+
+The card's geometry mirrors `engine/workpaper_engine/appearance.py` (`TAPE_*`)
+exactly — same font size, line height, padding, and Courier character advance —
+so the tape you line up beside a number on screen is the tape that lands in the
+PDF. Alignment is monospace padding, which is why the right-aligned amounts
+survive the trip verbatim. `npm run smoke` pixel-checks the tape's position in
+pdfium alongside the marks.
+
+## Flatten on export
+
+The **Flatten marks** toggle (Binder panel) paints marks into the page content
+stream instead of attaching them as `/Stamp` annotations. For a binder that
+leaves the building: nothing a recipient can select, drag, or delete, and nothing
+for a viewer to silently reposition (see the Preview finding in `spike/README.md`).
+
+It reuses the very same appearance Form XObject the annotation would have used,
+placed with the matrix a viewer would compute from `/Matrix`, `/BBox` and `/Rect`
+(PDF 2.0 §12.5.5) — so a flattened mark is pixel-identical to the annotated one,
+including on rotated pages. `verify:model` proves both halves: identical
+centroids in pdfium, and the flattened binder still renders its marks with
+annotation drawing turned **off** while the annotated one goes blank.
+
+The trade is deliberate and one-way: flattened marks carry no `/WPT_Data`, so
+that PDF can never be re-edited. **The session file stays the editable master** —
+flatten is for the copy you send out, not the copy you keep.
+
+## Agent access (MCP server)
+
+`app/src/mcp/` is a local MCP server that lets Claude — or any MCP client —
+build binders: import PDFs, order pages, bookmark, place marks and tapes, and
+export. It is a **second front door onto the same session model and the same
+Python engine** the desktop app drives, not a reimplementation, so the two can't
+drift.
+
+```bash
+npm run build:mcp     # bundles to out/mcp-server.cjs
+npm run verify:mcp    # drives it as a real MCP client through a whole build
+```
+
+Registered for Claude Code with:
+
+```bash
+claude mcp add --scope user workpaper-binder -- node <repo>/app/out/mcp-server.cjs
+```
+
+**The session file is the handoff.** There is no live link to a running app
+window: the agent assembles a binder and calls `binder_save`, you open that
+`.wptsession.json` in the app (`⌘O`) to review and finish it. An agent can also
+`binder_export` straight to PDF when no review is wanted.
+
+Tools: `probe_pdf` · `binder_new` / `binder_open` / `binder_save` /
+`binder_status` · `binder_add_pdfs` · `binder_move_pages` / `binder_rotate_pages`
+/ `binder_delete_pages` · `binder_bookmarks` / `binder_add_bookmark` /
+`binder_rename_bookmark` · `binder_set_reviewer` / `binder_place_mark` /
+`binder_annotations` / `binder_remove_marks` · `binder_add_tape` ·
+`binder_export`.
+
+Page ids (`pg_*`) are permanent and are how every tool refers to pages, so an
+agent reads them once from `binder_status` and they stay valid across reordering.
+
+### What crosses the boundary
+
+This matters more here than anywhere else in the app, so it is stated plainly.
+
+**Does cross:** file paths, file names, page counts, page order and rotation,
+bookmark titles, and mark/tape metadata (positions, letters, notes, totals).
+
+**Does not cross:** page text. The engine probes *structure*, not content —
+there is no tool that returns what a page says or what numbers are on it. This
+server cannot put the figures off a client return into a model's context.
+
+That is still not zero-disclosure. **File names and bookmark titles routinely
+carry client names** — a real 62-page master file had `Revenue – Triland Partners LLC`
+in its outline. Pointing an agent at real client files is therefore an IRC §7216
+disclosure decision. The tool does not make that decision, gate it, or redact
+anything: that was a deliberate call (2026-07-30), taken so the agent workflow
+stays frictionless. If a client-safe mode is ever wanted, the place for it is a
+handle-mapping layer in `src/mcp/server.ts` that swaps identifying strings before
+they reach the transport.
+
+Note this does not change the *product's* local-only claim: the app still has no
+telemetry and reaches no network. What leaves the machine is whatever the agent
+you point at it chooses to send to its own model.
 
 ## Bookmark behavior
 
@@ -159,6 +293,11 @@ Findings from dogfooding actual tax-software output, each pinned by a test:
 - Packaging is not set up (Phase 5). In particular PDF.js's WASM/cmap assets are
   loaded relative to `document.baseURI`, which works in dev; `file://` fetch
   behavior in a packaged build still needs verifying.
-- No marks/tapes/links UI yet — that is Phase 2–4. The engine already supports
-  them (proven in the Phase 0 spike).
+- No links UI yet — that is Phase 4. The engine already supports links (proven
+  in the Phase 0 spike). Marks (Phase 2) and tapes (Phase 3) are done.
+- A tape's caption and drag position are not individually undoable — they fold
+  into the undo entry that opened the gesture, like the reviewer-initials field.
+- Flatten burns **our** marks only; annotations that came in on a source page
+  stay annotations. Deliberate for now — worth revisiting when a binder first
+  goes to someone outside the firm.
 - Thumbnails render eagerly as they mount; a 300-page binder needs windowing.

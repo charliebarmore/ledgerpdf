@@ -17,6 +17,7 @@ Binder spec (JSON-friendly dict):
   ],
   "links":    [{"page": "pg1", "rect_n": [x0,y0,x1,y1], "target_page": "pg3"}],
   "bookmarks":[{"title": "...", "page": "pg1", "children": [...]}],
+  "flatten":  false,   # true = paint marks into page content, not annotations
   "output":   "/abs/path/out.pdf"
 }
 """
@@ -48,6 +49,46 @@ def _page_geom(page_obj: pikepdf.Object) -> PageGeom:
 def _fit_dest(out: pikepdf.Pdf, page_index: int) -> Array:
     """Explicit /Fit destination to a page in the output document."""
     return Array([out.pages[page_index].obj, Name.Fit])
+
+
+def _placement_matrix(form: pikepdf.Stream, rect: list[float]) -> tuple[float, ...]:
+    """The matrix a viewer would use to fit an appearance stream into /Rect.
+
+    This is PDF 2.0 12.5.5 (appearance streams) done by hand: transform the
+    form's /BBox by its /Matrix, take the bounding box of the result, and map
+    that onto /Rect. Deriving it rather than assuming identity is what keeps a
+    flattened mark pixel-identical to the annotation it replaces on rotated
+    pages, where /Matrix carries the rotation compensation.
+    """
+    a, b, c, d, e, f = (
+        float(v) for v in form.get(Name.Matrix, Array([1, 0, 0, 1, 0, 0]))
+    )
+    bx0, by0, bx1, by1 = (float(v) for v in form.BBox)
+    corners = ((bx0, by0), (bx1, by0), (bx1, by1), (bx0, by1))
+    xs = [a * x + c * y + e for x, y in corners]
+    ys = [b * x + d * y + f for x, y in corners]
+    tx0, tx1, ty0, ty1 = min(xs), max(xs), min(ys), max(ys)
+
+    rx0, rx1 = min(rect[0], rect[2]), max(rect[0], rect[2])
+    ry0, ry1 = min(rect[1], rect[3]), max(rect[1], rect[3])
+    sx = (rx1 - rx0) / (tx1 - tx0) if tx1 > tx0 else 1.0
+    sy = (ry1 - ry0) / (ty1 - ty0) if ty1 > ty0 else 1.0
+    return (sx, 0.0, 0.0, sy, rx0 - tx0 * sx, ry0 - ty0 * sy)
+
+
+def _flatten_op(page: pikepdf.Page, annot: pikepdf.Object) -> bytes:
+    """Content-stream operators that paint an annotation's normal appearance
+    onto the page itself. Returns the ops; the caller appends them.
+
+    The appearance Form XObject is reused verbatim, so a flattened mark is the
+    same drawing the annotation would have shown — only now it is page content
+    that no viewer can select, drag, or delete.
+    """
+    form = annot.AP.N
+    rect = [float(v) for v in annot.Rect]
+    name = page.add_resource(form, Name.XObject, prefix="WptM")
+    m = " ".join(f"{v:.6f}".rstrip("0").rstrip(".") or "0" for v in _placement_matrix(form, rect))
+    return f"q {m} cm {name} Do Q".encode("ascii")
 
 
 def _build_outline_items(
@@ -110,10 +151,18 @@ def export_binder(spec: dict) -> dict:
             return page_obj.Annots
 
         # 3. Our annotations (ticks, tapes).
+        #    With flatten=True the very same appearance is painted into the page
+        #    content instead of being attached as an annotation — the binder
+        #    leaves the building as a flat record. The trade is deliberate and
+        #    one-way: flattened marks carry no /WPT_Data, so that PDF can no
+        #    longer be re-edited. The session file remains the editable master.
+        flatten = bool(spec.get("flatten"))
         n_marks = 0
+        pending_flat: dict[int, list[bytes]] = {}
         for i, a in enumerate(spec.get("annotations", [])):
             idx = final_index[a["page"]]
-            page_obj = out.pages[idx].obj
+            page = out.pages[idx]
+            page_obj = page.obj
             geom = _page_geom(page_obj)
             nm = f"wpt-{a['kind']}-{i:04d}"
             if a["kind"] in ("tick", "cross", "text"):
@@ -125,8 +174,19 @@ def export_binder(spec: dict) -> dict:
                 )
             else:
                 raise ValueError(f"unknown annotation kind: {a['kind']}")
-            _annots_array(page_obj).append(annot)
+            if flatten:
+                pending_flat.setdefault(idx, []).append(_flatten_op(page, annot))
+            else:
+                _annots_array(page_obj).append(annot)
             n_marks += 1
+
+        # Balance the imported content with q/Q before painting on top of it, so
+        # a source page that leaves the graphics state dirty can't smear its
+        # colors or clip onto our marks.
+        for idx, ops in pending_flat.items():
+            page = out.pages[idx]
+            page.contents_add(b"q\n", prepend=True)
+            page.contents_add(b"\nQ\n" + b"\n".join(ops) + b"\n")
 
         # 4. Internal links.
         for i, ln in enumerate(spec.get("links", [])):
@@ -158,6 +218,7 @@ def export_binder(spec: dict) -> dict:
         "output": str(output),
         "pages": n_pages,
         "marks": n_marks,
+        "flattened": flatten,
         "final_index": final_index,
         "check_problems": [str(p) for p in problems],
     }

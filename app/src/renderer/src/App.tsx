@@ -1,29 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookmarkPanel } from './components/BookmarkPanel'
+import { MarkInspector } from './components/MarkInspector'
 import { PageView } from './components/PageView'
 import { ThumbnailRail } from './components/ThumbnailRail'
 import { MARK_COLOR } from './components/MarkLayer'
 import { forgetDoc } from './pdf'
 import {
   MARK_SIZE_DEFAULT,
+  STAMP_MAX_LEN,
   addBookmark,
   addMark,
   addSource,
+  addStamp,
+  addTape,
   baseName,
+  formatAmount,
+  tapeTotal,
   deletePages,
   movePages,
   newSession,
   nudgeBookmarkDepth,
   parseSession,
+  popTapeEntry,
+  pushTapeEntry,
   removeBookmark,
   removeMarks,
+  removeStamp,
+  removeTapes,
   rotatePages,
   setBookmarkTitle,
   toExportSpec,
   updateMark,
-  type MarkKind,
+  updateTape,
+  type Mark,
   type ProbeWire,
-  type Session
+  type Session,
+  type ToolKind
 } from './session'
 
 const MOD = window.wpt.platform === 'darwin' ? '⌘' : 'Ctrl'
@@ -36,12 +48,16 @@ export default function App(): React.JSX.Element {
   const [status, setStatus] = useState('Add PDFs to start a binder.')
   const [busy, setBusy] = useState(false)
   const [pageCounts, setPageCounts] = useState(true)
+  const [flatten, setFlatten] = useState(false)
   const [sideW, setSideW] = useState(300)
   const [autoEditKey, setAutoEditKey] = useState<string | null>(null)
-  const [armed, setArmed] = useState<{ kind: MarkKind; text?: string } | null>(null)
+  const [armed, setArmed] = useState<{ kind: ToolKind; text?: string } | null>(null)
   const [selectedMarkId, setSelectedMarkId] = useState<string | null>(null)
+  const [activeTapeId, setActiveTapeId] = useState<string | null>(null)
   const [markSize] = useState(MARK_SIZE_DEFAULT)
+  const [stampDraft, setStampDraft] = useState('')
   const reviewerInitials = session.reviewer ?? ''
+  const stamps = session.stamps ?? []
   const past = useRef<Session[]>([])
   const future = useRef<Session[]>([])
 
@@ -140,6 +156,7 @@ export default function App(): React.JSX.Element {
     const firstIdx = pages.findIndex((p) => p.id === ids[0])
     apply(next, `Deleted ${ids.length} page(s). ${MOD}Z to undo.`)
     setSelected(new Set())
+    setActiveTapeId(null)
     setCurrentId(next.pages[Math.min(firstIdx, next.pages.length - 1)]?.id ?? null)
     for (const s of session.sources) {
       if (!next.sources.some((n) => n.id === s.id)) forgetDoc(s.id)
@@ -195,6 +212,7 @@ export default function App(): React.JSX.Element {
       setCurrentId(target.id)
       setSelected(new Set([target.id]))
       setSelectedMarkId(null)
+      setActiveTapeId(null)
     },
     [pages]
   )
@@ -222,9 +240,19 @@ export default function App(): React.JSX.Element {
 
   // -------------------------------------------------------------------- marks
 
-  const placeMark = useCallback(
+  const placeTool = useCallback(
     (nx: number, ny: number) => {
       if (!current || !armed) return
+      if (armed.kind === 'tape') {
+        const { session: next, id } = addTape(session, { page: current.id, nx, ny, entries: [] })
+        apply(next, 'Tape placed — key a number, Enter after each. Esc when done.')
+        setActiveTapeId(id)
+        setSelectedMarkId(null)
+        // A tape is a mode you enter and key into, not a stamp you repeat —
+        // staying armed would drop a second empty tape on the next click.
+        setArmed(null)
+        return
+      }
       const { session: next, id } = addMark(session, {
         page: current.id,
         kind: armed.kind,
@@ -264,6 +292,83 @@ export default function App(): React.JSX.Element {
     setSelectedMarkId(null)
   }, [selectedMarkId, session, apply])
 
+  const selectedMark = useMemo<Mark | null>(
+    () => (session.marks ?? []).find((m) => m.id === selectedMarkId) ?? null,
+    [session.marks, selectedMarkId]
+  )
+
+  /** Inspector edits — note, author, letters, size — on the selected mark. */
+  const editMark = useCallback(
+    (patch: Partial<Mark>) => {
+      if (!selectedMarkId) return
+      apply(updateMark(session, selectedMarkId, patch), 'Mark updated.')
+    },
+    [selectedMarkId, session, apply]
+  )
+
+  // ---------------------------------------------------------- calculator tape
+
+  /** Enter commits a line. Each committed line is one undo step. */
+  const commitTapeEntry = useCallback(
+    (id: string, value: number) => {
+      const next = pushTapeEntry(session, id, value)
+      const tape = next.tapes?.find((t) => t.id === id)
+      apply(
+        next,
+        `${formatAmount(value)} — total ${formatAmount(tapeTotal(tape?.entries ?? []))}`
+      )
+    },
+    [session, apply]
+  )
+
+  const backspaceTape = useCallback(
+    (id: string) => {
+      const next = popTapeEntry(session, id)
+      if (next === session) return
+      const tape = next.tapes?.find((t) => t.id === id)
+      apply(next, `Line removed — total ${formatAmount(tapeTotal(tape?.entries ?? []))}`)
+    },
+    [session, apply]
+  )
+
+  // Dragging and captioning fire continuously; fold each gesture into the undo
+  // entry that opened it rather than one per pointer event or keystroke.
+  const moveTape = useCallback((id: string, nx: number, ny: number) => {
+    setSession((prev) => updateTape(prev, id, { nx, ny }))
+  }, [])
+
+  const titleTape = useCallback((id: string, title: string) => {
+    setSession((prev) => updateTape(prev, id, { title }))
+  }, [])
+
+  const deleteTape = useCallback(
+    (id: string) => {
+      apply(removeTapes(session, [id]), `Tape deleted. ${MOD}Z to undo.`)
+      setActiveTapeId(null)
+    },
+    [session, apply]
+  )
+
+  // ----------------------------------------------------------- custom stamps
+
+  /** Save whatever is in the box as a reusable stamp, and arm it immediately. */
+  const saveStamp = useCallback(() => {
+    const next = addStamp(session, stampDraft)
+    if (next === session) return setStampDraft('')
+    const text = next.stamps![next.stamps!.length - 1]
+    apply(next, `Stamp "${text}" saved.`)
+    setArmed({ kind: 'text', text })
+    setStampDraft('')
+  }, [session, stampDraft, apply])
+
+  const dropStamp = useCallback(
+    (text: string) => {
+      apply(removeStamp(session, text), `Stamp "${text}" removed from the palette.`)
+      setArmed((cur) => (cur?.kind === 'text' && cur.text === text ? null : cur))
+    },
+    [session, apply]
+  )
+
   // --------------------------------------------------------------- persistence
 
   /** Core export. Takes the session explicitly — never reads render-time state. */
@@ -271,12 +376,14 @@ export default function App(): React.JSX.Element {
     setBusy(true)
     setStatus('Exporting…')
     try {
-      const res = await window.wpt.exportBinder(toExportSpec(target, out, { pageCounts }))
+      const res = await window.wpt.exportBinder(toExportSpec(target, out, { pageCounts, flatten }))
       if (res.ok) {
-        const r = res.result as { pages: number; check_problems: string[] }
+        const r = res.result as { pages: number; marks: number; check_problems: string[] }
         const clean = r.check_problems.length === 0
         setStatus(
-          `Exported ${r.pages} pages to ${baseName(out)}${clean ? ' · validation clean' : ` · ${r.check_problems.length} validation warning(s)`}`
+          `Exported ${r.pages} pages to ${baseName(out)}${
+            flatten && r.marks ? ` · ${r.marks} mark(s) flattened` : ''
+          }${clean ? ' · validation clean' : ` · ${r.check_problems.length} validation warning(s)`}`
         )
         if (reveal) await window.wpt.reveal(out)
       } else {
@@ -285,14 +392,15 @@ export default function App(): React.JSX.Element {
     } finally {
       setBusy(false)
     }
-  }, [pageCounts])
+  }, [pageCounts, flatten])
 
   const exportBinder = useCallback(async () => {
     if (!pages.length) return setStatus('Nothing to export.')
-    const suggested = `${(session.sources[0]?.name ?? 'binder').replace(/\.pdf$/i, '')}-binder.pdf`
+    const stem = (session.sources[0]?.name ?? 'binder').replace(/\.pdf$/i, '')
+    const suggested = flatten ? `${stem}-binder-flat.pdf` : `${stem}-binder.pdf`
     const out = await window.wpt.chooseBinderOutput(suggested)
     if (out) await exportSession(session, out)
-  }, [session, pages, exportSession])
+  }, [session, pages, exportSession, flatten])
 
   const saveSession = useCallback(
     async (forceDialog = false) => {
@@ -347,16 +455,40 @@ export default function App(): React.JSX.Element {
           ny: 0.3,
           size: 24
         }).session
-        imported = addMark(imported, {
+        const lettered = addMark(imported, {
           page: imported.pages[0].id,
           kind: 'text',
           nx: 0.4,
           ny: 0.45,
           size: 24,
           text: 'F'
+        })
+        imported = lettered.session
+        // A custom stamp, on its own page so the page-0 color checks stay
+        // unambiguous — covers the firm-legend path end to end.
+        imported = addStamp(imported, 'TB')
+        imported = addMark(imported, {
+          page: imported.pages[1].id,
+          kind: 'text',
+          nx: 0.55,
+          ny: 0.25,
+          size: 24,
+          text: 'TB'
         }).session
+        // A tape, keyed the way the 10-key does it: place, then push entries.
+        const tape = addTape(imported, {
+          page: imported.pages[0].id,
+          nx: 0.68,
+          ny: 0.55,
+          entries: [],
+          title: 'Repairs'
+        })
+        imported = tape.session
+        for (const v of [1200, 340, -50]) imported = pushTapeEntry(imported, tape.id, v)
         setSession(imported)
-        setSelectedMarkId(null)
+        // Leave the lettered mark selected so the window snapshot captures the
+        // inspector rather than an empty side panel.
+        setSelectedMarkId(lettered.id)
       }
       if (exportTo && imported) await devRefs.current.exportSession(imported, exportTo, false)
       window.wpt.devRendered()
@@ -367,6 +499,13 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // While the cursor is in a text field, the field owns the keyboard.
+      // Without this, typing reviewer initials armed the F stamp on "F" and
+      // — much worse — deleted a binder page on Backspace. The bookmark rename
+      // input guards itself with stopPropagation; this covers every field.
+      const el = e.target as HTMLElement | null
+      if (el && (el.isContentEditable || /^(input|textarea|select)$/i.test(el.tagName))) return
+
       const mod = e.metaKey || e.ctrlKey
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault()
@@ -403,6 +542,7 @@ export default function App(): React.JSX.Element {
         if (e.key === 'Escape') {
           setArmed(null)
           setSelectedMarkId(null)
+          setActiveTapeId(null)
           return
         }
         if (e.key === 'v' || e.key === 'V') {
@@ -412,6 +552,7 @@ export default function App(): React.JSX.Element {
         if (e.key === 't' || e.key === 'T') return setArmed({ kind: 'tick' })
         if (e.key === 'x' || e.key === 'X') return setArmed({ kind: 'cross' })
         if (e.key === 'f' || e.key === 'F') return setArmed({ kind: 'text', text: 'F' })
+        if (e.key === 'c' || e.key === 'C') return setArmed({ kind: 'tape' })
         if (e.key === '+' || e.key === '=') return resizeMark(4)
         if (e.key === '_' || e.key === '-') return resizeMark(-4)
       }
@@ -569,6 +710,13 @@ export default function App(): React.JSX.Element {
           >
             {reviewerInitials || '—'}
           </button>
+          <button
+            className={armed?.kind === 'tape' ? 'on' : ''}
+            onClick={() => setArmed({ kind: 'tape' })}
+            title="Calculator tape — click the page, then key numbers  (C)"
+          >
+            🖩
+          </button>
         </span>
         <span className="sep" />
         <button onClick={undo} title={`Undo  ${MOD}Z`}>
@@ -617,9 +765,16 @@ export default function App(): React.JSX.Element {
               onGoto={goto}
               armed={armed}
               selectedMarkId={selectedMarkId}
-              onPlaceMark={placeMark}
+              onPlaceMark={placeTool}
               onSelectMark={setSelectedMarkId}
               onMoveMark={moveMark}
+              activeTapeId={activeTapeId}
+              onActivateTape={setActiveTapeId}
+              onCommitTapeEntry={commitTapeEntry}
+              onBackspaceTape={backspaceTape}
+              onMoveTape={moveTape}
+              onTitleTape={titleTape}
+              onDeleteTape={deleteTape}
             />
             <div
               className="splitter"
@@ -651,6 +806,9 @@ export default function App(): React.JSX.Element {
                   setSelected(new Set([id]))
                 }}
               />
+              {selectedMark && (
+                <MarkInspector mark={selectedMark} onChange={editMark} onDelete={deleteMark} />
+              )}
               <div className="panel">
                 <div className="panel-head">
                   <span className="panel-title">Review</span>
@@ -672,6 +830,53 @@ export default function App(): React.JSX.Element {
                     }
                   />
                 </div>
+                {/* Every firm has its own tick-mark legend. Saved stamps live
+                    on the session, so the legend travels with the binder. */}
+                <div className="stamps">
+                  {stamps.length > 0 && (
+                    <div className="stamp-list">
+                      {stamps.map((s) => (
+                        <span
+                          key={s}
+                          className={`stamp${
+                            armed?.kind === 'text' && armed.text === s ? ' on' : ''
+                          }`}
+                        >
+                          <button
+                            className="stamp-arm"
+                            onClick={() => setArmed({ kind: 'text', text: s })}
+                            title={`Place "${s}" — click a tool, then click the page`}
+                          >
+                            {s}
+                          </button>
+                          <button
+                            className="stamp-drop"
+                            onClick={() => dropStamp(s)}
+                            title={`Remove "${s}" from the palette (marks already placed stay)`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="stamp-new">
+                    <input
+                      className="stamp-input"
+                      value={stampDraft}
+                      maxLength={STAMP_MAX_LEN}
+                      placeholder="Add a stamp — TB, PY, A/R…"
+                      onChange={(e) => setStampDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveStamp()
+                        if (e.key === 'Escape') setStampDraft('')
+                      }}
+                    />
+                    <button onClick={saveStamp} disabled={!stampDraft.trim()} title="Save + arm">
+                      +
+                    </button>
+                  </div>
+                </div>
                 <dl className="stats">
                   <dt>Marks</dt>
                   <dd>{session.marks?.length ?? 0}</dd>
@@ -680,6 +885,17 @@ export default function App(): React.JSX.Element {
               <div className="panel">
                 <div className="panel-head">
                   <span className="panel-title">Binder</span>
+                  <label
+                    className="toggle"
+                    title="Burn marks into the page for a binder that leaves the building — nothing a viewer can drag or delete. One-way: a flattened PDF can't be re-edited, so keep the session file as your master."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={flatten}
+                      onChange={(e) => setFlatten(e.target.checked)}
+                    />
+                    Flatten marks
+                  </label>
                 </div>
                 <dl className="stats">
                   <dt>Pages</dt>

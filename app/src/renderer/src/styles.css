@@ -189,6 +189,7 @@ button.link {
 }
 
 .thumb-frame {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   display: flex;
@@ -227,6 +228,29 @@ button.link {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--warning);
+}
+
+/* review coverage at a glance: where the marks are, and how many */
+
+.thumb-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.thumb-mark {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.85);
+}
+
+.thumb-marks-count {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--primary);
 }
 
 /* page view */
@@ -450,6 +474,293 @@ button.link {
 .rev-input:focus {
   outline: none;
   border-color: var(--primary);
+}
+
+/* calculator tape — colors mirror engine appearance.TAPE_* (content, not theme) */
+
+.tapelayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.tape {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  background: #fff;
+  border: 0.8px solid rgb(140 89 38);
+  color: rgb(26 26 31);
+  font-family: var(--mono);
+  white-space: pre;
+  cursor: grab;
+  outline: none;
+}
+
+.tape:active {
+  cursor: grabbing;
+}
+
+.tape.is-active {
+  box-shadow: 0 0 0 2px var(--primary), 0 2px 10px rgb(0 0 0 / 0.14);
+  z-index: 2;
+}
+
+.tape-line {
+  height: 1em;
+}
+
+.tape-title {
+  color: var(--muted);
+}
+
+.tape-rule {
+  overflow: hidden;
+}
+
+.tape-total {
+  font-weight: 700;
+}
+
+.tape-pending {
+  position: relative;
+  color: var(--primary);
+}
+
+/* a blinking caret so a tape mid-entry never looks like a finished one */
+.tape-caret {
+  display: inline-block;
+  width: 0.55em;
+  border-bottom: 1.5px solid var(--primary);
+  animation: tape-blink 1s step-end infinite;
+}
+
+@keyframes tape-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.tape-title-input {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-family: var(--mono);
+  color: var(--text);
+  background: #fffdf7;
+  border: 0;
+  border-bottom: 1px dotted var(--border);
+  padding: 0;
+  outline: none;
+}
+
+.tape-title-input::placeholder {
+  color: #b9b6ad;
+}
+
+.tape-close {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.tape-close:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+/* custom stamps — the firm's own tick-mark legend */
+
+.stamps {
+  padding: 0 var(--md) var(--sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stamp-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--xs);
+}
+
+.stamp {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.stamp.on {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.stamp-arm {
+  font: inherit;
+  font-family: var(--mono);
+  font-weight: 600;
+  color: rgb(26 84 153); /* MARK_COLOR.text — content, not theme */
+  border: 0;
+  background: none;
+  padding: 1px 6px;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stamp-drop {
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: none;
+  padding: 1px 5px;
+}
+
+.stamp-drop:hover {
+  color: var(--error);
+  background: #f1efe9;
+}
+
+.stamp-new {
+  display: flex;
+  gap: var(--xs);
+}
+
+.stamp-input {
+  font: inherit;
+  font-family: var(--mono);
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+}
+
+.stamp-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.stamp-input::placeholder {
+  font-family: var(--ui);
+  color: var(--muted);
+}
+
+/* mark inspector */
+
+.mi-delete {
+  padding: 1px 7px;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  flex: none;
+}
+
+.mi-delete:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.mi-id {
+  display: flex;
+  align-items: center;
+  gap: var(--sm);
+  padding: 0 var(--md) var(--sm);
+}
+
+.mi-glyph {
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 600;
+  min-width: 20px;
+  text-align: center;
+}
+
+.mi-kind {
+  color: var(--muted);
+}
+
+/* "tick" -> "Tick", but "Lettered stamp" keeps its lowercase second word */
+.mi-kind::first-letter {
+  text-transform: uppercase;
+}
+
+.mi-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--xs);
+  padding: 0 var(--md);
+}
+
+.mi-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sm);
+}
+
+.mi-row > span:first-child {
+  color: var(--muted);
+  width: 54px;
+  flex: none;
+}
+
+.mi-row input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+}
+
+.mi-row input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.mi-size {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--xs);
+}
+
+.mi-size button {
+  padding: 0 7px;
+}
+
+.mi-size-val {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  min-width: 22px;
+  text-align: center;
+}
+
+.mi-meta {
+  color: var(--muted);
+  padding-top: 2px;
+}
+
+.mi-meta > span:last-child {
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 /* side panels */

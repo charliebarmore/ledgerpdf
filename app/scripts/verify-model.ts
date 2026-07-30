@@ -17,18 +17,31 @@ import {
   addBookmark,
   addMark,
   addSource,
+  addStamp,
+  addTape,
   buildBookmarks,
   deletePages,
+  formatAmount,
   movePages,
   newSession,
+  normalizeStamp,
   nudgeBookmarkDepth,
+  parseAmount,
   parseSession,
+  popTapeEntry,
+  pushTapeEntry,
+  marksByPage,
   marksOnPage,
   removeBookmark,
   removeMarks,
+  removeStamp,
+  removeTapes,
   rotatePages,
   sanitizeTitle,
   setBookmarkTitle,
+  tapeLines,
+  tapeTotal,
+  tapesOnPage,
   updateMark,
   stripPageCount,
   toExportSpec,
@@ -42,6 +55,7 @@ const ENGINE = path.join(REPO, 'engine')
 const PY = path.join(ENGINE, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python')
 const FIXTURES = path.join(REPO, 'spike', 'fixtures')
 const OUT = path.join(REPO, 'spike', 'out', 'app_binder.pdf')
+const OUT_FLAT = path.join(REPO, 'spike', 'out', 'app_binder_flat.pdf')
 
 const results: Array<[string, boolean, string]> = []
 function check(name: string, ok: boolean, detail = ''): void {
@@ -68,6 +82,18 @@ function runEngine(command: unknown): Promise<any> {
     })
     child.stdin.write(JSON.stringify(command))
     child.stdin.end()
+  })
+}
+
+/** Run a python script in the engine venv and hand back its exit code + output. */
+function runPython(args: string[]): Promise<{ code: number; out: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(PY, args, { cwd: REPO })
+    let out = ''
+    child.stdout.on('data', (d) => (out += d))
+    child.stderr.on('data', (d) => (out += d))
+    child.on('error', (e) => resolve({ code: 1, out: String(e) }))
+    child.on('close', (code) => resolve({ code: code ?? 1, out }))
   })
 }
 
@@ -415,11 +441,220 @@ async function main(): Promise<number> {
   )
   check('removeMarks drops just the named ones', removeMarks(marked, [m2.id]).marks?.length === 1)
 
-  // --- the real thing: export through the engine and re-probe
+  // --- Phase 2 remainder: the mark inspector edits an existing mark in place
+  const inspected = updateMark(marked, m2.id, {
+    text: 'TB',
+    note: 'Tied to trial balance',
+    author: 'RD'
+  })
+  const edited = inspected.marks!.find((m) => m.id === m2.id)!
+  check(
+    'inspector edits letters, note and author after the fact',
+    edited.text === 'TB' && edited.note === 'Tied to trial balance' && edited.author === 'RD',
+    JSON.stringify([edited.text, edited.note, edited.author])
+  )
+  check(
+    'editing a mark never moves it or rewrites its timestamp',
+    edited.nx === 0.3 && edited.ny === 0.6 && edited.created === marked.marks![1].created,
+    `${edited.nx},${edited.ny} created=${edited.created === marked.marks![1].created}`
+  )
+  check(
+    'inspector edits persist through save/reopen',
+    (() => {
+      const rt = parseSession(JSON.parse(JSON.stringify(inspected)))
+      return 'session' in rt && rt.session.marks!.find((m) => m.id === m2.id)?.note ===
+        'Tied to trial balance'
+    })()
+  )
+
+  // --- Phase 2 remainder: marks grouped per page (the thumbnail rail's view)
+  const grouped = marksByPage(marked)
+  check(
+    'marksByPage groups every mark under its own page',
+    grouped.get(marked.pages[0].id)?.length === 2 && grouped.size === 1,
+    `size=${grouped.size}`
+  )
+  check(
+    'marksByPage totals match the session',
+    [...grouped.values()].flat().length === (marked.marks?.length ?? 0)
+  )
+
+  // --- Phase 2 remainder: custom stamps (a firm's own tick-mark legend)
+  check(
+    'stamps are trimmed, de-noised and length-capped',
+    normalizeStamp('  TB  ') === 'TB' &&
+      normalizeStamp(`A/R${String.fromCharCode(0)}`) === 'A/R' &&
+      normalizeStamp('averyverylongstamp').length === 8 &&
+      normalizeStamp('   ') === '',
+    JSON.stringify([normalizeStamp('  TB  '), normalizeStamp('averyverylongstamp')])
+  )
+  let stamped = addStamp(marked, 'TB')
+  stamped = addStamp(stamped, 'PY')
+  check('stamps are saved in order', stamped.stamps?.join(',') === 'TB,PY', String(stamped.stamps))
+  check('duplicate stamps are ignored', addStamp(stamped, 'TB').stamps?.length === 2)
+  check('blank stamps are ignored', addStamp(stamped, '   ') === stamped)
+  check(
+    'removing a stamp leaves marks already placed with it alone',
+    (() => {
+      const withMark = addStamp(stamped, 'ZZ')
+      const placed = addMark(withMark, {
+        page: withMark.pages[0].id,
+        kind: 'text',
+        nx: 0.1,
+        ny: 0.1,
+        size: 24,
+        text: 'ZZ'
+      }).session
+      const dropped = removeStamp(placed, 'ZZ')
+      return !dropped.stamps?.includes('ZZ') && dropped.marks?.some((m) => m.text === 'ZZ') === true
+    })()
+  )
+  check(
+    'stamps survive save/reopen',
+    (() => {
+      const rt = parseSession(JSON.parse(JSON.stringify(stamped)))
+      return 'session' in rt && rt.session.stamps?.join(',') === 'TB,PY'
+    })()
+  )
+  check(
+    'a session file with junk stamps is cleaned, not rejected',
+    (() => {
+      const rt = parseSession({ ...stamped, stamps: ['TB', 'TB', '  ', 42, 'PY'] })
+      return 'session' in rt && rt.session.stamps?.join(',') === 'TB,PY'
+    })()
+  )
+
+  // --- Phase 3: calculator tape
+  //
+  // The arithmetic is the whole product here. A workpaper total that doesn't
+  // foot to the cent is a defect, so the money path is checked before anything
+  // about how it looks.
+  check(
+    'tape sums in whole cents, not floats',
+    tapeTotal([0.1, 0.2]) === 0.3 &&
+      tapeTotal([1200, 340, -50]) === 1490 &&
+      tapeTotal([1.005, 2.005]) === 3.01 &&
+      tapeTotal([]) === 0,
+    `${tapeTotal([0.1, 0.2])} ${tapeTotal([1.005, 2.005])}`
+  )
+  check(
+    'amounts format with grouping and a leading minus',
+    formatAmount(1490) === '1,490.00' &&
+      formatAmount(-50.5) === '-50.50' &&
+      formatAmount(0) === '0.00' &&
+      formatAmount(1234567.891) === '1,234,567.89',
+    [formatAmount(1490), formatAmount(-50.5), formatAmount(1234567.891)].join(' ')
+  )
+  const badKeys = ['', '.', '-', 'abc', '1.2.3', '1-2', ' ']
+  check(
+    'the 10-key buffer parses what a preparer types, and rejects the rest',
+    parseAmount('1200') === 1200 &&
+      parseAmount('1200.5') === 1200.5 &&
+      parseAmount('1,200.50') === 1200.5 &&
+      parseAmount('.75') === 0.75 &&
+      parseAmount('-50') === -50 &&
+      badKeys.every((k) => parseAmount(k) === null),
+    badKeys.filter((k) => parseAmount(k) !== null).join(',')
+  )
+
+  let taped = { ...s, reviewer: 'CJB' } as Session
+  const t1 = addTape(taped, { page: taped.pages[0].id, nx: 0.5, ny: 0.85, entries: [] })
+  taped = t1.session
+  for (const v of [1200, 340, -50]) taped = pushTapeEntry(taped, t1.id, v)
+  check(
+    'keying lines onto a tape accumulates in order',
+    tapesOnPage(taped, taped.pages[0].id)[0].entries.join(',') === '1200,340,-50',
+    String(tapesOnPage(taped, taped.pages[0].id)[0].entries)
+  )
+  check(
+    'a tape carries reviewer initials and a timestamp like a mark does',
+    taped.tapes![0].author === 'CJB' && typeof taped.tapes![0].created === 'string'
+  )
+  check(
+    'backspace takes back the last line only',
+    popTapeEntry(taped, t1.id).tapes![0].entries.join(',') === '1200,340'
+  )
+  check(
+    'backspace on an empty tape is a no-op, not a crash',
+    popTapeEntry(addTape(taped, { page: taped.pages[0].id, nx: 0.1, ny: 0.1, entries: [] }).session,
+      't_missing') !== undefined
+  )
+
+  const titled = { ...taped, tapes: [{ ...taped.tapes![0], title: 'Repairs' }] }
+  const lines = tapeLines(titled.tapes![0])
+  check(
+    'the tape draws caption, right-aligned amounts, a rule and the total',
+    lines.length === 6 &&
+      lines[0].startsWith('Repairs') &&
+      lines[1] === '1,200.00' &&
+      lines[2] === '  340.00' &&
+      lines[3] === '  -50.00' &&
+      /^-+$/.test(lines[4]) &&
+      lines[5] === '1,490.00',
+    JSON.stringify(lines)
+  )
+  check(
+    'every drawn line is the same width — monospace padding IS the alignment',
+    new Set(lines.map((l) => l.length)).size === 1,
+    JSON.stringify(lines.map((l) => l.length))
+  )
+  check(
+    'a tape wide enough for its total stays aligned when a longer number lands',
+    (() => {
+      const big = tapeLines({ ...titled.tapes![0], entries: [1, 1234567.89] })
+      return new Set(big.map((l) => l.length)).size === 1 && big[2] === '1,234,567.89'
+    })()
+  )
+
+  check(
+    'tapes survive save/reopen with their entries intact',
+    (() => {
+      const rt = parseSession(JSON.parse(JSON.stringify(titled)))
+      return 'session' in rt && tapeTotal(rt.session.tapes![0].entries) === 1490 &&
+        rt.session.tapes![0].title === 'Repairs'
+    })()
+  )
+  check(
+    'a tape with junk entries is cleaned, not rejected — a total needs its addends',
+    (() => {
+      const junk = parseSession({
+        ...titled,
+        tapes: [{ ...titled.tapes![0], entries: [100, 'x', null, NaN, 25] }]
+      })
+      return 'session' in junk && junk.session.tapes![0].entries.join(',') === '100,25'
+    })()
+  )
+  check(
+    'deleting a page takes its tapes with it',
+    deletePages(taped, [taped.pages[0].id]).tapes?.length === 0
+  )
+  check('removeTapes drops just the named one', removeTapes(taped, [t1.id]).tapes?.length === 0)
+
+  // --- the real thing: export through the engine and re-probe.
+  //     A tape rides along, low on the page so it can't overlap the marks the
+  //     pixel checks below are looking for.
+  const exportTape = addTape(marked, {
+    page: marked.pages[0].id,
+    nx: 0.5,
+    ny: 0.85,
+    entries: [1200, 340, -50],
+    title: 'Repairs'
+  })
+  marked = exportTape.session
+
   const spec = toExportSpec(marked, OUT)
   check('spec only lists used sources', Object.keys(spec.sources).length === 2)
-  check('spec carries the marks as annotations', spec.annotations.length === 2,
+  check('spec carries marks and tapes as annotations', spec.annotations.length === 3,
     JSON.stringify(spec.annotations.map((a) => a.kind)))
+  const tapeSpec = spec.annotations.find((a) => a.kind === 'tape') as any
+  check(
+    'the tape spec carries BOTH the drawn lines and the structured entries',
+    Array.isArray(tapeSpec?.lines) &&
+      tapeSpec.lines[tapeSpec.lines.length - 1].trim() === '1,490.00' &&
+      tapeSpec.tape.entries.join(',') === '1200,340,-50' &&
+      tapeSpec.tape.total === 1490,
+    JSON.stringify(tapeSpec?.tape)
+  )
   const exported = await runEngine({ cmd: 'export', binder: spec })
   check('engine accepts app-built spec', exported.ok === true, String(exported.error ?? '').slice(0, 300))
   if (!exported.ok) return report()
@@ -463,11 +698,96 @@ async function main(): Promise<number> {
   )
   check(
     'marks land in the exported PDF with metadata',
-    exportedMarks.length === 2 &&
-      exportedMarks.every((m: any) => m.has_ap && m.wpt_data?.author === 'CJB') &&
+    exportedMarks.length === 3 &&
+      exportedMarks.filter((m: any) => m.wpt_kind !== 'tape').every(
+        (m: any) => m.has_ap && m.wpt_data?.author === 'CJB'
+      ) &&
       exportedMarks.some((m: any) => m.wpt_data?.text === 'F'),
     JSON.stringify(exportedMarks.map((m: any) => [m.wpt_kind, m.wpt_data?.author, m.wpt_data?.text]))
   )
+  const exportedTape = exportedMarks.find((m: any) => m.wpt_kind === 'tape')
+  check(
+    'the tape exports with its addends, not just its total',
+    !!exportedTape &&
+      exportedTape.has_ap &&
+      exportedTape.wpt_data?.total === 1490 &&
+      exportedTape.wpt_data?.entries?.join(',') === '1200,340,-50' &&
+      exportedTape.wpt_data?.title === 'Repairs',
+    JSON.stringify(exportedTape?.wpt_data)
+  )
+
+  // --- Phase 2 remainder: flatten-on-export
+  //
+  // The property that matters: flattening changes WHERE the mark lives in the
+  // file (page content, not an annotation) and must not change WHERE it lands
+  // on the sheet. `marked` has a green tick at (0.9, 0.1) and a blue "F" at
+  // (0.3, 0.6), both on the binder's first page.
+  const flatSpec = toExportSpec(marked, OUT_FLAT, { flatten: true })
+  check('flatten flag reaches the engine spec', flatSpec.flatten === true)
+  check(
+    'an ordinary export does not carry the flag at all',
+    toExportSpec(marked, OUT).flatten === undefined
+  )
+
+  const flatExport = await runEngine({ cmd: 'export', binder: flatSpec })
+  check(
+    'engine exports a flattened binder cleanly — marks AND tapes',
+    flatExport.ok === true &&
+      flatExport.result.pages === 5 &&
+      flatExport.result.marks === 3 &&
+      flatExport.result.flattened === true &&
+      flatExport.result.check_problems.length === 0,
+    JSON.stringify(flatExport.error ?? flatExport.result?.check_problems)
+  )
+
+  if (flatExport.ok) {
+    const flatProbe = await runEngine({ cmd: 'probe', path: OUT_FLAT })
+    const leftover = flatProbe.ok
+      ? flatProbe.probe.pages.flatMap((p: any) => (p.annotations ?? []).filter((a: any) => a.wpt_kind))
+      : [null]
+    check(
+      'a flattened binder carries no mark annotations at all',
+      leftover.length === 0,
+      JSON.stringify(leftover.map((m: any) => m?.wpt_kind))
+    )
+
+    // Rendered with pdfium (Chrome/Edge's engine) — same coordinates as the
+    // annotated export, checked pixel-side rather than trusted.
+    const args = ['0', 'green', '0.9', '0.1', 'blue', '0.3', '0.6']
+    const script = path.join(REPO, 'spike', 'check_mark_positions.py')
+    const annotPos = await runPython([script, OUT, ...args])
+    const flatPos = await runPython([script, OUT_FLAT, ...args])
+    check(
+      'flattened marks land exactly where the annotated ones do',
+      annotPos.code === 0 && flatPos.code === 0,
+      flatPos.out.trim().split('\n').join(' | ')
+    )
+
+    // The proof that it is really page content: render with annotations turned
+    // OFF. The annotated binder goes blank; the flattened one still shows.
+    const isContent = await runPython([
+      '-c',
+      [
+        'import sys, numpy as np, pypdfium2 as pdfium',
+        'def green(p):',
+        '    d = pdfium.PdfDocument(p)',
+        '    img = np.asarray(d[0].render(scale=2.0, draw_annots=False).to_pil().convert("RGB"))',
+        '    d.close()',
+        '    r, g, b = (img[:, :, i].astype(int) for i in range(3))',
+        '    return int(((g > 90) & (g > r + 30) & (g > b + 30)).sum())',
+        'a, f = green(sys.argv[1]), green(sys.argv[2])',
+        'print(f"annots-off pixels: annotated={a} flattened={f}")',
+        'sys.exit(0 if a == 0 and f > 50 else 1)'
+      ].join('\n'),
+      OUT,
+      OUT_FLAT
+    ])
+    check(
+      'flattened marks are page content, not annotations',
+      isContent.code === 0,
+      isContent.out.trim()
+    )
+  }
 
   return report()
 }

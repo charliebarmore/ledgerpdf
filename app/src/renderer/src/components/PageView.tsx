@@ -3,12 +3,14 @@ import {
   marksOnPage,
   pageProvenance,
   sourceOf,
+  tapesOnPage,
   type BinderPage,
-  type MarkKind,
-  type Session
+  type Session,
+  type ToolKind
 } from '../session'
 import { renderInto, type Sizing } from '../pdf'
 import { MarkLayer } from './MarkLayer'
+import { TapeLayer } from './TapeLayer'
 
 /** Zoom state: a fit mode, or an absolute scale where 1 = 100%. */
 type Zoom = { mode: 'fitWidth' } | { mode: 'fitPage' } | { mode: 'scale'; factor: number }
@@ -31,7 +33,14 @@ export function PageView({
   selectedMarkId,
   onPlaceMark,
   onSelectMark,
-  onMoveMark
+  onMoveMark,
+  activeTapeId,
+  onActivateTape,
+  onCommitTapeEntry,
+  onBackspaceTape,
+  onMoveTape,
+  onTitleTape,
+  onDeleteTape
 }: {
   session: Session
   page: BinderPage | null
@@ -39,11 +48,18 @@ export function PageView({
   pageIndex: number
   pageCount: number
   onGoto: (index: number) => void
-  armed: { kind: MarkKind; text?: string } | null
+  armed: { kind: ToolKind; text?: string } | null
   selectedMarkId: string | null
   onPlaceMark: (nx: number, ny: number) => void
   onSelectMark: (id: string | null) => void
   onMoveMark: (id: string, nx: number, ny: number) => void
+  activeTapeId: string | null
+  onActivateTape: (id: string | null) => void
+  onCommitTapeEntry: (id: string, value: number) => void
+  onBackspaceTape: (id: string) => void
+  onMoveTape: (id: string, nx: number, ny: number) => void
+  onTitleTape: (id: string, title: string) => void
+  onDeleteTape: (id: string) => void
 }): React.JSX.Element {
   const holder = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -209,6 +225,19 @@ export function PageView({
                   onPlace={onPlaceMark}
                   onSelect={onSelectMark}
                   onMove={onMoveMark}
+                />
+                <TapeLayer
+                  tapes={tapesOnPage(session, page.id)}
+                  width={canvasBox.w}
+                  height={canvasBox.h}
+                  scale={effective}
+                  activeId={activeTapeId}
+                  onActivate={onActivateTape}
+                  onCommit={onCommitTapeEntry}
+                  onBackspace={onBackspaceTape}
+                  onMove={onMoveTape}
+                  onTitle={onTitleTape}
+                  onDelete={onDeleteTape}
                 />
               </div>
             )}

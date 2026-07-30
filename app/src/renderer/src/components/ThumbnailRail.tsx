@@ -1,6 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
-import { pageProvenance, sourceOf, type BinderPage, type Session } from '../session'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  marksByPage,
+  pageProvenance,
+  sourceOf,
+  type BinderPage,
+  type Mark,
+  type Session
+} from '../session'
 import { renderThumb } from '../pdf'
+import { MARK_COLOR } from './MarkLayer'
 
 function Thumb({ session, page }: { session: Session; page: BinderPage }): React.JSX.Element {
   const [url, setUrl] = useState<string | null>(null)
@@ -24,6 +32,33 @@ function Thumb({ session, page }: { session: Session; page: BinderPage }): React
   )
 }
 
+/**
+ * Where the marks sit on this page, as colored dots.
+ *
+ * Deliberately dots and not the glyphs themselves: at rail scale a ✓ is
+ * illegible and a lettered stamp is a smudge, and sizing either correctly would
+ * need the page's point dimensions, which the rail doesn't have. The question
+ * the rail answers is "which pages have I reviewed, and roughly where" — a dot
+ * answers it honestly; a tiny glyph would only imply a precision it doesn't have.
+ */
+function MarkDots({ marks }: { marks: Mark[] }): React.JSX.Element {
+  return (
+    <div className="thumb-marks" aria-hidden="true">
+      {marks.map((m) => (
+        <span
+          key={m.id}
+          className="thumb-mark"
+          style={{
+            left: `${m.nx * 100}%`,
+            top: `${m.ny * 100}%`,
+            background: MARK_COLOR[m.kind]
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
 interface Props {
   session: Session
   selected: Set<string>
@@ -41,6 +76,7 @@ export function ThumbnailRail({
 }: Props): React.JSX.Element {
   const [dropAt, setDropAt] = useState<number | null>(null)
   const railRef = useRef<HTMLDivElement>(null)
+  const marks = useMemo(() => marksByPage(session), [session.marks])
 
   // Keep the current page visible. On a 62-page binder, navigating with the
   // keyboard or the page controls otherwise scrolls the selection off-screen.
@@ -61,7 +97,9 @@ export function ThumbnailRail({
         if (e.currentTarget === e.target) setDropAt(null)
       }}
     >
-      {session.pages.map((page, i) => (
+      {session.pages.map((page, i) => {
+        const pageMarks = marks.get(page.id) ?? []
+        return (
         <div
           key={page.id}
           data-page-id={page.id}
@@ -74,7 +112,9 @@ export function ThumbnailRail({
           ]
             .filter(Boolean)
             .join(' ')}
-          title={`${pageProvenance(session, page)}${page.rotate ? ` · rotated ${page.rotate}°` : ''}`}
+          title={`${pageProvenance(session, page)}${page.rotate ? ` · rotated ${page.rotate}°` : ''}${
+            pageMarks.length ? ` · ${pageMarks.length} mark${pageMarks.length === 1 ? '' : 's'}` : ''
+          }`}
           draggable
           onDragStart={(e) => {
             e.dataTransfer.effectAllowed = 'move'
@@ -99,13 +139,18 @@ export function ThumbnailRail({
         >
           <div className="thumb-frame">
             <Thumb session={session} page={page} />
+            {pageMarks.length > 0 && <MarkDots marks={pageMarks} />}
           </div>
           <div className="thumb-meta">
             <span className="thumb-num">{i + 1}</span>
+            {pageMarks.length > 0 && (
+              <span className="thumb-marks-count">✓{pageMarks.length}</span>
+            )}
             {page.rotate !== 0 && <span className="thumb-badge">{page.rotate}°</span>}
           </div>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

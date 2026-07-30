@@ -7,9 +7,10 @@ moves — pointing at the wrong number on a workpaper, which is worse than usele
 
     python spike/check_mark_positions.py <pdf> <page> <color> <nx> <ny> [...]
 
-`color` is "green" (tick) or "blue" (lettered mark). Repeat the color/nx/ny
-triple to check several marks on one page. Exit 0 if every mark is within
-tolerance of where it was placed.
+`color` is "green" (tick), "blue" (lettered mark), or "brown" (a calculator
+tape's border — its outline's centroid is the tape's center). Repeat the
+color/nx/ny triple to check several marks on one page. Exit 0 if every mark is
+within tolerance of where it was placed.
 """
 
 from __future__ import annotations
@@ -41,6 +42,10 @@ def mask_for(img: np.ndarray, color: str) -> np.ndarray:
         return (g > 90) & (g > r + 30) & (g > b + 30)
     if color == "blue":
         return (b > 90) & (b > r + 30) & (b > g + 20)
+    if color == "brown":
+        # Tape border (0.55, 0.35, 0.15). Disjoint from the tick's green and the
+        # lettered mark's blue, so tapes and marks can be checked on one page.
+        return (r > 100) & (r > g + 30) & (g > b + 20)
     raise SystemExit(f"unknown color {color!r}")
 
 

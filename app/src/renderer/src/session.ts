@@ -52,6 +52,9 @@ export interface UserBookmark {
 /** The review-mark palette. Colors and glyphs are defined by the engine. */
 export type MarkKind = 'tick' | 'cross' | 'text'
 
+/** What the toolbar can arm: a mark to stamp, or a tape to lay down. */
+export type ToolKind = MarkKind | 'tape'
+
 /**
  * A review mark placed on a page. Coordinates are normalized against the page
  * as DISPLAYED (CropBox-relative, rotation applied), with nx left→right and
@@ -78,6 +81,37 @@ export const MARK_SIZE_DEFAULT = 24
 export const MARK_SIZE_MIN = 10
 export const MARK_SIZE_MAX = 72
 
+/**
+ * Custom stamps are short by design — they sit on a workpaper next to a number,
+ * not in a margin note. Anything longer belongs in the mark's note.
+ */
+export const STAMP_MAX_LEN = 8
+
+/**
+ * A calculator tape: the numbers a preparer added up, kept next to the total
+ * they support.
+ *
+ * The whole point is the audit trail. A total on a workpaper with no tape is an
+ * assertion; a total with its addends is evidence. So the entries are stored
+ * structurally — not as the rendered text — and travel into the exported PDF as
+ * /WPT_Data, which is the seam a future tie-out layer reads.
+ */
+export interface Tape {
+  id: string
+  page: string
+  /** Center of the tape card, normalized against the page as displayed. */
+  nx: number
+  ny: number
+  /** The addends, in the order they were keyed. */
+  entries: number[]
+  /** Optional caption above the numbers, e.g. "Repairs & maintenance". */
+  title?: string
+  author?: string
+  created?: string
+}
+
+export const TAPE_TITLE_MAX_LEN = 28
+
 export interface Session {
   formatVersion: number
   sources: SourceDoc[]
@@ -94,6 +128,14 @@ export interface Session {
   marks?: Mark[]
   /** Reviewer initials, stamped as the author of new marks. */
   reviewer?: string
+  /**
+   * Reusable custom text stamps the user defined ("TB", "PY", "A/R", ...).
+   * Every firm has its own tick-mark legend; the fixed palette can't cover it,
+   * so the legend travels with the binder.
+   */
+  stamps?: string[]
+  /** Calculator tapes, anchored to page ids exactly as marks are. */
+  tapes?: Tape[]
 }
 
 export interface BookmarkNode {
@@ -117,6 +159,13 @@ export interface ExportSpec {
   bookmarks: BookmarkNode[]
   /** Engine-side annotation specs — review marks today, tapes/links later. */
   annotations: Array<Record<string, unknown>>
+  /**
+   * Burn our marks into the page content instead of writing them as
+   * annotations. For a binder that leaves the building: nothing to drag off,
+   * nothing a viewer can silently reposition. Omitted when false so an
+   * ordinary export's spec is unchanged.
+   */
+  flatten?: boolean
   output: string
 }
 
@@ -228,6 +277,7 @@ export function deletePages(session: Session, ids: string[]): Session {
     sources: session.sources.filter((s) => used.has(s.id)),
     // Anything anchored to a deleted page goes with it (undo restores both).
     ...(session.marks ? { marks: session.marks.filter((m) => !idSet.has(m.page)) } : {}),
+    ...(session.tapes ? { tapes: session.tapes.filter((t) => !idSet.has(t.page)) } : {}),
     ...(session.bookmarks
       ? { bookmarks: session.bookmarks.filter((b) => !idSet.has(b.page)) }
       : {})
@@ -281,6 +331,168 @@ export function removeMarks(session: Session, ids: string[]): Session {
 export function marksOnPage(session: Session, pageId: string | null): Mark[] {
   if (!pageId) return []
   return (session.marks ?? []).filter((m) => m.page === pageId)
+}
+
+/** Marks grouped by page id — one pass, for views that render every page. */
+export function marksByPage(session: Session): Map<string, Mark[]> {
+  const out = new Map<string, Mark[]>()
+  for (const m of session.marks ?? []) {
+    const list = out.get(m.page)
+    if (list) list.push(m)
+    else out.set(m.page, [m])
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------- tapes
+
+/**
+ * Tape geometry. Must match engine appearance.py — the on-screen card and the
+ * exported card are the same object at two moments, and a preparer who lines a
+ * tape up beside a number expects it to still be there after export.
+ */
+export const TAPE_FONT_SIZE = 9
+export const TAPE_LINE_HEIGHT = 11
+export const TAPE_PAD = 6
+export const TAPE_CHAR_W = TAPE_FONT_SIZE * 0.6 // Courier advance = 0.6 em
+
+/**
+ * Sum in whole cents.
+ *
+ * Money summed as floats gives 1490.0000000001, and a workpaper total that
+ * doesn't foot to the cent is a defect, not a rounding curiosity.
+ */
+export function tapeTotal(entries: number[]): number {
+  return entries.reduce((cents, v) => cents + Math.round(v * 100), 0) / 100
+}
+
+/** "1,200.00" / "-50.00" — adding-machine convention, minus sign not parens. */
+export function formatAmount(value: number): string {
+  const neg = value < 0 || Object.is(value, -0)
+  const abs = Math.abs(value)
+  const [whole, frac] = abs.toFixed(2).split('.')
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return `${neg ? '-' : ''}${grouped}.${frac}`
+}
+
+/**
+ * Parse what the 10-key buffer holds into a number, or null if it isn't one.
+ * Accepts what a preparer actually types: "1200", "1200.5", "1,200.50", ".75".
+ */
+export function parseAmount(raw: string): number | null {
+  const cleaned = raw.replace(/,/g, '').trim()
+  if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(cleaned)) return null
+  const n = Number(cleaned)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * The tape exactly as it will be drawn: right-aligned amounts, a rule, and the
+ * total. Courier is monospace, so padding with spaces IS the alignment — the
+ * engine draws these strings verbatim and sizes the card from the longest one.
+ */
+export function tapeLines(tape: Tape): string[] {
+  const amounts = tape.entries.map(formatAmount)
+  const total = formatAmount(tapeTotal(tape.entries))
+  const title = tape.title?.trim() ?? ''
+  const width = Math.max(total.length, ...amounts.map((a) => a.length), title.length, 8)
+  const pad = (s: string): string => s.padStart(width)
+  return [
+    ...(title ? [title.padEnd(width)] : []),
+    ...amounts.map(pad),
+    '-'.repeat(width),
+    pad(total)
+  ]
+}
+
+/** Displayed size of a tape in points — mirrors engine appearance.tape_size. */
+export function tapeSize(tape: Tape): { w: number; h: number } {
+  const lines = tapeLines(tape)
+  const maxChars = Math.max(1, ...lines.map((l) => l.length))
+  return {
+    w: maxChars * TAPE_CHAR_W + 2 * TAPE_PAD,
+    h: lines.length * TAPE_LINE_HEIGHT + 2 * TAPE_PAD
+  }
+}
+
+export function addTape(
+  session: Session,
+  tape: Omit<Tape, 'id' | 'created' | 'author'> & { author?: string }
+): { session: Session; id: string } {
+  const seq = session.seq + 1
+  const id = `tp_${seq}`
+  const next: Tape = {
+    ...tape,
+    id,
+    author: tape.author ?? session.reviewer ?? '',
+    created: new Date().toISOString()
+  }
+  return { session: { ...session, seq, tapes: [...(session.tapes ?? []), next] }, id }
+}
+
+export function updateTape(session: Session, id: string, patch: Partial<Tape>): Session {
+  return {
+    ...session,
+    tapes: (session.tapes ?? []).map((t) =>
+      t.id === id
+        ? {
+            ...t,
+            ...patch,
+            nx: patch.nx === undefined ? t.nx : Math.min(1, Math.max(0, patch.nx)),
+            ny: patch.ny === undefined ? t.ny : Math.min(1, Math.max(0, patch.ny))
+          }
+        : t
+    )
+  }
+}
+
+/** Key one more addend onto a tape. */
+export function pushTapeEntry(session: Session, id: string, value: number): Session {
+  const tape = (session.tapes ?? []).find((t) => t.id === id)
+  if (!tape) return session
+  return updateTape(session, id, { entries: [...tape.entries, value] })
+}
+
+/** Undo the last keyed addend — the ⌫ a preparer reaches for on a mis-key. */
+export function popTapeEntry(session: Session, id: string): Session {
+  const tape = (session.tapes ?? []).find((t) => t.id === id)
+  if (!tape || tape.entries.length === 0) return session
+  return updateTape(session, id, { entries: tape.entries.slice(0, -1) })
+}
+
+export function removeTapes(session: Session, ids: string[]): Session {
+  const set = new Set(ids)
+  return { ...session, tapes: (session.tapes ?? []).filter((t) => !set.has(t.id)) }
+}
+
+export function tapesOnPage(session: Session, pageId: string | null): Tape[] {
+  if (!pageId) return []
+  return (session.tapes ?? []).filter((t) => t.page === pageId)
+}
+
+// -------------------------------------------------------------- custom stamps
+
+/** Clean a stamp the user typed: one line, no control characters, capped. */
+export function normalizeStamp(raw: string): string {
+  return sanitizeTitle(raw).replace(/\s+/g, ' ').slice(0, STAMP_MAX_LEN).trim()
+}
+
+/**
+ * Save a custom stamp for reuse. Blank and exact duplicates are no-ops, so the
+ * caller can just hand over whatever is in the input box.
+ */
+export function addStamp(session: Session, raw: string): Session {
+  const text = normalizeStamp(raw)
+  if (!text) return session
+  const stamps = session.stamps ?? []
+  if (stamps.includes(text)) return session
+  return { ...session, stamps: [...stamps, text] }
+}
+
+/** Forget a custom stamp. Marks already placed with it are untouched. */
+export function removeStamp(session: Session, text: string): Session {
+  const stamps = (session.stamps ?? []).filter((s) => s !== text)
+  return { ...session, stamps }
 }
 
 // ------------------------------------------------------------------ bookmarks
@@ -574,11 +786,17 @@ function mergeUserBookmarks(
 
 // --------------------------------------------------------------------- export
 
+export interface ExportOptions extends BookmarkOptions {
+  /** Burn marks into page content rather than writing them as annotations. */
+  flatten?: boolean
+}
+
 export function toExportSpec(
   session: Session,
   output: string,
-  bookmarkOpts: BookmarkOptions = {}
+  opts: ExportOptions = {}
 ): ExportSpec {
+  const { flatten = false, ...bookmarkOpts } = opts
   const used = new Set(session.pages.map((p) => p.source))
   const sources: Record<string, string> = {}
   for (const s of session.sources) {
@@ -593,8 +811,9 @@ export function toExportSpec(
       rotate: p.rotate
     })),
     bookmarks: buildBookmarks(session, bookmarkOpts),
-    // Marks whose page survived; the engine reads these as annotations.
-    annotations: (session.marks ?? [])
+    // Marks and tapes whose page survived; the engine reads these as annotations.
+    annotations: [
+      ...(session.marks ?? [])
       .filter((m) => session.pages.some((p) => p.id === m.page))
       .map((m) => ({
         kind: m.kind,
@@ -607,6 +826,26 @@ export function toExportSpec(
         ...(m.note ? { note: m.note } : {}),
         ...(m.created ? { created: m.created } : {})
       })),
+      // Tapes carry BOTH the drawn lines and the structured entries: the lines
+      // are what a viewer shows, the entries are what a tie-out layer reads.
+      ...(session.tapes ?? [])
+        .filter((t) => session.pages.some((p) => p.id === t.page))
+        .map((t) => ({
+          kind: 'tape',
+          page: t.page,
+          nx: t.nx,
+          ny: t.ny,
+          lines: tapeLines(t),
+          tape: {
+            entries: t.entries,
+            total: tapeTotal(t.entries),
+            ...(t.title ? { title: t.title } : {}),
+            ...(t.created ? { created: t.created } : {})
+          },
+          ...(t.author ? { author: t.author } : {})
+        }))
+    ],
+    ...(flatten ? { flatten: true } : {}),
     output
   }
 }
@@ -643,7 +882,33 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
       ...(Array.isArray(s.marks)
         ? { marks: s.marks.filter((m) => pageIds.has(m.page)) }
         : {}),
-      ...(typeof s.reviewer === 'string' ? { reviewer: s.reviewer } : {})
+      ...(Array.isArray(s.tapes)
+        ? {
+            tapes: s.tapes
+              .filter((t) => pageIds.has(t.page))
+              // A tape whose entries didn't survive the round trip would render
+              // a total with nothing behind it — drop the junk, keep the tape.
+              .map((t) => ({
+                ...t,
+                entries: (Array.isArray(t.entries) ? t.entries : []).filter(
+                  (v): v is number => typeof v === 'number' && Number.isFinite(v)
+                )
+              }))
+          }
+        : {}),
+      ...(typeof s.reviewer === 'string' ? { reviewer: s.reviewer } : {}),
+      ...(Array.isArray(s.stamps)
+        ? {
+            stamps: [
+              ...new Set(
+                s.stamps
+                  .filter((x): x is string => typeof x === 'string')
+                  .map(normalizeStamp)
+                  .filter(Boolean)
+              )
+            ]
+          }
+        : {})
     }
   }
 }

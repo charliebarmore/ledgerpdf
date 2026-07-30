@@ -2,7 +2,7 @@
   "name": "workpaper-tool",
   "version": "0.1.0",
   "private": true,
-  "description": "Tax workpaper binder \u2014 organize, mark up, and export PDF binders locally",
+  "description": "Tax workpaper binder — organize, mark up, and export PDF binders locally",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -14,12 +14,17 @@
     "predev": "npm run prepare:assets",
     "prebuild": "npm run prepare:assets",
     "smoke": "node scripts/smoke.mjs",
-    "verify": "npm run typecheck && npm run verify:model && npm run smoke"
+    "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --outfile=out/mcp-server.cjs --log-level=warning",
+    "mcp": "npm run build:mcp && node out/mcp-server.cjs",
+    "verify:mcp": "npm run build:mcp && node scripts/mcp-check.mjs",
+    "verify": "npm run typecheck && npm run verify:model && npm run verify:mcp && npm run smoke"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "pdfjs-dist": "^6.1.200",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

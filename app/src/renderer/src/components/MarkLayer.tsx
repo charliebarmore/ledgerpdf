@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react'
-import type { Mark, MarkKind } from '../session'
+import type { Mark, MarkKind, ToolKind } from '../session'
 
 /**
  * Interactive overlay sitting exactly on top of the rendered page canvas.
@@ -40,8 +40,8 @@ export function MarkLayer({
   height: number
   /** Effective zoom: CSS pixels per PDF point. Marks are sized in points. */
   scale: number
-  /** The palette tool waiting to be placed, if any. */
-  armed: { kind: MarkKind; text?: string } | null
+  /** The palette tool waiting to be placed, if any — a mark or a tape. */
+  armed: { kind: ToolKind; text?: string } | null
   selectedId: string | null
   onPlace: (nx: number, ny: number) => void
   onSelect: (id: string | null) => void
