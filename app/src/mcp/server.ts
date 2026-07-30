@@ -64,10 +64,26 @@ const fail = (
   isError: true
 })
 
-function resolvePdf(p: string): string {
+/** Keep in step with main/index.ts SOURCE_EXTS and engine images.IMAGE_SUFFIXES. */
+const SOURCE_EXTS = [
+  '.pdf',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.jpe',
+  '.gif',
+  '.bmp',
+  '.tif',
+  '.tiff',
+  '.webp'
+]
+
+function resolveSource(p: string): string {
   const abs = path.resolve(p)
   if (!existsSync(abs)) throw new Error(`no such file: ${abs}`)
-  if (!abs.toLowerCase().endsWith('.pdf')) throw new Error(`not a PDF: ${abs}`)
+  if (!SOURCE_EXTS.some((e) => abs.toLowerCase().endsWith(e))) {
+    throw new Error(`not a PDF or supported image: ${abs}`)
+  }
   return abs
 }
 
@@ -141,12 +157,12 @@ server.registerTool(
   {
     title: 'Probe a PDF',
     description:
-      'Inspect a PDF without adding it to the binder: page count, page sizes, rotation, and its bookmark outline. Use to check a file before importing.',
-    inputSchema: { path: z.string().describe('Absolute or relative path to a .pdf') }
+      'Inspect a PDF or image without adding it to the binder: page count, page sizes, rotation, and its bookmark outline. An image reports the single Letter page it would become. Use to check a file before importing.',
+    inputSchema: { path: z.string().describe('Path to a .pdf or an image (png, jpg, tif, ...)') }
   },
   async ({ path: p }) => {
     try {
-      const res = await runEngine({ cmd: 'probe', path: resolvePdf(p) })
+      const res = await runEngine({ cmd: 'probe', path: resolveSource(p) })
       if (!res.ok) return fail(`probe failed: ${res.error}`)
       const probe = res.probe as ProbeWire
       const outline = probe.outline?.length
@@ -246,17 +262,17 @@ server.registerTool(
 server.registerTool(
   'binder_add_pdfs',
   {
-    title: 'Add PDFs to the binder',
+    title: 'Add PDFs or images to the binder',
     description:
-      'Probe each PDF and append all of its pages to the end of the binder, in the order given. The same file may be added twice; each import is a distinct source.',
-    inputSchema: { paths: z.array(z.string()).min(1).describe('Paths to .pdf files') }
+      'Probe each file and append its pages to the end of the binder, in the order given. PDFs contribute all their pages; an image (png, jpg, tif, ...) contributes one Letter page, auto-oriented, with the picture centred. The same file may be added twice; each import is a distinct source.',
+    inputSchema: { paths: z.array(z.string()).min(1).describe('Paths to .pdf or image files') }
   },
   async ({ paths }) => {
     const failed: string[] = []
     let next = session
     for (const p of paths) {
       try {
-        const res = await runEngine({ cmd: 'probe', path: resolvePdf(p) })
+        const res = await runEngine({ cmd: 'probe', path: resolveSource(p) })
         if (res.ok) next = addSource(next, res.probe as ProbeWire)
         else failed.push(`${baseName(p)}: ${res.error}`)
       } catch (e) {

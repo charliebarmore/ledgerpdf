@@ -168,13 +168,50 @@ def make_fixture_b(path: Path) -> None:
         pdf.save(path)
 
 
+def make_image_fixtures(landscape: Path, rotated: Path, png: Path) -> None:
+    """Image sources — the receipt-photo and screenshot cases.
+
+    Each carries a red block in its TOP-LEFT corner, which is what makes
+    orientation assertable after export: if EXIF handling or the page /Rotate is
+    wrong, the block lands on the wrong side of the sheet.
+
+      receipt.jpg      400x300 landscape, no EXIF   -> landscape Letter page
+      receipt_rot.jpg  same pixels, EXIF orient 6   -> portrait page via /Rotate,
+                                                       embedded losslessly
+      screenshot.png   200x500 portrait, has alpha  -> portrait page, re-encoded
+                                                       (PNG isn't DCT) and
+                                                       flattened onto white
+    """
+    from PIL import Image
+
+    photo = Image.new("RGB", (400, 300), (255, 255, 255))
+    for x in range(120):
+        for y in range(80):
+            photo.putpixel((x, y), (220, 30, 30))
+    photo.save(landscape, quality=92)
+
+    exif = photo.getexif()
+    exif[274] = 6  # rotate 90 CW on display — a phone held portrait
+    photo.save(rotated, quality=92, exif=exif)
+
+    shot = Image.new("RGBA", (200, 500), (0, 0, 255, 255))
+    for x in range(60):
+        for y in range(60):
+            shot.putpixel((x, y), (220, 30, 30, 255))
+    shot.save(png)
+
+
 def main() -> dict[str, str]:
     FIXTURES.mkdir(parents=True, exist_ok=True)
     a = FIXTURES / "fixture_a.pdf"
     b = FIXTURES / "fixture_b.pdf"
     make_fixture_a(a)
     make_fixture_b(b)
-    return {"A": str(a), "B": str(b)}
+    img = FIXTURES / "receipt.jpg"
+    img_rot = FIXTURES / "receipt_rot.jpg"
+    shot = FIXTURES / "screenshot.png"
+    make_image_fixtures(img, img_rot, shot)
+    return {"A": str(a), "B": str(b), "IMG": str(img), "IMG_ROT": str(img_rot), "PNG": str(shot)}
 
 
 if __name__ == "__main__":

@@ -17,13 +17,13 @@ function Thumb({ session, page }: { session: Session; page: BinderPage }): React
   useEffect(() => {
     let live = true
     if (!src) return
-    renderThumb(src.id, src.path, page.index, page.rotate)
+    renderThumb(src.id, src.path, page.index, page.rotate, 132, src.kind)
       .then((u) => live && setUrl(u))
       .catch(() => live && setUrl(null))
     return () => {
       live = false
     }
-  }, [src?.id, src?.path, page.index, page.rotate])
+  }, [src?.id, src?.path, src?.kind, page.index, page.rotate])
 
   return url ? (
     <img className="thumb-img" src={url} alt="" draggable={false} />

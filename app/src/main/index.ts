@@ -83,6 +83,19 @@ function runEngine(command: unknown): Promise<EngineOk | EngineErr> {
   })
 }
 
+/**
+ * What may enter a binder. Images become one Letter page each at export — the
+ * engine's images.py is the only place that knows how. Keep this list in step
+ * with IMAGE_SUFFIXES there.
+ */
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'jpe', 'gif', 'bmp', 'tif', 'tiff', 'webp'] as const
+const SOURCE_EXTS = ['pdf', ...IMAGE_EXTS] as const
+
+function isSourcePath(p: string): boolean {
+  const ext = path.extname(p).slice(1).toLowerCase()
+  return (SOURCE_EXTS as readonly string[]).includes(ext)
+}
+
 // --------------------------------------------------------------------- IPC
 
 function registerIpc(): void {
@@ -90,9 +103,13 @@ function registerIpc(): void {
 
   ipcMain.handle('dialog:openPdfs', async () => {
     const res = await dialog.showOpenDialog({
-      title: 'Add PDFs to binder',
+      title: 'Add files to binder',
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+      filters: [
+        { name: 'PDFs and images', extensions: [...SOURCE_EXTS] },
+        { name: 'PDF', extensions: ['pdf'] },
+        { name: 'Images', extensions: [...IMAGE_EXTS] }
+      ]
     })
     if (res.canceled) return []
     for (const p of res.filePaths) allowedInputs.add(path.resolve(p))
@@ -104,7 +121,7 @@ function registerIpc(): void {
     if (!Array.isArray(paths)) return []
     const ok: string[] = []
     for (const p of paths) {
-      if (typeof p === 'string' && p.toLowerCase().endsWith('.pdf')) {
+      if (typeof p === 'string' && isSourcePath(p)) {
         const abs = path.resolve(p)
         allowedInputs.add(abs)
         ok.push(abs)
@@ -113,8 +130,8 @@ function registerIpc(): void {
     return ok
   })
 
-  /** PDF bytes for rendering in the renderer (PDF.js). */
-  ipcMain.handle('fs:readPdf', async (_e, p: unknown) => {
+  /** Source bytes for rendering: a PDF for PDF.js, or an image for the canvas. */
+  ipcMain.handle('fs:readSource', async (_e, p: unknown) => {
     const abs = assertAllowed(allowedInputs, p, 'file')
     const buf = await readFile(abs)
     return new Uint8Array(buf)
@@ -232,7 +249,7 @@ function createWindow(): void {
       const paths = preopen
         .split(path.delimiter)
         .map((p) => path.resolve(p.trim()))
-        .filter((p) => p.toLowerCase().endsWith('.pdf'))
+        .filter(isSourcePath)
       for (const p of paths) allowedInputs.add(p)
       // Optional: WPT_DEV_EXPORT lets the smoke test drive a real export
       // through IPC + the engine without a save dialog.

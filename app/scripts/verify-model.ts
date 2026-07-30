@@ -14,6 +14,8 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import {
   SESSION_FORMAT_VERSION,
+  baseName,
+  imageLayout,
   addBookmark,
   addMark,
   addSource,
@@ -629,6 +631,146 @@ async function main(): Promise<number> {
     deletePages(taped, [taped.pages[0].id]).tapes?.length === 0
   )
   check('removeTapes drops just the named one', removeTapes(taped, [t1.id]).tapes?.length === 0)
+
+  // --- images as pages: a receipt photo and a screenshot are workpaper pages
+  //     like any other. The engine wraps them into Letter pages at export; the
+  //     source files are never touched.
+  const jpg = path.join(FIXTURES, 'receipt.jpg')
+  const jpgRot = path.join(FIXTURES, 'receipt_rot.jpg')
+  const png = path.join(FIXTURES, 'screenshot.png')
+  if (!existsSync(jpg)) {
+    check('image fixtures present', false, 'run spike/make_fixtures.py')
+    return report()
+  }
+
+  const pj = await runEngine({ cmd: 'probe', path: jpg })
+  const pjr = await runEngine({ cmd: 'probe', path: jpgRot })
+  const pp = await runEngine({ cmd: 'probe', path: png })
+  check(
+    'probe treats an image as a one-page source',
+    pj.ok && pj.probe.kind === 'image' && pj.probe.n_pages === 1 && pj.probe.outline.length === 0,
+    JSON.stringify(pj.probe?.kind)
+  )
+  check(
+    'a landscape image gets a landscape Letter page, a portrait one portrait',
+    JSON.stringify(pj.probe.pages[0].mediabox) === JSON.stringify([0, 0, 792, 612]) &&
+      JSON.stringify(pp.probe.pages[0].mediabox) === JSON.stringify([0, 0, 612, 792]),
+    `${JSON.stringify(pj.probe.pages[0].mediabox)} ${JSON.stringify(pp.probe.pages[0].mediabox)}`
+  )
+  check(
+    'EXIF rotation rides on the page /Rotate so the JPEG stays byte-for-byte',
+    pjr.probe.pages[0].rotate === 90 && pjr.probe.image.lossless === true,
+    `rotate=${pjr.probe.pages[0].rotate} lossless=${pjr.probe.image?.lossless}`
+  )
+  check(
+    'a PNG is reported as re-encoded, and says why',
+    pp.probe.image.lossless === false && /JPEG/.test(pp.probe.image.reason),
+    JSON.stringify(pp.probe.image)
+  )
+
+  // The app draws the image preview itself rather than through PDF.js, so the
+  // Letter framing exists twice — imageLayout() in pdf.ts and _layout() in
+  // images.py. If they ever disagree, a mark placed over the picture exports
+  // somewhere else, silently. Check them against each other rather than trust.
+  const layoutMismatches: string[] = []
+  for (const p of [pj, pjr, pp]) {
+    const [pxW, pxH] = p.probe.image.pixels as [number, number]
+    const rot = p.probe.pages[0].rotate as number
+    const quarter = rot === 90 || rot === 270
+    // TS works in DISPLAY space; the engine states the page before /Rotate.
+    const [dispW, dispH] = quarter ? [pxH, pxW] : [pxW, pxH]
+    const ts = imageLayout(dispW, dispH)
+    const want = quarter
+      ? [ts.pageH, ts.pageW, ts.y, ts.x, ts.h, ts.w]
+      : [ts.pageW, ts.pageH, ts.x, ts.y, ts.w, ts.h]
+    const got = [...(p.probe.image.box as number[]), ...(p.probe.image.placement as number[])]
+    if (want.some((v, i) => Math.abs(v - got[i]) > 0.01)) {
+      layoutMismatches.push(
+        `${baseName(p.probe.path)}: app ${want.map((v) => v.toFixed(1))} vs engine ${got.map((v) => v.toFixed(1))}`
+      )
+    }
+  }
+  check(
+    'the app frames an image page exactly as the engine will',
+    layoutMismatches.length === 0,
+    layoutMismatches.join(' | ')
+  )
+
+  let withImages: Session = newSession()
+  withImages = addSource(withImages, pa.probe as ProbeWire)
+  withImages = addSource(withImages, pj.probe as ProbeWire)
+  withImages = addSource(withImages, pp.probe as ProbeWire)
+  check(
+    'the session records which sources are images',
+    withImages.sources.map((s) => s.kind).join(',') === 'pdf,image,image',
+    withImages.sources.map((s) => s.kind).join(',')
+  )
+  check(
+    'an image contributes exactly one page to the binder',
+    withImages.pages.length === 5,
+    `pages=${withImages.pages.length}`
+  )
+  check(
+    'source kind survives save/reopen',
+    (() => {
+      const rt = parseSession(JSON.parse(JSON.stringify(withImages)))
+      return 'session' in rt && rt.session.sources[1].kind === 'image'
+    })()
+  )
+  check(
+    'a session written before image support still reads as all-PDF',
+    (() => {
+      const legacy = JSON.parse(JSON.stringify(withImages))
+      for (const s of legacy.sources) delete s.kind
+      const rt = parseSession(legacy)
+      return 'session' in rt && rt.session.sources.every((s) => s.kind === 'pdf')
+    })()
+  )
+
+  const MIXED_OUT = path.join(REPO, 'spike', 'out', 'app_binder_images.pdf')
+  const mixedExport = await runEngine({
+    cmd: 'export',
+    binder: toExportSpec(withImages, MIXED_OUT)
+  })
+  check(
+    'a binder mixing PDF pages and images exports cleanly',
+    mixedExport.ok === true &&
+      mixedExport.result.pages === 5 &&
+      mixedExport.result.check_problems.length === 0,
+    JSON.stringify(mixedExport.error ?? mixedExport.result?.check_problems)
+  )
+
+  // The property that matters for a photo: the picture must not come out
+  // sideways. Each fixture has a red block in its top-left corner.
+  const rotOut = path.join(REPO, 'spike', 'out', 'app_binder_rotimg.pdf')
+  let rotOnly: Session = newSession()
+  rotOnly = addSource(rotOnly, pjr.probe as ProbeWire)
+  const rotExport = await runEngine({ cmd: 'export', binder: toExportSpec(rotOnly, rotOut) })
+  check('an EXIF-rotated photo exports cleanly', rotExport.ok === true, String(rotExport.error))
+  if (rotExport.ok) {
+    // Upright, the red block sits top-LEFT. Rotated 90 CW it must be top-RIGHT.
+    const corner = await runPython([
+      '-c',
+      [
+        'import sys, numpy as np, pypdfium2 as pdfium',
+        'd = pdfium.PdfDocument(sys.argv[1])',
+        'img = np.asarray(d[0].render(scale=1.0).to_pil().convert("RGB")); d.close()',
+        'r, g, b = (img[:, :, i].astype(int) for i in range(3))',
+        'm = (r > 150) & (r > g + 60) & (r > b + 60)',
+        'ys, xs = np.nonzero(m)',
+        'h, w = m.shape',
+        'cx, cy = xs.mean() / w, ys.mean() / h',
+        'print(f"red at ({cx:.2f},{cy:.2f}) on a {w}x{h} page")',
+        'sys.exit(0 if cx > 0.6 and cy < 0.4 and h > w else 1)'
+      ].join('\n'),
+      rotOut
+    ])
+    check(
+      'an EXIF-rotated photo lands upright, not sideways',
+      corner.code === 0,
+      corner.out.trim()
+    )
+  }
 
   // --- the real thing: export through the engine and re-probe.
   //     A tape rides along, low on the page so it can't overlap the marks the

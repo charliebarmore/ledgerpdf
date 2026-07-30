@@ -13,6 +13,8 @@ import re
 import pikepdf
 from pikepdf import Name
 
+from .images import is_image, probe_image
+
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
@@ -83,6 +85,12 @@ def _annot_summary(annot, page_map) -> dict:
 
 
 def probe_pdf(path: str) -> dict:
+    # An image is a page too. Dispatching here means every caller — the app's
+    # import, the MCP server, the verification harness — gets one probe API and
+    # never has to care which kind of file it pointed at.
+    if is_image(path):
+        return probe_image(path)
+
     with pikepdf.open(path) as pdf:
         page_map = _page_index_map(pdf)
         pages = []

@@ -246,6 +246,36 @@ check(
   reopened.text.split('\n')[0]
 )
 
+// An agent should be able to drop a receipt photo into a binder too.
+await call('binder_new')
+const imgProbe = await call('probe_pdf', { path: path.join(FIXTURES, 'receipt.jpg') })
+check(
+  'probe_pdf handles an image as a one-page source',
+  imgProbe.text.includes('1 page(s)') && !imgProbe.isError,
+  imgProbe.text.split('\n')[0]
+)
+const imgAdd = await call('binder_add_pdfs', {
+  paths: [path.join(FIXTURES, 'receipt.jpg'), path.join(FIXTURES, 'screenshot.png')]
+})
+check(
+  'an agent can add images, one page each',
+  imgAdd.text.includes('Added 2 file(s)') && imgAdd.text.includes('2 page(s)'),
+  imgAdd.text.split('\n')[0]
+)
+const imgOut = path.join(REPO, 'spike', 'out', 'mcp_images.pdf')
+const imgExport = await call('binder_export', { output: imgOut })
+check(
+  'a binder of images exports and validates',
+  !imgExport.isError && imgExport.text.includes('validation: clean'),
+  imgExport.text
+)
+check(
+  'a non-PDF, non-image file is refused with a useful message',
+  (await call('binder_add_pdfs', { paths: [path.join(REPO, 'ROADMAP.md')] })).text.includes(
+    'not a PDF or supported image'
+  )
+)
+
 await call('binder_new')
 check('exporting an empty binder is refused', (await call('binder_export', { output: OUT_PDF })).isError)
 

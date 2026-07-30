@@ -19,11 +19,19 @@ export interface OutlineNode {
   children: OutlineNode[]
 }
 
+/**
+ * What kind of file a source is. An image becomes one Letter page at export —
+ * the engine's images.py owns that — but it renders differently in the app, so
+ * the distinction has to survive save/reopen.
+ */
+export type SourceKind = 'pdf' | 'image'
+
 export interface SourceDoc {
   id: string
   path: string
   name: string
   nPages: number
+  kind: SourceKind
   /** The source's own bookmark tree, to nest under its file-level bookmark. */
   outline: OutlineNode[]
 }
@@ -173,8 +181,11 @@ export interface ExportSpec {
 export interface ProbeWire {
   path: string
   n_pages: number
+  /** Absent for PDFs; "image" when the engine wrapped a picture into a page. */
+  kind?: string
   pages: Array<{ index: number; rotate: number; mediabox: number[]; cropbox: number[] | null }>
   outline: Array<{ title: string; dest_page: number | null; children: unknown[] }>
+  image?: { pixels: number[]; lossless: boolean; reason: string }
 }
 
 // --------------------------------------------------------------- construction
@@ -222,6 +233,7 @@ export function addSource(session: Session, probe: ProbeWire): Session {
     path: probe.path,
     name: baseName(probe.path),
     nPages: probe.n_pages,
+    kind: probe.kind === 'image' ? 'image' : 'pdf',
     outline: normalizeOutline(probe.outline)
   }
   const newPages: BinderPage[] = probe.pages.map((p) => ({
@@ -342,6 +354,45 @@ export function marksByPage(session: Session): Map<string, Mark[]> {
     else out.set(m.page, [m])
   }
   return out
+}
+
+// --------------------------------------------------------------- image pages
+
+/**
+ * Where an image sits on the page it becomes.
+ *
+ * MUST match engine images.py (LETTER, MARGIN, `_layout`). Marks are stored in
+ * normalized PAGE coordinates, so if the app's preview frames the picture
+ * differently from the export, a tick placed on a receipt lands somewhere else
+ * in the PDF. `verify:model` compares the two implementations directly rather
+ * than trusting them to agree.
+ *
+ * Lives in the model, not the render layer, because it decides page geometry —
+ * and because the render layer can't be imported outside a browser build.
+ */
+const LETTER: readonly [number, number] = [612, 792]
+const IMAGE_MARGIN = 18
+
+export interface ImageLayout {
+  /** Page size in points, before any user rotation. */
+  pageW: number
+  pageH: number
+  /** Image rect within the page, measured from the TOP-left. */
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** Fit to Letter, auto-oriented: a portrait image gets a portrait page. */
+export function imageLayout(imgW: number, imgH: number): ImageLayout {
+  const [pw, ph] = imgH >= imgW ? LETTER : [LETTER[1], LETTER[0]]
+  const scale = Math.min((pw - 2 * IMAGE_MARGIN) / imgW, (ph - 2 * IMAGE_MARGIN) / imgH)
+  const w = imgW * scale
+  const h = imgH * scale
+  // Centred, so measuring y from the top matches the engine measuring from the
+  // bottom — no flip is needed here, and none should ever creep in.
+  return { pageW: pw, pageH: ph, x: (pw - w) / 2, y: (ph - h) / 2, w, h }
 }
 
 // ---------------------------------------------------------------------- tapes
@@ -606,8 +657,9 @@ export function nudgeBookmarkDepth(session: Session, key: string, delta: number)
   }
 }
 
-function stripPdfExt(name: string): string {
-  return name.replace(/\.pdf$/i, '')
+/** File-level bookmarks read as document names, not filenames. */
+function stripSourceExt(name: string): string {
+  return name.replace(/\.(pdf|png|jpe?g|jpe|gif|bmp|tiff?|webp)$/i, '')
 }
 
 /**
@@ -711,7 +763,7 @@ export function buildBookmarks(session: Session, opts: BookmarkOptions = {}): Bo
   } else {
     tree = perSource.map(({ source, page, children }) => {
       const key = `f:${source.id}`
-      return { key, title: titled(key, stripPdfExt(source.name)), page, children }
+      return { key, title: titled(key, stripSourceExt(source.name)), page, children }
     })
   }
 
@@ -872,7 +924,8 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
   return {
     session: {
       formatVersion: SESSION_FORMAT_VERSION,
-      sources: s.sources,
+      // Sessions written before image support have no `kind`; they were all PDFs.
+      sources: s.sources.map((x) => ({ ...x, kind: x.kind === 'image' ? 'image' : 'pdf' })),
       pages: s.pages.map((p) => ({ ...p, rotate: p.rotate ?? 0 })),
       seq,
       ...(s.titles && typeof s.titles === 'object' ? { titles: s.titles } : {}),

@@ -9,14 +9,16 @@ const api = {
 
   ping: () => ipcRenderer.invoke('engine:ping'),
 
-  /** Open dialog; returns chosen paths (also authorizes them). */
+  /** Open dialog; returns chosen paths (also authorizes them). PDFs or images. */
   openPdfs: (): Promise<string[]> => ipcRenderer.invoke('dialog:openPdfs'),
 
   /** Authorize drag-dropped / session-restored paths. Returns the accepted ones. */
   registerFiles: (paths: string[]): Promise<string[]> =>
     ipcRenderer.invoke('files:register', paths),
 
-  readPdf: (filePath: string): Promise<Uint8Array> => ipcRenderer.invoke('fs:readPdf', filePath),
+  /** Raw bytes of a source file — a PDF for PDF.js, or an image for the canvas. */
+  readSource: (filePath: string): Promise<Uint8Array> =>
+    ipcRenderer.invoke('fs:readSource', filePath),
 
   probe: (filePath: string): Promise<{ ok: boolean; probe?: unknown; error?: string }> =>
     ipcRenderer.invoke('engine:probe', filePath),

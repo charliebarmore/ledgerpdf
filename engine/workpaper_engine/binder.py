@@ -30,7 +30,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Name, OutlineItem
 
-from . import appearance
+from . import appearance, images
 from .geometry import PageGeom
 from .probe import sanitize_text
 
@@ -113,8 +113,13 @@ def export_binder(spec: dict) -> dict:
     output.parent.mkdir(parents=True, exist_ok=True)
 
     with ExitStack() as stack:
+        # An image source is wrapped into a one-page PDF in memory here and is
+        # then indistinguishable from any other source for the rest of export.
+        # The file on disk is never touched.
         sources: dict[str, pikepdf.Pdf] = {
-            key: stack.enter_context(pikepdf.open(path))
+            key: stack.enter_context(
+                images.image_to_pdf(path) if images.is_image(path) else pikepdf.open(path)
+            )
             for key, path in spec["sources"].items()
         }
         out = stack.enter_context(pikepdf.new())

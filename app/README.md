@@ -23,11 +23,11 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | Script | What it proves |
 |---|---|
 | `typecheck` | main/preload and renderer both typecheck |
-| `verify:model` | 72 checks on the pure session model, ending in **two real engine exports + re-probes** (reorder, rotation, bookmark hoisting, session round-trip, version guard, marks, custom stamps, and a flattened binder pixel-compared against the annotated one) |
-| `verify:mcp` | drives the **MCP server** as a real MCP client through a whole binder build — import, reorder, bookmark, mark, tape, export, save, reopen — plus the error paths, then verifies the PDF it produced |
-| `smoke` | drives the **actual Electron app** headlessly: imports two fixtures → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
+| `verify:model` | 100 checks on the pure session model, ending in **two real engine exports + re-probes** (reorder, rotation, bookmark hoisting, session round-trip, version guard, marks, custom stamps, and a flattened binder pixel-compared against the annotated one) |
+| `verify:mcp` | 32 checks driving the **MCP server** as a real MCP client through a whole binder build — import (PDFs and images), reorder, bookmark, mark, tape, export, save, reopen — plus the error paths, then verifies the PDF it produced |
+| `smoke` | drives the **actual Electron app** headlessly: imports two PDFs and a receipt photo → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 
-Both suites use synthetic fixtures only — **never client documents**.
+All three suites use synthetic fixtures only — **never client documents**.
 
 ## Layout
 
@@ -37,9 +37,9 @@ src/mcp/        local MCP server — agents drive the same model + engine
 src/preload/    the entire renderer API surface (contextBridge)
 src/renderer/
   src/session.ts    the binder model: stable page ids, bookmarks, export spec (pure)
-  src/pdf.ts        PDF.js rendering + per-canvas render cancellation
+  src/pdf.ts        PDF.js rendering, image-page painting, render cancellation
   src/App.tsx       state, undo/redo, keyboard
-  src/components/   ThumbnailRail · PageView · BookmarkPanel · MarkLayer · MarkInspector
+  src/components/   ThumbnailRail · PageView · BookmarkPanel · MarkLayer · MarkInspector · TapeLayer
 scripts/        asset copy, model verification, smoke test
 ```
 
@@ -55,7 +55,8 @@ This app holds client tax documents, so the boundaries are deliberate:
   renderer cannot reach the network. `wasm-unsafe-eval` is present only for
   PDF.js's JBIG2/JPEG2000 decoders.
 - No telemetry. Nothing leaves the machine.
-- Source PDFs are opened read-only; a binder is always written to a new file.
+- Source files are opened read-only; a binder is always written to a new file.
+  Images are converted in memory at export — the original is never rewritten.
 
 ## Keyboard
 
@@ -75,10 +76,10 @@ This app holds client tax documents, so the boundaries are deliberate:
 | `+` `−` | resize the selected mark |
 | `⌫` | delete the selected mark (else the selected pages) |
 | `⌘/Ctrl B` | add a bookmark on the current page |
-| `⌘/Ctrl I` · `E` · `S` · `O` | add PDFs · export · save session · open session |
+| `⌘/Ctrl I` · `E` · `S` · `O` | add files · export · save session · open session |
 
 Click selects, `⌘/Ctrl`-click toggles, `⇧`-click selects a range. Drag thumbnails
-to reorder; drop PDFs onto the window to import.
+to reorder; drop PDFs or images onto the window to import.
 
 While the cursor is in a text field, the field owns the keyboard — none of the
 single-key shortcuts fire. Without that, typing initials armed the `F` stamp and
@@ -96,7 +97,7 @@ Dev builds only (ignored when packaged), used by `npm run smoke`:
 
 | Env var | Effect |
 |---|---|
-| `WPT_DEV_OPEN` | `path`-delimited PDFs to import at startup |
+| `WPT_DEV_OPEN` | `path`-delimited PDFs/images to import at startup |
 | `WPT_DEV_EXPORT` | export to this path (pre-authorized, no dialog) |
 | `WPT_DEV_SHOT` | capture the window to this PNG once loaded |
 | `WPT_DEV_EXIT` | quit after capturing |
@@ -138,6 +139,36 @@ coverage across a 60-page binder is visible without paging through it. Dots, not
 glyphs: at rail scale a ✓ is illegible, and sizing one correctly would need page
 dimensions the rail doesn't have — a dot answers "reviewed, and roughly where"
 without implying precision it doesn't have.
+
+## Images as pages
+
+PNG, JPEG, TIFF, GIF, BMP and WebP can be dropped in alongside PDFs — a phone
+photo of a receipt or a screenshot is a workpaper page like any other. Each
+image becomes **one Letter page, auto-oriented** (portrait image → portrait
+page), with the picture centred inside an 18pt margin. A binder is a document,
+not a photo album: mixed sources have to print and paginate consistently.
+
+**Conversion happens at export, in memory.** The session keeps pointing at
+`receipt.png` untouched, exactly like every other source — no derived files, no
+hidden state, and the invariant the whole app rests on (session = JSON +
+untouched sources, a PDF exists only at export) is preserved. `engine/images.py`
+is the single place that knows how; the rest of the codebase sees an ordinary
+page and orders, marks, tapes, bookmarks and flattens it unchanged.
+
+**A JPEG goes in byte-for-byte.** Its compressed data is embedded raw as
+`/DCTDecode`, so the receipt in the binder is the file the client sent rather
+than a recompression of it — and **EXIF rotation is honoured through the page's
+`/Rotate`**, so a photo taken with the phone held sideways lands upright without
+touching a pixel. Only cases PDF genuinely can't consume fall back to
+re-encoding (losslessly, as Flate): PNG and other non-JPEG formats, CMYK,
+progressive scans, and mirrored EXIF orientations. `probe` reports which
+happened and why, so it is never a silent downgrade.
+
+The app draws image pages itself rather than through PDF.js, which means the
+Letter framing exists **twice** — `imageLayout()` in `session.ts` and `_layout()`
+in `images.py`. If those ever disagree, a tick placed over a receipt exports
+somewhere else, silently. `verify:model` compares the two implementations
+directly rather than trusting them to agree; keep it that way.
 
 ## Calculator tape (Phase 3)
 

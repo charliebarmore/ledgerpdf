@@ -92,7 +92,7 @@ export function PageView({
           ? { mode: 'fitWidth', boxW: box.w }
           : { mode: 'fitPage', boxW: box.w, boxH: box.h }
     setError(null)
-    renderInto(canvas.current, src.id, src.path, page.index, page.rotate, sizing)
+    renderInto(canvas.current, src.id, src.path, page.index, page.rotate, sizing, src.kind)
       .then((zoom) => {
         setEffective(zoom)
         const el = canvas.current

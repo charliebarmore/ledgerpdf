@@ -65,7 +65,10 @@ const flat = (nodes, depth = 0) =>
 
 const a = path.join(FIXTURES, 'fixture_a.pdf')
 const b = path.join(FIXTURES, 'fixture_b.pdf')
-if (!existsSync(a) || !existsSync(b)) {
+// A receipt photo rides along so the app's own image preview — which draws the
+// Letter page itself rather than going through PDF.js — is exercised for real.
+const img = path.join(FIXTURES, 'receipt.jpg')
+if (!existsSync(a) || !existsSync(b) || !existsSync(img)) {
   console.error('fixtures missing — run: engine/.venv/bin/python spike/run_spike.py')
   process.exit(1)
 }
@@ -77,7 +80,7 @@ const app = await run('npm', ['run', 'dev'], {
   cwd: APP,
   env: {
     ...process.env,
-    WPT_DEV_OPEN: [a, b].join(path.delimiter),
+    WPT_DEV_OPEN: [a, b, img].join(path.delimiter),
     WPT_DEV_EXPORT: OUT_PDF,
     WPT_DEV_SHOT: SHOT,
     WPT_DEV_MARKS: '1',
@@ -92,14 +95,25 @@ if (existsSync(OUT_PDF)) {
   const probed = await engine({ cmd: 'probe', path: OUT_PDF })
   check('exported binder parses', probed.ok === true)
   if (probed.ok) {
-    check('6 pages from 2 sources', probed.probe.n_pages === 6, `n_pages=${probed.probe.n_pages}`)
+    check(
+      '7 pages from 2 PDFs and an image',
+      probed.probe.n_pages === 7,
+      `n_pages=${probed.probe.n_pages}`
+    )
+    const last = probed.probe.pages[6]
+    check(
+      'the image became a landscape Letter page at the end of the binder',
+      JSON.stringify(last.mediabox) === JSON.stringify([0, 0, 792, 612]),
+      JSON.stringify(last.mediabox)
+    )
     const got = flat(probed.probe.outline)
     const want = [
       'fixture_a (3 pages) -> 0',
       'fixture_b -> 3',
       '  Schedule X -> 3',
       '    Detail X-1 (2 pages) -> 4',
-      '  Schedule Y (2 pages) -> 4'
+      '  Schedule Y (2 pages) -> 4',
+      'receipt (1 page) -> 6'
     ]
     check('bookmarks nested + retargeted', JSON.stringify(got) === JSON.stringify(want), got.join(' | '))
   }

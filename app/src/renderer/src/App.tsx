@@ -45,7 +45,7 @@ export default function App(): React.JSX.Element {
   const [sessionPath, setSessionPath] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [currentId, setCurrentId] = useState<string | null>(null)
-  const [status, setStatus] = useState('Add PDFs to start a binder.')
+  const [status, setStatus] = useState('Add PDFs or images to start a binder.')
   const [busy, setBusy] = useState(false)
   const [pageCounts, setPageCounts] = useState(true)
   const [flatten, setFlatten] = useState(false)
@@ -591,13 +591,14 @@ export default function App(): React.JSX.Element {
     selectedMarkId
   ])
 
-  /** Drag the divider to widen the bookmark panel — real titles are long. */
+  /** Drag the divider to widen the bookmark panel — real titles are long.
+   *  The panel is on the LEFT, so dragging right widens it. */
   const startResize = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
     const startX = e.clientX
     const startW = sideW
     const onMove = (ev: PointerEvent): void =>
-      setSideW(Math.max(200, Math.min(720, startW + (startX - ev.clientX))))
+      setSideW(Math.max(200, Math.min(720, startW + (ev.clientX - startX))))
     const onUp = (): void => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
@@ -611,10 +612,12 @@ export default function App(): React.JSX.Element {
   const onDrop = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault()
-      const files = [...e.dataTransfer.files].filter((f) => f.name.toLowerCase().endsWith('.pdf'))
-      if (!files.length) return
-      const paths = files.map((f) => window.wpt.pathForFile(f)).filter(Boolean)
+      // Hand everything to the main process — it owns the list of what may
+      // enter a binder and returns only what it authorized.
+      const paths = [...e.dataTransfer.files].map((f) => window.wpt.pathForFile(f)).filter(Boolean)
+      if (!paths.length) return
       const allowed = await window.wpt.registerFiles(paths)
+      if (!allowed.length) return setStatus('Nothing added — drop PDFs or images.')
       await importPaths(allowed)
     },
     [importPaths]
@@ -640,7 +643,7 @@ export default function App(): React.JSX.Element {
       <header className="toolbar">
         <strong className="brand">Workpaper Binder</strong>
         <button onClick={addViaDialog} disabled={busy}>
-          Add PDFs
+          Add files
         </button>
         <span className="sep" />
         <button onClick={() => rotate(-90)} disabled={!count} title="Rotate left  [">
@@ -741,7 +744,7 @@ export default function App(): React.JSX.Element {
         {pages.length === 0 ? (
           <div className="dropzone">
             <div className="dropzone-inner">
-              <p className="dz-title">Drop PDFs here</p>
+              <p className="dz-title">Drop PDFs or images here</p>
               <p className="dz-sub">
                 or <button className="link" onClick={addViaDialog}>choose files</button> · nothing
                 leaves this machine
@@ -750,38 +753,6 @@ export default function App(): React.JSX.Element {
           </div>
         ) : (
           <>
-            <ThumbnailRail
-              session={session}
-              selected={selected}
-              currentId={current?.id ?? null}
-              onSelect={select}
-              onReorder={(ids, before) => apply(movePages(session, ids, before), 'Reordered.')}
-            />
-            <PageView
-              session={session}
-              page={current}
-              pageIndex={currentIndex}
-              pageCount={pages.length}
-              onGoto={goto}
-              armed={armed}
-              selectedMarkId={selectedMarkId}
-              onPlaceMark={placeTool}
-              onSelectMark={setSelectedMarkId}
-              onMoveMark={moveMark}
-              activeTapeId={activeTapeId}
-              onActivateTape={setActiveTapeId}
-              onCommitTapeEntry={commitTapeEntry}
-              onBackspaceTape={backspaceTape}
-              onMoveTape={moveTape}
-              onTitleTape={titleTape}
-              onDeleteTape={deleteTape}
-            />
-            <div
-              className="splitter"
-              onPointerDown={startResize}
-              title="Drag to resize"
-              role="separator"
-            />
             <aside className="side">
               <BookmarkPanel
                 session={session}
@@ -907,6 +878,38 @@ export default function App(): React.JSX.Element {
                 </dl>
               </div>
             </aside>
+            <div
+              className="splitter"
+              onPointerDown={startResize}
+              title="Drag to resize"
+              role="separator"
+            />
+            <PageView
+              session={session}
+              page={current}
+              pageIndex={currentIndex}
+              pageCount={pages.length}
+              onGoto={goto}
+              armed={armed}
+              selectedMarkId={selectedMarkId}
+              onPlaceMark={placeTool}
+              onSelectMark={setSelectedMarkId}
+              onMoveMark={moveMark}
+              activeTapeId={activeTapeId}
+              onActivateTape={setActiveTapeId}
+              onCommitTapeEntry={commitTapeEntry}
+              onBackspaceTape={backspaceTape}
+              onMoveTape={moveTape}
+              onTitleTape={titleTape}
+              onDeleteTape={deleteTape}
+            />
+            <ThumbnailRail
+              session={session}
+              selected={selected}
+              currentId={current?.id ?? null}
+              onSelect={select}
+              onReorder={(ids, before) => apply(movePages(session, ids, before), 'Reordered.')}
+            />
           </>
         )}
       </div>
