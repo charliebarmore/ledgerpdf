@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   HIGHLIGHT_FILL,
   SHAPE_COLORS,
@@ -311,6 +311,14 @@ export function ShapeLayer({
   )
 
   const editing = shapes.find((s) => s.id === selectedId && s.kind === 'textbox')
+  const noteRef = useRef<HTMLTextAreaElement>(null)
+
+  // A NEW note is useless until the caret is in it, and the single-key tool
+  // shortcuts would otherwise eat every letter typed. Only empty ones grab
+  // focus, so selecting an existing note to move it doesn't steal the caret.
+  useEffect(() => {
+    if (editing && !editing.text) noteRef.current?.focus()
+  }, [editing?.id])
 
   return (
     <div
@@ -383,9 +391,10 @@ export function ShapeLayer({
           return (
             <textarea
               key={`t-${s.id}`}
-              className="shape-text"
+              ref={selectedId === s.id ? noteRef : undefined}
+              className={`shape-text${selectedId === s.id ? ' is-editing' : ''}`}
               value={s.text ?? ''}
-              placeholder={editing?.id === s.id ? 'Type a note…' : ''}
+              placeholder={selectedId === s.id ? 'Type a note…' : ''}
               spellCheck={false}
               style={{
                 left,
@@ -396,7 +405,10 @@ export function ShapeLayer({
                 lineHeight: `${13 * scale}px`,
                 padding: 4 * scale,
                 color: SHAPE_COLORS[s.color] ?? SHAPE_COLORS.red,
-                pointerEvents: drawing ? 'none' : 'auto'
+                // Only the SELECTED note takes the pointer. Unselected, the
+                // shape's hit area underneath handles click-to-select and
+                // drag-to-move; a textarea on top would swallow both.
+                pointerEvents: !drawing && selectedId === s.id ? 'auto' : 'none'
               }}
               onFocus={() => onSelect(s.id)}
               onChange={(e) => onText(s.id, e.target.value)}

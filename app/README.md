@@ -304,9 +304,20 @@ The highlighter is a translucent multiply-blend fill, not a stroke — multiply 
 the number underneath stays readable. A highlight that hides what it marks is
 worse than none.
 
-Text notes render through a real `<textarea>` in the app so wrapping and editing
-behave like text; the engine re-wraps with Helvetica metrics at export. Base-14
-fonts only, so nothing is embedded — same rule as the lettered stamps.
+**Text notes** are placed, not sized: a plain click gives a default box rather
+than nothing, since a drag is the wrong gesture for a note. A new note takes
+the caret immediately — without that, the single-key tool shortcuts eat every
+letter you type (`n` re-arms the note tool, `r` arms rectangle…), which is
+exactly how it failed first time round.
+
+Only the SELECTED note takes the pointer. Unselected, the hit area underneath
+handles click-to-select and drag-to-move; a `<textarea>` sitting on top would
+swallow both. Auto-focus is limited to empty notes, so selecting an existing
+one to move it doesn't steal the caret.
+
+They render through a real `<textarea>` so wrapping and editing behave like
+text; the engine re-wraps with Helvetica metrics at export. Base-14 fonts only,
+so nothing is embedded — same rule as the lettered stamps.
 
 ## Calculator tape (Phase 3)
 

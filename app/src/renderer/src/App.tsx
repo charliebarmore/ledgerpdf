@@ -467,14 +467,21 @@ export default function App(): React.JSX.Element {
   const drawShape = useCallback(
     (nx: number, ny: number, nx2: number, ny2: number) => {
       if (!current || !armed || !isShapeKind(armed.kind)) return
-      if (!isDragMeaningful(nx, ny, nx2, ny2)) return
+      let [x2, y2] = [nx2, ny2]
+      if (!isDragMeaningful(nx, ny, x2, y2)) {
+        // A text note is PLACED, not sized — a plain click should give a box
+        // to type in. Every other shape genuinely needs a drag.
+        if (armed.kind !== 'textbox') return
+        x2 = Math.min(1, nx + 0.3)
+        y2 = Math.min(1, ny + 0.07)
+      }
       const { session: next, id } = addShape(session, {
         page: current.id,
         kind: armed.kind,
         nx,
         ny,
-        nx2,
-        ny2,
+        nx2: x2,
+        ny2: y2,
         color: shapeColor,
         width: SHAPE_WIDTH_DEFAULT,
         ...(armed.kind === 'textbox' ? { text: '' } : {})
