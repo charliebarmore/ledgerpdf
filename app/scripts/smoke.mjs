@@ -143,7 +143,7 @@ if (existsSync(OUT_PDF)) {
     'a tape keyed in the app exports with its addends and total',
     !!tape &&
       tape.has_ap &&
-      tape.wpt_data?.entries?.join(',') === '1200,340,-50' &&
+      tape.wpt_data?.entries?.map((e) => `${e.op}${e.value}`).join(',') === '+1200,+340,-50' &&
       tape.wpt_data?.total === 1490,
     JSON.stringify(tape?.wpt_data)
   )

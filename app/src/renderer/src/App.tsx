@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookmarkPanel } from './components/BookmarkPanel'
 import { MarkInspector } from './components/MarkInspector'
 import { ShapeInspector } from './components/ShapeInspector'
+import { Keypad } from './components/Keypad'
 import { PageView } from './components/PageView'
 import { ThumbnailRail } from './components/ThumbnailRail'
 import { MARK_COLOR } from './components/MarkLayer'
@@ -23,8 +24,11 @@ import {
   newSession,
   nudgeBookmarkDepth,
   parseSession,
+  parseAmount,
   popTapeEntry,
   pushTapeEntry,
+  removeTapeEntry,
+  updateTapeEntry,
   removeBookmark,
   removeMarks,
   isShapeKind,
@@ -46,6 +50,8 @@ import {
   type ProbeWire,
   type Shape,
   type ShapeColor,
+  type TapeEntry,
+  type TapeOp,
   type Session,
   type SourceDoc,
   type ToolKind
@@ -74,12 +80,19 @@ export default function App(): React.JSX.Element {
   const [armed, setArmed] = useState<{ kind: ToolKind; text?: string } | null>(null)
   const [selectedMarkId, setSelectedMarkId] = useState<string | null>(null)
   const [activeTapeId, setActiveTapeId] = useState<string | null>(null)
+  const [tapeBuffer, setTapeBuffer] = useState('')
+  const [tapeOp, setTapeOp] = useState<TapeOp>('+')
+  const [keypadOpen, setKeypadOpen] = useState(true)
   const [markSize] = useState(MARK_SIZE_DEFAULT)
   const [stampDraft, setStampDraft] = useState('')
   const [addingStamp, setAddingStamp] = useState(false)
   const [shapeColor, setShapeColor] = useState<ShapeColor>('red')
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
   const shapeArmed = !!armed && isShapeKind(armed.kind)
+  const activeTape = useMemo(
+    () => (session.tapes ?? []).find((t) => t.id === activeTapeId) ?? null,
+    [session.tapes, activeTapeId]
+  )
   const reviewerInitials = session.reviewer ?? ''
   const stamps = session.stamps ?? []
   const past = useRef<Session[]>([])
@@ -286,7 +299,16 @@ export default function App(): React.JSX.Element {
     (nx: number, ny: number) => {
       if (!current || !armed) return
       if (armed.kind === 'tape') {
-        const { session: next, id } = addTape(session, { page: current.id, nx, ny, entries: [] })
+        const onPage = (session.tapes ?? []).filter((t) => t.page === current.id).length
+        const { session: next, id } = addTape(session, {
+          page: current.id,
+          nx,
+          ny,
+          entries: [],
+          section: onPage + 1
+        })
+        setKeypadOpen(true)
+        setTapeBuffer('')
         apply(next, 'Tape placed — key a number, Enter after each. Esc when done.')
         setActiveTapeId(id)
         setSelectedMarkId(null)
@@ -352,27 +374,71 @@ export default function App(): React.JSX.Element {
 
   // ---------------------------------------------------------- calculator tape
 
-  /** Enter commits a line. Each committed line is one undo step. */
-  const commitTapeEntry = useCallback(
-    (id: string, value: number) => {
-      const next = pushTapeEntry(session, id, value)
-      const tape = next.tapes?.find((t) => t.id === id)
-      apply(
-        next,
-        `${formatAmount(value)} — total ${formatAmount(tapeTotal(tape?.entries ?? []))}`
-      )
+  /**
+   * One key router for the tape, used by BOTH the keyboard and the on-screen
+   * keypad — so a button and a keystroke can never drift apart.
+   */
+  const tapeKey = useCallback(
+    (key: string) => {
+      const id = activeTapeId
+      if (!id) return
+      const commit = (op: TapeOp): void => {
+        const value = parseAmount(tapeBuffer)
+        if (value === null) return
+        const next = pushTapeEntry(session, id, { value: Math.abs(value), op: value < 0 ? (op === '+' ? '-' : '+') : op })
+        const tape = next.tapes?.find((t) => t.id === id)
+        apply(next, `${op}${formatAmount(Math.abs(value))} — total ${formatAmount(tapeTotal(tape?.entries ?? []))}`)
+        setTapeBuffer('')
+        setTapeOp('+')
+      }
+
+      if (/^[0-9]$/.test(key)) return setTapeBuffer((b) => (b === '0' ? key : b + key))
+      if (key === '00' || key === '000') return setTapeBuffer((b) => (b ? b + key : b))
+      if (key === '.') return setTapeBuffer((b) => (b.includes('.') ? b : (b || '0') + '.'))
+      if (key === '±') return setTapeBuffer((b) => (b.startsWith('-') ? b.slice(1) : `-${b}`))
+      if (key === '+') return commit('+')
+      if (key === '-') return commit('-')
+      if (key === 'Enter' || key === '=') return commit(tapeOp)
+      if (key === 'C') {
+        setTapeBuffer('')
+        return setTapeOp('+')
+      }
+      if (key === 'CE') return setTapeBuffer('')
+      if (key === 'Backspace' || key === 'Delete') {
+        // Take back the keystroke first; only then the last committed line.
+        if (tapeBuffer) return setTapeBuffer((b) => b.slice(0, -1))
+        const next = popTapeEntry(session, id)
+        if (next === session) return
+        const tape = next.tapes?.find((t) => t.id === id)
+        return apply(next, `Line removed — total ${formatAmount(tapeTotal(tape?.entries ?? []))}`)
+      }
+      if (key === 'Escape') {
+        const tape = session.tapes?.find((t) => t.id === id)
+        // An untouched tape shouldn't linger as an empty card on the workpaper.
+        if (tape && tape.entries.length === 0 && !tapeBuffer && !tape.title) {
+          apply(removeTapes(session, [id]), 'Tape discarded.')
+        }
+        setTapeBuffer('')
+        setActiveTapeId(null)
+      }
     },
-    [session, apply]
+    [activeTapeId, tapeBuffer, tapeOp, session, apply]
   )
 
-  const backspaceTape = useCallback(
-    (id: string) => {
-      const next = popTapeEntry(session, id)
-      if (next === session) return
-      const tape = next.tapes?.find((t) => t.id === id)
-      apply(next, `Line removed — total ${formatAmount(tapeTotal(tape?.entries ?? []))}`)
+  const editTapeEntry = useCallback(
+    (index: number, patch: Partial<TapeEntry>) => {
+      if (!activeTapeId) return
+      apply(updateTapeEntry(session, activeTapeId, index, patch), 'Tape line updated.')
     },
-    [session, apply]
+    [activeTapeId, session, apply]
+  )
+
+  const removeTapeLine = useCallback(
+    (index: number) => {
+      if (!activeTapeId) return
+      apply(removeTapeEntry(session, activeTapeId, index), 'Tape line removed.')
+    },
+    [activeTapeId, session, apply]
   )
 
   // Dragging and captioning fire continuously; fold each gesture into the undo
@@ -389,6 +455,7 @@ export default function App(): React.JSX.Element {
     (id: string) => {
       apply(removeTapes(session, [id]), `Tape deleted. ${MOD}Z to undo.`)
       setActiveTapeId(null)
+      setTapeBuffer('')
     },
     [session, apply]
   )
@@ -1136,8 +1203,9 @@ export default function App(): React.JSX.Element {
               onMoveMark={moveMark}
               activeTapeId={activeTapeId}
               onActivateTape={setActiveTapeId}
-              onCommitTapeEntry={commitTapeEntry}
-              onBackspaceTape={backspaceTape}
+              tapeBuffer={tapeBuffer}
+              tapeOp={tapeOp}
+              onTapeKey={tapeKey}
               onMoveTape={moveTape}
               onTitleTape={titleTape}
               onDeleteTape={deleteTape}
@@ -1159,6 +1227,18 @@ export default function App(): React.JSX.Element {
           </>
         )}
       </div>
+
+      {activeTape && keypadOpen && (
+        <Keypad
+          tape={activeTape}
+          buffer={tapeBuffer}
+          onKey={tapeKey}
+          onEditEntry={editTapeEntry}
+          onRemoveEntry={removeTapeLine}
+          onClose={() => setKeypadOpen(false)}
+          onNewTape={() => setArmed({ kind: 'tape' })}
+        />
+      )}
 
       <footer className="statusbar">
         <span className={busy ? 'working' : ''}>{busy ? 'Working…' : status}</span>

@@ -225,7 +225,9 @@ if (probe.ok) {
   const t = annots.find((x) => x.wpt_kind === 'tape')
   check(
     'the tape is in the PDF with its addends and total',
-    !!t && t.wpt_data?.total === 1490 && t.wpt_data?.entries?.join(',') === '1200,340,-50',
+    !!t &&
+      t.wpt_data?.total === 1490 &&
+      t.wpt_data?.entries?.map((e) => `${e.op}${e.value}`).join(',') === '+1200,+340,-50',
     JSON.stringify(t?.wpt_data)
   )
   const titles = JSON.stringify(probe.probe.outline)

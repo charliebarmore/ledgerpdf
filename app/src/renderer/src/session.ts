@@ -169,14 +169,26 @@ export const STAMP_MAX_LEN = 8
  * structurally — not as the rendered text — and travel into the exported PDF as
  * /WPT_Data, which is the seam a future tie-out layer reads.
  */
+/** What an adding machine actually records per line: a figure and the key. */
+export type TapeOp = '+' | '-'
+
+export interface TapeEntry {
+  value: number
+  op: TapeOp
+  /** Optional per-line label — the "Note" column. */
+  note?: string
+}
+
 export interface Tape {
   id: string
   page: string
   /** Center of the tape card, normalized against the page as displayed. */
   nx: number
   ny: number
-  /** The addends, in the order they were keyed. */
-  entries: number[]
+  /** The lines, in the order they were keyed. */
+  entries: TapeEntry[]
+  /** Section number shown in the line labels ("2 - 1"). */
+  section?: number
   /** Optional caption above the numbers, e.g. "Repairs & maintenance". */
   title?: string
   author?: string
@@ -600,8 +612,21 @@ export const TAPE_CHAR_W = TAPE_FONT_SIZE * 0.6 // Courier advance = 0.6 em
  * Money summed as floats gives 1490.0000000001, and a workpaper total that
  * doesn't foot to the cent is a defect, not a rounding curiosity.
  */
-export function tapeTotal(entries: number[]): number {
-  return entries.reduce((cents, v) => cents + Math.round(v * 100), 0) / 100
+export function tapeTotal(entries: TapeEntry[]): number {
+  return (
+    entries.reduce(
+      (cents, e) => cents + (e.op === '-' ? -1 : 1) * Math.round(e.value * 100),
+      0
+    ) / 100
+  )
+}
+
+/** Accept a bare number as a "+" line — the old shape, and a convenient input. */
+export function toTapeEntry(v: TapeEntry | number): TapeEntry {
+  if (typeof v === 'number') {
+    return v < 0 ? { value: -v, op: '-' } : { value: v, op: '+' }
+  }
+  return { value: v.value, op: v.op === '-' ? '-' : '+', ...(v.note ? { note: v.note } : {}) }
 }
 
 /** "1,200.00" / "-50.00" — adding-machine convention, minus sign not parens. */
@@ -625,21 +650,45 @@ export function parseAmount(raw: string): number | null {
 }
 
 /**
- * The tape exactly as it will be drawn: right-aligned amounts, a rule, and the
- * total. Courier is monospace, so padding with spaces IS the alignment — the
- * engine draws these strings verbatim and sizes the card from the longest one.
+ * The tape exactly as it will be drawn — the columnar adding-machine grid:
+ *
+ *     1 - 0 |          |            |
+ *     1 - 1 | Jan fee  |   1,200.00 | +
+ *     1 - 2 |          |     340.00 | +
+ *     1 - T | Total    |   1,490.00 | *
+ *
+ * Section-and-line labels make every figure addressable, which is what turns a
+ * column of numbers into something a reviewer can point at. The engine draws
+ * these strings verbatim in Courier, so padding with spaces IS the alignment.
  */
 export function tapeLines(tape: Tape): string[] {
-  const amounts = tape.entries.map(formatAmount)
+  const section = tape.section ?? 1
+  const rows = tape.entries.map((e, i) => ({
+    label: `${section} - ${i + 1}`,
+    note: e.note?.trim() ?? '',
+    amount: formatAmount(e.value),
+    op: e.op
+  }))
   const total = formatAmount(tapeTotal(tape.entries))
+  const headLabel = `${section} - 0`
+  const totalLabel = `${section} - T`
+
+  const labelW = Math.max(headLabel.length, totalLabel.length, ...rows.map((r) => r.label.length))
+  const noteW = Math.max(8, ...rows.map((r) => r.note.length), 'Total'.length)
+  const amtW = Math.max(total.length, ...rows.map((r) => r.amount.length), 8)
+
+  // The op column is one character wide even when empty, or the header row
+  // comes out a character short and the card's right edge looks ragged.
+  const line = (label: string, note: string, amount: string, op: string): string =>
+    `${label.padEnd(labelW)} | ${note.padEnd(noteW)} | ${amount.padStart(amtW)} | ${op.padEnd(1)}`
+
+  const gridW = line(headLabel, '', '', '').length
   const title = tape.title?.trim() ?? ''
-  const width = Math.max(total.length, ...amounts.map((a) => a.length), title.length, 8)
-  const pad = (s: string): string => s.padStart(width)
   return [
-    ...(title ? [title.padEnd(width)] : []),
-    ...amounts.map(pad),
-    '-'.repeat(width),
-    pad(total)
+    ...(title ? [title.padEnd(gridW)] : []),
+    line(headLabel, '', '', ''),
+    ...rows.map((r) => line(r.label, r.note, r.amount, r.op)),
+    line(totalLabel, 'Total', total, '*')
   ]
 }
 
@@ -684,18 +733,42 @@ export function updateTape(session: Session, id: string, patch: Partial<Tape>): 
   }
 }
 
-/** Key one more addend onto a tape. */
-export function pushTapeEntry(session: Session, id: string, value: number): Session {
+/** Key one more line onto a tape. */
+export function pushTapeEntry(
+  session: Session,
+  id: string,
+  entry: TapeEntry | number
+): Session {
   const tape = (session.tapes ?? []).find((t) => t.id === id)
   if (!tape) return session
-  return updateTape(session, id, { entries: [...tape.entries, value] })
+  return updateTape(session, id, { entries: [...tape.entries, toTapeEntry(entry)] })
 }
 
-/** Undo the last keyed addend — the ⌫ a preparer reaches for on a mis-key. */
+/** Undo the last keyed line — the ⌫ a preparer reaches for on a mis-key. */
 export function popTapeEntry(session: Session, id: string): Session {
   const tape = (session.tapes ?? []).find((t) => t.id === id)
   if (!tape || tape.entries.length === 0) return session
   return updateTape(session, id, { entries: tape.entries.slice(0, -1) })
+}
+
+/** Edit one line in place — its figure, its operator, or its note. */
+export function updateTapeEntry(
+  session: Session,
+  id: string,
+  index: number,
+  patch: Partial<TapeEntry>
+): Session {
+  const tape = (session.tapes ?? []).find((t) => t.id === id)
+  if (!tape || index < 0 || index >= tape.entries.length) return session
+  const entries = tape.entries.map((e, i) => (i === index ? { ...e, ...patch } : e))
+  return updateTape(session, id, { entries })
+}
+
+/** Remove one line, so a mis-key in the middle doesn't mean retyping the tape. */
+export function removeTapeEntry(session: Session, id: string, index: number): Session {
+  const tape = (session.tapes ?? []).find((t) => t.id === id)
+  if (!tape || index < 0 || index >= tape.entries.length) return session
+  return updateTape(session, id, { entries: tape.entries.filter((_, i) => i !== index) })
 }
 
 export function removeTapes(session: Session, ids: string[]): Session {
@@ -1169,9 +1242,15 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
               // a total with nothing behind it — drop the junk, keep the tape.
               .map((t) => ({
                 ...t,
-                entries: (Array.isArray(t.entries) ? t.entries : []).filter(
-                  (v): v is number => typeof v === 'number' && Number.isFinite(v)
-                )
+                // Sessions written before per-line operators stored bare
+                // numbers; a negative one was a subtraction.
+                entries: (Array.isArray(t.entries) ? t.entries : [])
+                  .filter(
+                    (v) =>
+                      (typeof v === 'number' && Number.isFinite(v)) ||
+                      (v && typeof v === 'object' && Number.isFinite((v as TapeEntry).value))
+                  )
+                  .map(toTapeEntry)
               }))
           }
         : {}),

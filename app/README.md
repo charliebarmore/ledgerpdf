@@ -304,36 +304,59 @@ fonts only, so nothing is embedded — same rule as the lettered stamps.
 
 ## Calculator tape (Phase 3)
 
-`C` (or the 🖩 button), then click the page. The tape is a **10-key adding
-machine**, because that is the muscle memory every preparer already has:
+`Tape` in the palette (or `C`), then click the page. A **10 Key panel** opens
+beside it with the tape's lines and a keypad.
+
+The tape is an adding-machine grid, the format a preparer recognises:
+
+```
+Repairs
+1 - 0 |         |          |
+1 - 1 | Jan fee | 1,200.00 | +
+1 - 2 |         |   340.00 | +
+1 - 3 | credit  |    50.00 | -
+1 - T | Total   | 1,490.00 | *
+```
+
+Section-and-line labels make every figure addressable — that is what lets a
+reviewer point at `1 - 3` rather than "the third number". Each line carries an
+optional note and its operator.
 
 | Keys | Action |
 |---|---|
-| `0`–`9` `.` | key into the current line |
-| `Enter` | commit the line; the running total updates |
-| `-` / `+` | flip the sign of the line being keyed |
-| `⌫` | take back the keystroke — or, once the buffer is empty, the last committed line |
-| `Esc` | put the tape down (an untouched tape deletes itself rather than leaving an empty card) |
+| `0`–`9` `.` `00` | key into the current line |
+| `+` or `Enter` | commit the line as an addition |
+| `-` | commit it as a subtraction |
+| `±` | flip the sign of what is being keyed |
+| `⌫` | take back the keystroke — or, once empty, the last committed line |
+| `C` / `CE` | clear everything / clear the current figure |
+| `Esc` | put the tape down (an untouched tape deletes itself) |
 
-Each committed line is one undo step. The caption field above the numbers is
-optional and is what makes the tape a workpaper artifact rather than a
-calculator — "Repairs" beside a total is the thing a reviewer needs.
+**Every button routes through the same key handler as the keyboard**
+(`tapeKey` in `App.tsx`), so the panel and typing cannot drift apart. The
+panel is a second way in, not the primary one — typing is faster than clicking
+digits.
 
-**Money is summed in whole cents**, never as floats. `0.1 + 0.2` must be `0.30`
-and a total that doesn't foot to the cent is a defect, not a rounding curiosity.
+In the panel each line's note is editable, its operator toggles, and it can be
+deleted individually: a mis-key in the middle shouldn't mean retyping the tape.
+
+**× and ÷ are deliberately absent.** Every line is an addition or a
+subtraction, which is what lets the total be summed in **exact cents** and
+always foot to what is printed. Multiply and divide would need a rounding rule
+— round each line, or carry precision and round only the total — and a tape
+that doesn't foot to the penny is a defect in a workpaper, not a rounding
+curiosity. Adding them is a decision, not a keystroke.
 
 **Entries are stored structurally, not as the rendered text.** A total on a
-workpaper with no addends is an assertion; a total with its addends is evidence.
-Both go into the PDF: the drawn lines are what any viewer shows, and the entries
-plus total ride along in `/WPT_Data` — which is the seam the AI tie-out layer
-reads later.
+workpaper with no addends is an assertion; a total with its addends is
+evidence. Both go into the PDF: the drawn lines are what any viewer shows, and
+the entries, operators, notes and total ride along in `/WPT_Data` — the seam
+the AI tie-out layer reads.
 
-The card's geometry mirrors `engine/workpaper_engine/appearance.py` (`TAPE_*`)
-exactly — same font size, line height, padding, and Courier character advance —
-so the tape you line up beside a number on screen is the tape that lands in the
-PDF. Alignment is monospace padding, which is why the right-aligned amounts
-survive the trip verbatim. `npm run smoke` pixel-checks the tape's position in
-pdfium alongside the marks.
+The card's geometry mirrors `engine/workpaper_engine/appearance.py` (`TAPE_*`),
+and the card is built from the model's `tapeLines()` — the same strings the
+engine draws — so the preview and the PDF cannot drift. `npm run smoke`
+pixel-checks the tape's position in pdfium.
 
 ## Flatten on export
 

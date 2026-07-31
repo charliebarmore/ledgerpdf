@@ -1130,3 +1130,185 @@ button.link {
   font-family: var(--mono);
   font-size: 12px;
 }
+
+
+/* ---------------------------------------------------------------- 10 key */
+
+.keypad {
+  position: fixed;
+  right: var(--lg);
+  bottom: 44px;
+  width: 300px;
+  z-index: 50;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.kp-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px var(--sm);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  cursor: grab;
+}
+
+.kp-close {
+  border: 0;
+  background: none;
+  padding: 0 4px;
+  color: var(--muted);
+}
+
+/* the tape's lines, editable */
+.kp-tape {
+  max-height: 160px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.kp-row {
+  display: grid;
+  grid-template-columns: 44px 1fr 76px 18px 18px;
+  align-items: center;
+  gap: 2px;
+  padding: 1px var(--sm);
+}
+
+.kp-row:nth-child(even) {
+  background: #faf9f6;
+}
+
+.kp-head {
+  font-family: var(--ui);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+}
+
+.kp-label {
+  color: var(--muted);
+}
+
+.kp-amt {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.kp-note {
+  font: inherit;
+  font-family: var(--ui);
+  border: 0;
+  background: transparent;
+  min-width: 0;
+  padding: 0 2px;
+  color: var(--text);
+}
+
+.kp-note:focus {
+  outline: none;
+  background: #fffdf7;
+}
+
+.kp-op,
+.kp-del {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.kp-op {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.kp-del:hover {
+  color: var(--error);
+}
+
+.kp-total {
+  border-top: 1px solid var(--border);
+  font-weight: 700;
+  background: var(--surface);
+}
+
+.kp-note-static,
+.kp-op-static {
+  color: var(--muted);
+  padding: 0 2px;
+}
+
+.kp-display {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  padding: 6px var(--sm);
+  background: #f4f6f4;
+  border-bottom: 1px solid var(--border);
+}
+
+.kp-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: var(--sm);
+}
+
+.kp-key {
+  padding: 9px 0;
+  font-size: 14px;
+}
+
+.kp-wide {
+  grid-column: span 2;
+}
+
+.kp-op-key {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.kp-enter {
+  grid-column: span 4;
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  font-weight: 500;
+}
+
+.kp-enter:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.kp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sm);
+  padding: 0 var(--sm) var(--sm);
+}
+
+.kp-hint {
+  font-size: 10px;
+  color: var(--muted);
+}

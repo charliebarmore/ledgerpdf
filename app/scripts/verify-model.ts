@@ -51,6 +51,7 @@ import {
   setBookmarkTitle,
   tapeLines,
   tapeTotal,
+  toTapeEntry,
   tapesOnPage,
   updateMark,
   stripPageCount,
@@ -545,11 +546,11 @@ async function main(): Promise<number> {
   // about how it looks.
   check(
     'tape sums in whole cents, not floats',
-    tapeTotal([0.1, 0.2]) === 0.3 &&
-      tapeTotal([1200, 340, -50]) === 1490 &&
-      tapeTotal([1.005, 2.005]) === 3.01 &&
+    tapeTotal([0.1, 0.2].map(toTapeEntry)) === 0.3 &&
+      tapeTotal([1200, 340, -50].map(toTapeEntry)) === 1490 &&
+      tapeTotal([1.005, 2.005].map(toTapeEntry)) === 3.01 &&
       tapeTotal([]) === 0,
-    `${tapeTotal([0.1, 0.2])} ${tapeTotal([1.005, 2.005])}`
+    `${tapeTotal([0.1, 0.2].map(toTapeEntry))} ${tapeTotal([1.005, 2.005].map(toTapeEntry))}`
   )
   check(
     'amounts format with grouping and a leading minus',
@@ -577,8 +578,10 @@ async function main(): Promise<number> {
   for (const v of [1200, 340, -50]) taped = pushTapeEntry(taped, t1.id, v)
   check(
     'keying lines onto a tape accumulates in order',
-    tapesOnPage(taped, taped.pages[0].id)[0].entries.join(',') === '1200,340,-50',
-    String(tapesOnPage(taped, taped.pages[0].id)[0].entries)
+    tapesOnPage(taped, taped.pages[0].id)[0]
+      .entries.map((e) => `${e.op}${e.value}`)
+      .join(',') === '+1200,+340,-50',
+    JSON.stringify(tapesOnPage(taped, taped.pages[0].id)[0].entries)
   )
   check(
     'a tape carries reviewer initials and a timestamp like a mark does',
@@ -586,7 +589,7 @@ async function main(): Promise<number> {
   )
   check(
     'backspace takes back the last line only',
-    popTapeEntry(taped, t1.id).tapes![0].entries.join(',') === '1200,340'
+    popTapeEntry(taped, t1.id).tapes![0].entries.map((e) => e.value).join(',') === '1200,340'
   )
   check(
     'backspace on an empty tape is a no-op, not a crash',
@@ -597,14 +600,13 @@ async function main(): Promise<number> {
   const titled = { ...taped, tapes: [{ ...taped.tapes![0], title: 'Repairs' }] }
   const lines = tapeLines(titled.tapes![0])
   check(
-    'the tape draws caption, right-aligned amounts, a rule and the total',
+    'the tape draws the adding-machine grid: line labels, note, amount, operator',
     lines.length === 6 &&
       lines[0].startsWith('Repairs') &&
-      lines[1] === '1,200.00' &&
-      lines[2] === '  340.00' &&
-      lines[3] === '  -50.00' &&
-      /^-+$/.test(lines[4]) &&
-      lines[5] === '1,490.00',
+      lines[1].startsWith('1 - 0') &&
+      /^1 - 1 \|.*\| +1,200\.00 \| \+$/.test(lines[2]) &&
+      /^1 - 3 \|.*\| +50\.00 \| -$/.test(lines[4]) &&
+      /^1 - T \| Total .*\| +1,490\.00 \| \*$/.test(lines[5]),
     JSON.stringify(lines)
   )
   check(
@@ -615,8 +617,10 @@ async function main(): Promise<number> {
   check(
     'a tape wide enough for its total stays aligned when a longer number lands',
     (() => {
-      const big = tapeLines({ ...titled.tapes![0], entries: [1, 1234567.89] })
-      return new Set(big.map((l) => l.length)).size === 1 && big[2] === '1,234,567.89'
+      const big = tapeLines({ ...titled.tapes![0], entries: [1, 1234567.89].map(toTapeEntry) })
+      // Every drawn row is the same width, and the long figure is right-aligned
+      // in the amount column rather than widening only its own row.
+      return new Set(big.map((l) => l.length)).size === 1 && big.some((l) => l.includes('1,234,567.89'))
     })()
   )
 
@@ -635,7 +639,10 @@ async function main(): Promise<number> {
         ...titled,
         tapes: [{ ...titled.tapes![0], entries: [100, 'x', null, NaN, 25] }]
       })
-      return 'session' in junk && junk.session.tapes![0].entries.join(',') === '100,25'
+      return (
+        'session' in junk &&
+        junk.session.tapes![0].entries.map((e) => e.value).join(',') === '100,25'
+      )
     })()
   )
   check(
@@ -999,7 +1006,7 @@ async function main(): Promise<number> {
     page: marked.pages[0].id,
     nx: 0.5,
     ny: 0.85,
-    entries: [1200, 340, -50],
+    entries: [1200, 340, -50].map(toTapeEntry),
     title: 'Repairs'
   })
   marked = exportTape.session
@@ -1016,8 +1023,8 @@ async function main(): Promise<number> {
   check(
     'the tape spec carries BOTH the drawn lines and the structured entries',
     Array.isArray(tapeSpec?.lines) &&
-      tapeSpec.lines[tapeSpec.lines.length - 1].trim() === '1,490.00' &&
-      tapeSpec.tape.entries.join(',') === '1200,340,-50' &&
+      /^1 - T \| Total .*\| +1,490\.00 \| \*$/.test(tapeSpec.lines[tapeSpec.lines.length - 1]) &&
+      tapeSpec.tape.entries.map((e: any) => `${e.op}${e.value}`).join(',') === '+1200,+340,-50' &&
       tapeSpec.tape.total === 1490,
     JSON.stringify(tapeSpec?.tape)
   )
@@ -1105,7 +1112,7 @@ async function main(): Promise<number> {
     !!exportedTape &&
       exportedTape.has_ap &&
       exportedTape.wpt_data?.total === 1490 &&
-      exportedTape.wpt_data?.entries?.join(',') === '1200,340,-50' &&
+      exportedTape.wpt_data?.entries?.map((e: any) => `${e.op}${e.value}`).join(',') === '+1200,+340,-50' &&
       exportedTape.wpt_data?.title === 'Repairs',
     JSON.stringify(exportedTape?.wpt_data)
   )

@@ -42,6 +42,7 @@ import {
   rotatePages,
   setBookmarkTitle,
   tapeTotal,
+  toTapeEntry,
   toExportSpec,
   type BookmarkNode,
   type ProbeWire,
@@ -558,16 +559,20 @@ server.registerTool(
       pageId: z.string(),
       nx: z.number().min(0).max(1),
       ny: z.number().min(0).max(1).describe('0 = top of page, 1 = bottom'),
-      entries: z.array(z.number()).min(1).describe('The addends, in order. Negatives subtract.'),
+      entries: z
+        .array(z.union([z.number(), z.object({ value: z.number(), op: z.enum(['+', '-']).optional(), note: z.string().optional() })]))
+        .min(1)
+        .describe('Lines in order. A bare number is an addition; a negative one subtracts. Or {value, op, note}.'),
       title: z.string().max(28).optional().describe('Caption, e.g. "Repairs & maintenance"')
     }
   },
   async ({ pageId, nx, ny, entries, title }) => {
     if (!session.pages.some((p) => p.id === pageId)) return fail(`unknown page id: ${pageId}`)
-    const res = addTape(session, { page: pageId, nx, ny, entries, ...(title ? { title } : {}) })
+    const lines = entries.map((e) => toTapeEntry(e as never))
+    const res = addTape(session, { page: pageId, nx, ny, entries: lines, ...(title ? { title } : {}) })
     session = res.session
     return text(
-      `Tape on ${pageId}: ${entries.length} line(s), total ${formatAmount(tapeTotal(entries))}.`
+      `Tape on ${pageId}: ${lines.length} line(s), total ${formatAmount(tapeTotal(lines))}.`
     )
   }
 )

@@ -8,6 +8,7 @@ import {
   type BinderPage,
   type Session,
   type Shape,
+  type TapeOp,
   type ToolKind
 } from '../session'
 import { renderInto, type Sizing } from '../pdf'
@@ -39,8 +40,9 @@ export function PageView({
   onMoveMark,
   activeTapeId,
   onActivateTape,
-  onCommitTapeEntry,
-  onBackspaceTape,
+  tapeBuffer,
+  tapeOp,
+  onTapeKey,
   onMoveTape,
   onTitleTape,
   onDeleteTape,
@@ -65,8 +67,9 @@ export function PageView({
   onMoveMark: (id: string, nx: number, ny: number) => void
   activeTapeId: string | null
   onActivateTape: (id: string | null) => void
-  onCommitTapeEntry: (id: string, value: number) => void
-  onBackspaceTape: (id: string) => void
+  tapeBuffer: string
+  tapeOp: TapeOp
+  onTapeKey: (key: string) => void
   onMoveTape: (id: string, nx: number, ny: number) => void
   onTitleTape: (id: string, title: string) => void
   onDeleteTape: (id: string) => void
@@ -264,8 +267,9 @@ export function PageView({
                   scale={effective}
                   activeId={activeTapeId}
                   onActivate={onActivateTape}
-                  onCommit={onCommitTapeEntry}
-                  onBackspace={onBackspaceTape}
+                  buffer={tapeBuffer}
+                  pendingOp={tapeOp}
+                  onKey={onTapeKey}
                   onMove={onMoveTape}
                   onTitle={onTitleTape}
                   onDelete={onDeleteTape}
