@@ -484,9 +484,26 @@ and the card is built from the model's `tapeLines()` — the same strings the
 engine draws — so the preview and the PDF cannot drift. `npm run smoke`
 pixel-checks the tape's position in pdfium.
 
+## Page numbering
+
+**Options** beside Export PDF turns on binder page numbers, in three styles:
+plain (`1, 2, 3…`), `Page 14 of 62`, or **Bates** with a prefix and zero-padding
+(`WP-000014`). Start number, corner and size are all settable, and the menu
+shows what the first and last pages will actually print so the settings can be
+checked before committing to an export.
+
+**Numbers are computed at export from each page's FINAL position, never stored
+per page.** This is the whole design: store a number and the first reorder
+leaves a binder reading 1, 2, 5, 3, 4 — worse than no numbers at all, because
+it still looks authoritative. `verify:model` pins it: move page 1 to the end and
+it prints the last number, not a stale 1.
+
+Numbering is off by default. An export should never silently stamp something
+onto a client's pages that wasn't asked for.
+
 ## Flatten on export
 
-The **Flatten** toggle beside Export binder paints marks into the page content
+The **Flatten marks** toggle in **Options** paints marks into the page content
 stream instead of attaching them as `/Stamp` annotations. For a binder that
 leaves the building: nothing a recipient can select, drag, or delete, and nothing
 for a viewer to silently reposition (see the Preview finding in `spike/README.md`).

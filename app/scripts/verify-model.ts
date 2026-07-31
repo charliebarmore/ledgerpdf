@@ -52,6 +52,8 @@ import {
   clearPageStatus,
   setBookmarkTitle,
   setPageStatus,
+  formatPageNumber,
+  numbering,
   statusCounts,
   statusDefs,
   statusOf,
@@ -1185,6 +1187,59 @@ async function main(): Promise<number> {
   } else {
     check('a drawn rectangle exports centred where it was dragged', false, String(rectExport.error))
   }
+
+  // --- page numbering: derived from binder ORDER, never stored per page
+  const NUM = numbering({ ...s, numbering: { ...numbering(s), enabled: true } })
+  check(
+    'the three numbering styles print what they say',
+    formatPageNumber(0, 62, { ...NUM, style: 'number', start: 1 }) === '1' &&
+      formatPageNumber(13, 62, { ...NUM, style: 'pageOfTotal', start: 1 }) === 'Page 14 of 62' &&
+      formatPageNumber(13, 62, { ...NUM, style: 'bates', prefix: 'WP-', digits: 6 }) ===
+        'WP-000014',
+    formatPageNumber(13, 62, { ...NUM, style: 'bates', prefix: 'WP-', digits: 6 })
+  )
+  check(
+    'a start offset carries through every style',
+    formatPageNumber(0, 3, { ...NUM, style: 'number', start: 100 }) === '100' &&
+      formatPageNumber(2, 3, { ...NUM, style: 'pageOfTotal', start: 100 }) === 'Page 102 of 102',
+    formatPageNumber(2, 3, { ...NUM, style: 'pageOfTotal', start: 100 })
+  )
+  check(
+    'numbering is off unless asked for — no silent stamping on an export',
+    toExportSpec(s, 'x.pdf').annotations.filter((a) => a.kind === 'pagenumber').length === 0
+  )
+  check(
+    'every page gets exactly one number, in binder order',
+    (() => {
+      const numbered = { ...s, numbering: { ...numbering(s), enabled: true } }
+      const anns = toExportSpec(numbered, 'x.pdf').annotations.filter(
+        (a) => a.kind === 'pagenumber'
+      )
+      return (
+        anns.length === s.pages.length &&
+        anns.map((a) => a.text).join(',') ===
+          s.pages.map((_, i) => String(i + 1)).join(',')
+      )
+    })()
+  )
+  check(
+    'REORDERING RENUMBERS — the reason numbers are not stored per page',
+    (() => {
+      const numbered = { ...s, numbering: { ...numbering(s), enabled: true } }
+      const before = toExportSpec(numbered, 'x.pdf').annotations.filter(
+        (a) => a.kind === 'pagenumber'
+      )
+      const firstId = numbered.pages[0].id
+      const moved = movePages(numbered, [firstId], numbered.pages.length)
+      const after = toExportSpec(moved, 'x.pdf').annotations.filter((a) => a.kind === 'pagenumber')
+      // The page that was "1" must now print the last number, not carry a 1.
+      const wasFirst = after.find((a) => a.page === firstId)
+      return (
+        before.find((a) => a.page === firstId)?.text === '1' &&
+        wasFirst?.text === String(moved.pages.length)
+      )
+    })()
+  )
 
   // --- the armed-tool cursor: the mark drawn at the point of aim
   check(

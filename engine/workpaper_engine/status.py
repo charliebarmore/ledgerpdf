@@ -1,4 +1,12 @@
-"""Page status: the stamp and the border.
+"""Page furniture generated at export: status stamps, page borders, page numbers.
+
+None of these are stored as annotations in the session. They are derived — from
+the page's status, or from its FINAL position in the binder — and drawn afresh
+each export. That is the whole point: a stored page number survives a reorder
+and leaves a binder numbered 1, 2, 5, 3, 4, which is worse than no numbers
+because it still looks authoritative.
+
+Page status: the stamp and the border.
 
 A status says what state a page is in — reviewed, open item, not applicable —
 and shows it three ways at once: a stamp carrying who and when, a colored border
@@ -217,3 +225,72 @@ def style_outline(pdf: pikepdf.Pdf, nodes: list[dict]) -> None:
             node = node.get(Name.Next)
 
     walk(nodes, root.get(Name.First))
+
+
+NUMBER_PAD = 18.0
+
+
+def make_page_number(pdf: pikepdf.Pdf, geom: PageGeom, spec: dict, nm: str) -> pikepdf.Object:
+    """The binder's own page number, printed in a corner.
+
+    Sized to the text so the annotation rect hugs it: an oversized box would
+    sit over page content and be selectable far from the number itself.
+    """
+    text = str(spec.get("text", "")).strip()
+    size = float(spec.get("size", 9.0))
+    corner = str(spec.get("corner", "br"))
+    if not text:
+        return pdf.make_indirect(Dictionary())
+
+    # Helvetica averages ~0.5 em; the strings here are short.
+    w = max(len(text) * size * 0.52 + 6, 12.0)
+    h = size + 6
+
+    parts = [
+        "q",
+        "0.15 0.15 0.17 rg",
+        "BT",
+        f"/F1 {_fmt(size)} Tf",
+        f"{_fmt(3)} {_fmt(4)} Td",
+        f"({_esc(text)}) Tj",
+        "ET",
+        "Q",
+    ]
+    form = pdf.make_stream(" ".join(parts).encode("ascii"))
+    form.Type = Name.XObject
+    form.Subtype = Name.Form
+    form.BBox = Array([0, 0, w, h])
+    m = appearance_matrix(geom.rotate)
+    if m is not None:
+        form.Matrix = Array(m)
+    form.Resources = Dictionary(
+        Font=Dictionary(
+            F1=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica)
+        )
+    )
+
+    # Nudge the anchor inwards so the number never straddles the page edge.
+    dw, dh = geom.display_size
+    nx = float(spec["nx"])
+    ny = float(spec["ny"])
+    half_w = (w / 2) / dw
+    half_h = (h / 2) / dh
+    nx = min(1 - half_w, max(half_w, nx))
+    ny = min(1 - half_h, max(half_h, ny))
+
+    rect = visual_rect_to_user_rect(geom, nx, ny, w, h)
+    annot = Dictionary(
+        Type=Name.Annot,
+        Subtype=Name.FreeText,
+        Rect=Array(list(rect)),
+        AP=Dictionary(N=form),
+        NM=String(nm),
+        Contents=String(text),
+        # Required by the spec for FreeText; the appearance stream is what draws.
+        DA=String(f"/Helv {_fmt(size)} Tf 0 g"),
+        F=4,
+    )
+    annot[Name("/WPT_Kind")] = String("pagenumber")
+    obj = pdf.make_indirect(annot)
+    obj[Name("/WPT_Data")] = String(json.dumps(spec, separators=(",", ":")))
+    return obj

@@ -198,6 +198,8 @@ def export_binder(spec: dict) -> dict:
                     annot = status.make_status_stamp(out, geom, a, nm)
                 elif a["kind"] == "pageborder":
                     annot = status.make_page_border(out, geom, a, nm)
+                elif a["kind"] == "pagenumber":
+                    annot = status.make_page_number(out, geom, a, nm)
                 elif a["kind"] == "tape":
                     annot = appearance.make_tape(
                         out, geom, a["nx"], a["ny"], a["lines"], a.get("tape", {}),

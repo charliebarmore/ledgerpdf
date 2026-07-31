@@ -5,6 +5,7 @@ import { ShapeInspector } from './components/ShapeInspector'
 import { Keypad } from './components/Keypad'
 import { StatusMenu } from './components/StatusMenu'
 import { ColorMenu } from './components/ColorMenu'
+import { ExportMenu } from './components/ExportMenu'
 import { PageView } from './components/PageView'
 import { ThumbnailRail } from './components/ThumbnailRail'
 import { MARK_COLOR } from './components/MarkLayer'
@@ -46,6 +47,7 @@ import {
   statusDefs,
   statusOf,
   statusParts,
+  numbering,
   toExportSpec,
   updateMark,
   updateShape,
@@ -559,6 +561,7 @@ export default function App(): React.JSX.Element {
 
   const defs = useMemo(() => statusDefs(session), [session.statusDefs])
   const parts = useMemo(() => statusParts(session), [session.statusParts])
+  const numberCfg = useMemo(() => numbering(session), [session.numbering])
   const counts = useMemo(() => statusCounts(session), [session.statuses, session.pages, session.statusDefs])
   const currentStatus = current ? statusOf(session, current.id) : null
 
@@ -1252,14 +1255,15 @@ export default function App(): React.JSX.Element {
         >
           Save session
         </button>
-        {/* An export option belongs beside the export button, not in a panel. */}
-        <label
-          className="toggle flatten"
-          title="Burn marks and tapes into the page for a binder that leaves the building — nothing a viewer can drag or delete. One-way: a flattened PDF can't be re-edited, so keep the session file as your master."
-        >
-          <input type="checkbox" checked={flatten} onChange={(e) => setFlatten(e.target.checked)} />
-          Flatten
-        </label>
+        <ExportMenu
+          flatten={flatten}
+          onFlatten={setFlatten}
+          numbering={numberCfg}
+          onNumbering={(patch) =>
+            apply({ ...session, numbering: { ...numberCfg, ...patch } }, 'Export options updated.')
+          }
+          pageCount={pages.length}
+        />
         <button className="primary" onClick={() => void exportBinder()} disabled={busy || !pages.length}>
           Export PDF
         </button>

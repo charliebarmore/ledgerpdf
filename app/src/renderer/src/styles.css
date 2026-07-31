@@ -1445,6 +1445,48 @@ button.link {
 }
 
 
+/* export options */
+
+.exportmenu {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.ex-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 40;
+  width: 268px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: var(--sm) var(--md) var(--md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+
+.ex-top {
+  padding-top: var(--sm);
+  border-top: 1px solid var(--border);
+}
+
+.ex-menu select,
+.ex-menu input[type='text'],
+.ex-menu .mi-row input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+}
+
+.ex-num {
+  font-family: var(--mono);
+  max-width: 70px;
+}
+
 /* ------------------------------------------------------------ page status */
 
 .statusmenu {

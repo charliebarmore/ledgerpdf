@@ -222,6 +222,65 @@ export const DEFAULT_STATUS_PARTS: StatusParts = {
   borderWidth: 4
 }
 
+/**
+ * Binder page numbering.
+ *
+ * Numbers follow BINDER ORDER, so they are computed at export from each page's
+ * final position — never stored per page. Store them and the first reorder
+ * leaves a binder numbered 1, 2, 5, 3, 4, which is worse than no numbers at
+ * all because it looks authoritative.
+ */
+export type NumberStyle = 'number' | 'pageOfTotal' | 'bates'
+
+export interface Numbering {
+  enabled: boolean
+  style: NumberStyle
+  /** Bates prefix, e.g. "WP-". */
+  prefix: string
+  /** Number given to the first page. */
+  start: number
+  /** Zero-padding for Bates, e.g. 6 -> WP-000014. */
+  digits: number
+  corner: 'tl' | 'tr' | 'bl' | 'br'
+  /** Point size of the printed number. */
+  size: number
+}
+
+export const DEFAULT_NUMBERING: Numbering = {
+  enabled: false,
+  style: 'number',
+  prefix: 'WP-',
+  start: 1,
+  digits: 4,
+  corner: 'br',
+  size: 9
+}
+
+/** What gets printed on page `index` (0-based) of a binder of `total`. */
+export function formatPageNumber(index: number, total: number, cfg: Numbering): string {
+  const n = cfg.start + index
+  if (cfg.style === 'bates') {
+    return `${cfg.prefix}${String(Math.max(0, n)).padStart(Math.max(1, cfg.digits), '0')}`
+  }
+  if (cfg.style === 'pageOfTotal') {
+    return `Page ${n} of ${cfg.start + total - 1}`
+  }
+  return String(n)
+}
+
+export function numbering(session: Session): Numbering {
+  return { ...DEFAULT_NUMBERING, ...(session.numbering ?? {}) }
+}
+
+/** Where the number sits, normalized to the page as displayed. */
+export function numberAnchor(corner: Numbering['corner']): { nx: number; ny: number } {
+  const inset = 0.055
+  return {
+    nx: corner === 'tl' || corner === 'bl' ? inset : 1 - inset,
+    ny: corner === 'tl' || corner === 'tr' ? inset : 1 - inset
+  }
+}
+
 export const DEFAULT_STATUS_DEFS: StatusDef[] = [
   { id: 'reviewed', label: 'Reviewed', color: 'green' },
   { id: 'open', label: 'Open item', color: 'red' },
@@ -348,6 +407,8 @@ export interface Session {
   statuses?: Record<string, PageStatus>
   /** Which parts of a status are drawn. */
   statusParts?: StatusParts
+  /** Binder page numbering, applied at export. */
+  numbering?: Numbering
 }
 
 export interface BookmarkNode {
@@ -1492,6 +1553,21 @@ export function toExportSpec(
           ...(x.note ? { note: x.note } : {}),
           ...(x.created ? { created: x.created } : {})
         })),
+      // Page numbers, from each page's FINAL position in the binder.
+      ...(() => {
+        const num = numbering(session)
+        if (!num.enabled) return []
+        const anchor = numberAnchor(num.corner)
+        return session.pages.map((p, i) => ({
+          kind: 'pagenumber',
+          page: p.id,
+          nx: anchor.nx,
+          ny: anchor.ny,
+          text: formatPageNumber(i, session.pages.length, num),
+          size: num.size,
+          corner: num.corner
+        }))
+      })(),
       // Page statuses become a stamp and a border. They are generated at
       // export from the status, not stored as shapes, so changing the legend
       // or the parts re-draws every page rather than leaving stale artwork.
@@ -1592,6 +1668,9 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
               Object.entries(s.statuses).filter(([pid]) => pageIds.has(pid))
             )
           }
+        : {}),
+      ...(s.numbering && typeof s.numbering === 'object'
+        ? { numbering: { ...DEFAULT_NUMBERING, ...s.numbering } }
         : {}),
       ...(s.statusParts && typeof s.statusParts === 'object'
         ? { statusParts: { ...DEFAULT_STATUS_PARTS, ...s.statusParts } }
