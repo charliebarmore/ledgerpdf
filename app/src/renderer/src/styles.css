@@ -55,12 +55,10 @@ body {
 
 .toolbar {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
   row-gap: var(--xs);
-  /* Tight on purpose: the row carries ~25 controls and the labels that matter
-     ("Save session" vs "Export PDF", "Move ↑") must not be abbreviated away. */
-  gap: 6px;
+  gap: 0;
   padding: var(--sm) var(--md);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -69,6 +67,22 @@ body {
 .toolbar button {
   white-space: nowrap;
   padding: 5px 8px;
+}
+
+/* Two purposeful rows rather than one overflowing one: the document above,
+   annotation below. Adding a tool now costs height, not legibility — the
+   labels were being abbreviated away to buy pixels. */
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: var(--xs);
+  gap: 6px;
+}
+
+.toolbar-annotate {
+  padding-top: var(--xs);
+  border-top: 1px solid var(--border);
 }
 
 .toolbar .sep {
@@ -1341,6 +1355,57 @@ button.link {
 
 
 /* ------------------------------------------------------------ page status */
+
+.statusmenu {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.statusmenu > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* the current page's status, so the button reports as well as acts */
+.st-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+}
+
+.st-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 40;
+  width: 292px;
+  padding-bottom: var(--sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+
+.st-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px var(--md);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.st-menu .st-list {
+  padding-top: var(--xs);
+}
 
 .st-list {
   display: flex;

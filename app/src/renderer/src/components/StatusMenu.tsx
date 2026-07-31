@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   SHAPE_COLORS,
   SHAPE_COLOR_NAMES,
@@ -9,14 +9,18 @@ import {
 } from '../session'
 
 /**
- * The status legend, with how many pages sit in each.
+ * The status control: a toolbar button that opens the legend.
+ *
+ * It lives in the toolbar rather than the side pane because applying a status
+ * is an ACTION on the current selection, like rotating or deleting — the side
+ * pane is for navigation and for inspecting what is already there.
  *
  * A status is applied to the selected pages (or the current one) and replaces
  * any status already there — a page is in one state, not several. The counts
  * turn the panel into a progress readout: on a 62-page binder, "38 Reviewed,
  * 18 not set" is the answer to the only question that matters mid-review.
  */
-export function StatusPanel({
+export function StatusMenu({
   session,
   defs,
   counts,
@@ -48,19 +52,58 @@ export function StatusPanel({
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
   const [showParts, setShowParts] = useState(false)
+  const [open, setOpen] = useState(false)
+  const wrap = useRef<HTMLDivElement>(null)
+
+  // Close on an outside click or Escape. Bound only while open, so the menu
+  // costs nothing when it isn't showing.
+  useEffect(() => {
+    if (!open) return
+    const away = (e: PointerEvent): void => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        setOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', away)
+    document.addEventListener('keydown', esc, true)
+    return () => {
+      document.removeEventListener('pointerdown', away)
+      document.removeEventListener('keydown', esc, true)
+    }
+  }, [open])
+
+  const currentDef = defs.find((d) => d.id === currentStatusId) ?? null
 
   return (
-    <div className="panel">
-      <div className="panel-head">
-        <span className="panel-title">Status</span>
-        <button
-          className="bm-add"
-          onClick={() => setShowParts((v) => !v)}
-          title="What a status draws"
-        >
-          {showParts ? 'Done' : 'Options'}
-        </button>
-      </div>
+    <span className="statusmenu" ref={wrap}>
+      <button
+        className={open ? 'on' : ''}
+        onClick={() => setOpen((v) => !v)}
+        title="Mark the selected page(s) reviewed, open, or anything else in your legend"
+      >
+        <span
+          className="st-dot"
+          style={{ background: currentDef ? SHAPE_COLORS[currentDef.color] : 'transparent' }}
+        />
+        Status
+      </button>
+
+      {open && (
+        <div className="st-menu">
+          <div className="st-menu-head">
+            <span>{targetCount ? `Apply to ${targetCount} page(s)` : 'Select a page first'}</span>
+            <button
+              className="bm-add"
+              onClick={() => setShowParts((v) => !v)}
+              title="What a status draws"
+            >
+              {showParts ? 'Done' : 'Options'}
+            </button>
+          </div>
 
       <div className="st-list">
         {defs.map((d) => (
@@ -94,7 +137,10 @@ export function StatusPanel({
               <button
                 className="st-label"
                 disabled={targetCount === 0}
-                onClick={() => onApply(d.id)}
+                onClick={() => {
+                  onApply(d.id)
+                  setOpen(false)
+                }}
                 onDoubleClick={() => setEditing(d.id)}
                 title={
                   targetCount === 0
@@ -120,7 +166,14 @@ export function StatusPanel({
 
         <div className="st-row st-unset">
           <span className="st-swatch st-swatch-none" />
-          <button className="st-label" disabled={targetCount === 0} onClick={onClear}>
+          <button
+            className="st-label"
+            disabled={targetCount === 0}
+            onClick={() => {
+              onClear()
+              setOpen(false)
+            }}
+          >
             Not set
           </button>
           <span className="st-count">{counts.unset}</span>
@@ -214,8 +267,10 @@ export function StatusPanel({
             The stamp carries your initials ({session.reviewer || 'set them in the toolbar'}) and
             the time you applied it.
           </p>
+          </div>
+        )}
         </div>
       )}
-    </div>
+    </span>
   )
 }

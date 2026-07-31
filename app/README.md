@@ -259,8 +259,12 @@ directly rather than trusting them to agree; keep it that way.
 
 ## Page status
 
-A small legend the firm defines — Reviewed, Open item, N/A out of the box — is
-applied a page at a time from the Status panel. It works on the selection, so a
+A small legend the firm defines — Reviewed, Open item, N/A out of the box —
+applied from the **Status** dropdown in the toolbar. It sits there rather than
+in the side pane because applying a status is an *action on the selection*,
+like rotating or deleting; the side pane is for navigation and for inspecting
+what is already there. The button carries a dot showing the current page's
+status, so it reports as well as acts. It works on the selection, so a
 range of pages can be marked at once, and applying a second status **replaces**
 the first: a page is in one state, not several.
 
@@ -526,6 +530,13 @@ file is named after the binder for the same reason a folder of files all called
 `binder.wptsession.json` helps nobody.
 
 ## Window layout
+
+**The toolbar is two rows, deliberately.** The top one is the *document* —
+add, rotate, move, delete, status, undo, and the file actions on the right. The
+bottom one is *annotation* — marks, drawing tools, colors, initials. One row
+had been patched for width three times, each patch abbreviating a label to buy
+pixels, which is what made tools unreadable in the first place. Adding a tool
+now costs height, not legibility.
 
 Three columns: **bookmarks** on the left (where a reader looks for a contents
 pane), the **page** in the middle, the **thumbnail rail** on the right. Drag the
