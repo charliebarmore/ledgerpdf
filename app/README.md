@@ -640,6 +640,17 @@ clipping on a narrow window.
   `o:<source>:<outline path>`), never its position, so they survive reordering,
   rotation, deletion of other pages, and save/reopen. A renamed title still gets
   a generated page count appended if counts are on.
+- **Re-assign** a bookmark to another page: go to the page you want, hover the
+  bookmark row, and click the `→ 7` button — labelled with the destination page
+  rather than an icon, because "→ 7" says exactly where it lands. A bookmark
+  added on the wrong page previously had to be deleted and retyped, and an
+  imported one whose destination was wrong could not be fixed at all.
+  Re-targeting an imported bookmark stores an **override** (`bookmarkPages`,
+  the page-level twin of `titles`) rather than rewriting the source outline, so
+  the original destination is never lost — `⇱` sends it home. An override onto
+  a page that is later deleted is dropped, and the bookmark falls back to its
+  imported destination rather than dangling.
+
 - A bookmark whose target page is deleted is dropped and its children hoisted —
   and those children keep their own renames.
 

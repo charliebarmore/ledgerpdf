@@ -35,6 +35,9 @@ export function BookmarkPanel({
   onAdd,
   onRemove,
   onIndent,
+  currentPageId,
+  onAssign,
+  onClearAssign,
   canAdd,
   autoEditKey,
   onAutoEditDone
@@ -47,12 +50,17 @@ export function BookmarkPanel({
   onAdd: () => void
   onRemove: (key: string) => void
   onIndent: (key: string, delta: number) => void
+  /** Where "assign here" would send a bookmark: the page you are on. */
+  currentPageId: string | null
+  onAssign: (key: string, pageId: string) => void
+  onClearAssign: (key: string) => void
   canAdd: boolean
   autoEditKey: string | null
   onAutoEditDone: () => void
 }): React.JSX.Element {
   const [editing, setEditing] = useState<{ key: string; value: string } | null>(null)
   const tree = buildBookmarks(session, { pageCounts })
+  const retargeted = new Set(Object.keys(session.bookmarkPages ?? {}))
   const numberOf = new Map(session.pages.map((p, i) => [p.id, i + 1]))
 
   // A just-added bookmark opens straight into rename — add, type, Enter.
@@ -103,6 +111,32 @@ export function BookmarkPanel({
             title={`${n.title}\nBinder page ${numberOf.get(n.page) ?? '?'}\nDouble-click to rename${isUser ? ' · added by you' : ''}`}
           >
             <span className="bm-title">{n.title}</span>
+            {currentPageId && n.page !== currentPageId && (
+              // Labelled with the destination, not an icon: "→ 7" says exactly
+              // where the bookmark lands, which an arrow glyph never could.
+              <span
+                className="bm-assign"
+                title={`Move this bookmark to binder page ${numberOf.get(currentPageId)}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onAssign(n.key, currentPageId)
+                }}
+              >
+                →{numberOf.get(currentPageId)}
+              </span>
+            )}
+            {!isUser && retargeted.has(n.key) && (
+              <span
+                className="bm-revert"
+                title="Send this bookmark back to the page it was imported on"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onClearAssign(n.key)
+                }}
+              >
+                ⇱
+              </span>
+            )}
             {isUser ? (
               <span className="bm-tools">
                 <span

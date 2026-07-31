@@ -17,6 +17,8 @@ import {
   addMark,
   addSource,
   addShape,
+  assignBookmarkPage,
+  clearBookmarkPage,
   addStamp,
   addTape,
   baseName,
@@ -1296,6 +1298,16 @@ export default function App(): React.JSX.Element {
                 }
                 onAdd={addBookmarkHere}
                 onRemove={(key) => apply(removeBookmark(session, key), 'Bookmark removed.')}
+                currentPageId={current?.id ?? null}
+                onAssign={(key, pageId) =>
+                  apply(
+                    assignBookmarkPage(session, key, pageId),
+                    `Bookmark moved to page ${pages.findIndex((p) => p.id === pageId) + 1}.`
+                  )
+                }
+                onClearAssign={(key) =>
+                  apply(clearBookmarkPage(session, key), 'Bookmark sent back to its imported page.')
+                }
                 onIndent={(key, delta) =>
                   apply(nudgeBookmarkDepth(session, key, delta), 'Bookmark nesting changed.')
                 }

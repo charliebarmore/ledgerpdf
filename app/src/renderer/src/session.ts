@@ -387,6 +387,12 @@ export interface Session {
   titles?: Record<string, string>
   /** Bookmarks the user added. Merged into the imported outline by page order. */
   bookmarks?: UserBookmark[]
+  /**
+   * Re-targeted bookmarks, keyed by BookmarkNode.key — the page-level twin of
+   * `titles`. Only imported bookmarks need this: a user bookmark owns its page
+   * outright, so re-assigning one just moves it.
+   */
+  bookmarkPages?: Record<string, string>
   /** Review marks (ticks, crosses, lettered stamps), anchored to page ids. */
   marks?: Mark[]
   /** Reviewer initials, stamped as the author of new marks. */
@@ -580,6 +586,13 @@ export function deletePages(session: Session, ids: string[]): Session {
       : {}),
     ...(session.bookmarks
       ? { bookmarks: session.bookmarks.filter((b) => !idSet.has(b.page)) }
+      : {}),
+    ...(session.bookmarkPages
+      ? {
+          bookmarkPages: Object.fromEntries(
+            Object.entries(session.bookmarkPages).filter(([, pid]) => !idSet.has(pid))
+          )
+        }
       : {})
   }
 }
@@ -1257,6 +1270,36 @@ export function setBookmarkTitle(
   return { ...session, titles }
 }
 
+/**
+ * Point a bookmark at a different page.
+ *
+ * A bookmark added on the wrong page previously had to be deleted and retyped,
+ * and an imported one whose destination was wrong could not be fixed at all.
+ * Imported bookmarks are re-targeted through an override rather than by
+ * rewriting the source outline, so the original destination is never lost and
+ * the change survives save/reopen exactly like a rename.
+ */
+export function assignBookmarkPage(session: Session, key: string, pageId: string): Session {
+  if (!session.pages.some((p) => p.id === pageId)) return session
+
+  if (key.startsWith(USER_BOOKMARK_PREFIX)) {
+    const id = key.slice(USER_BOOKMARK_PREFIX.length)
+    return {
+      ...session,
+      bookmarks: (session.bookmarks ?? []).map((b) => (b.id === id ? { ...b, page: pageId } : b))
+    }
+  }
+  return { ...session, bookmarkPages: { ...(session.bookmarkPages ?? {}), [key]: pageId } }
+}
+
+/** Drop a re-target, sending an imported bookmark back to where it came from. */
+export function clearBookmarkPage(session: Session, key: string): Session {
+  if (!session.bookmarkPages?.[key]) return session
+  const next = { ...session.bookmarkPages }
+  delete next[key]
+  return { ...session, bookmarkPages: next }
+}
+
 /** Add a bookmark on a page. Returns the session and the new bookmark's key. */
 export function addBookmark(
   session: Session,
@@ -1375,7 +1418,15 @@ export function buildBookmarks(session: Session, opts: BookmarkOptions = {}): Bo
       const path = [...prefix, i]
       const key = `o:${sourceId}:${path.join('.')}`
       const children = mapNodes(sourceId, n.children, path)
-      const target = n.destPage === null ? null : pageIdFor(sourceId, n.destPage)
+      // A re-target wins over the imported destination, provided its page is
+      // still in the binder.
+      const override = session.bookmarkPages?.[key]
+      const target =
+        override && session.pages.some((p) => p.id === override)
+          ? override
+          : n.destPage === null
+            ? null
+            : pageIdFor(sourceId, n.destPage)
       // Target page deleted: drop this bookmark but keep its children (which
       // retain their own keys, so their renames survive too).
       if (!target) return children
@@ -1400,7 +1451,10 @@ export function buildBookmarks(session: Session, opts: BookmarkOptions = {}): Bo
   } else {
     tree = perSource.map(({ source, page, children }) => {
       const key = `f:${source.id}`
-      return { key, title: titled(key, stripSourceExt(source.name)), page, children }
+      const override = session.bookmarkPages?.[key]
+      const target =
+        override && session.pages.some((p) => p.id === override) ? override : page
+      return { key, title: titled(key, stripSourceExt(source.name)), page: target, children }
     })
   }
 
@@ -1655,6 +1709,13 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
       pages: s.pages.map((p) => ({ ...p, rotate: p.rotate ?? 0 })),
       seq,
       ...(s.titles && typeof s.titles === 'object' ? { titles: s.titles } : {}),
+      ...(s.bookmarkPages && typeof s.bookmarkPages === 'object'
+        ? {
+            bookmarkPages: Object.fromEntries(
+              Object.entries(s.bookmarkPages).filter(([, pid]) => pageIds.has(pid as string))
+            )
+          }
+        : {}),
       ...(Array.isArray(s.bookmarks)
         ? { bookmarks: s.bookmarks.filter((b) => pageIds.has(b.page)) }
         : {}),

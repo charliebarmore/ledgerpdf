@@ -1082,6 +1082,26 @@ button.link {
   color: var(--primary);
 }
 
+.bm-assign {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--primary);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0 3px;
+  flex: none;
+  opacity: 0;
+}
+
+.bm-row:hover .bm-assign {
+  opacity: 1;
+}
+
+.bm-assign:hover {
+  border-color: var(--primary);
+  background: #e4efef;
+}
+
 .bm-revert {
   flex: none;
   color: var(--muted);

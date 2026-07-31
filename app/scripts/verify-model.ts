@@ -21,6 +21,8 @@ import {
   addMark,
   addSource,
   addShape,
+  assignBookmarkPage,
+  clearBookmarkPage,
   addStamp,
   addTape,
   buildBookmarks,
@@ -1187,6 +1189,68 @@ async function main(): Promise<number> {
   } else {
     check('a drawn rectangle exports centred where it was dragged', false, String(rectExport.error))
   }
+
+  // --- re-assigning a bookmark to another page
+  check(
+    'a user bookmark can be moved to another page',
+    (() => {
+      const add = addBookmark(solo, solo.pages[0].id, 'Ledger')
+      const moved = assignBookmarkPage(add.session, add.key, solo.pages[2].id)
+      const node = buildBookmarks(moved).find((b) => b.key === add.key)
+      return node?.page === solo.pages[2].id
+    })()
+  )
+  check(
+    'an imported bookmark re-targets through an override, leaving the source alone',
+    (() => {
+      const key = buildBookmarks(solo)[0].key // an imported node
+      const moved = assignBookmarkPage(solo, key, solo.pages[2].id)
+      const node = buildBookmarks(moved).find((b) => b.key === key)
+      // The override moved it, and the source outline is untouched.
+      return (
+        node?.page === solo.pages[2].id &&
+        moved.sources[0].outline === solo.sources[0].outline &&
+        moved.bookmarkPages?.[key] === solo.pages[2].id
+      )
+    })()
+  )
+  check(
+    'clearing the override sends an imported bookmark home',
+    (() => {
+      const key = buildBookmarks(solo)[0].key
+      const home = buildBookmarks(solo).find((b) => b.key === key)?.page
+      const moved = assignBookmarkPage(solo, key, solo.pages[2].id)
+      const back = clearBookmarkPage(moved, key)
+      return buildBookmarks(back).find((b) => b.key === key)?.page === home
+    })()
+  )
+  check(
+    're-assignment survives save/reopen and a reorder',
+    (() => {
+      const key = buildBookmarks(solo)[0].key
+      const target = solo.pages[2].id
+      const moved = assignBookmarkPage(solo, key, target)
+      const rt = parseSession(JSON.parse(JSON.stringify(moved)))
+      if (!('session' in rt)) return false
+      // Anchored to a page ID, so moving that page carries the bookmark along.
+      const reordered = movePages(rt.session, [target], 0)
+      return buildBookmarks(reordered).find((b) => b.key === key)?.page === target
+    })()
+  )
+  check(
+    'an override onto a deleted page is dropped, not left dangling',
+    (() => {
+      const key = buildBookmarks(solo)[0].key
+      const moved = assignBookmarkPage(solo, key, solo.pages[2].id)
+      const gone = deletePages(moved, [solo.pages[2].id])
+      // Falls back to the imported destination rather than vanishing.
+      return gone.bookmarkPages?.[key] === undefined && buildBookmarks(gone).length > 0
+    })()
+  )
+  check(
+    'assigning to a page that is not in the binder is refused',
+    assignBookmarkPage(solo, buildBookmarks(solo)[0].key, 'pg_nope') === solo
+  )
 
   // --- page numbering: derived from binder ORDER, never stored per page
   const NUM = numbering({ ...s, numbering: { ...numbering(s), enabled: true } })
