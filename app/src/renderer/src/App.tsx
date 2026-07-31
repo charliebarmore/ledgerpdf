@@ -473,6 +473,18 @@ export default function App(): React.JSX.Element {
     [session, apply]
   )
 
+  /** Clicking a tape puts you back in it — and brings the keypad back with it.
+   *  Without this, closing the keypad left every tape a dead card. */
+  const activateTape = useCallback((id: string | null) => {
+    setActiveTapeId(id)
+    if (id) {
+      setKeypadOpen(true)
+      setTapeBuffer('')
+      setSelectedMarkId(null)
+      setSelectedShapeId(null)
+    }
+  }, [])
+
   // -------------------------------------------------------------------- shapes
 
   /** Commit a drag as a shape. A stray click is not a shape. */
@@ -1317,7 +1329,7 @@ export default function App(): React.JSX.Element {
               onSelectMark={setSelectedMarkId}
               onMoveMark={moveMark}
               activeTapeId={activeTapeId}
-              onActivateTape={setActiveTapeId}
+              onActivateTape={activateTape}
               tapeBuffer={tapeBuffer}
               tapeOp={tapeOp}
               onTapeKey={tapeKey}
@@ -1351,7 +1363,11 @@ export default function App(): React.JSX.Element {
           onKey={tapeKey}
           onEditEntry={editTapeEntry}
           onRemoveEntry={removeTapeLine}
-          onClose={() => setKeypadOpen(false)}
+          onClose={() => {
+            setKeypadOpen(false)
+            setActiveTapeId(null)
+            setTapeBuffer('')
+          }}
           onNewTape={() => setArmed({ kind: 'tape' })}
         />
       )}

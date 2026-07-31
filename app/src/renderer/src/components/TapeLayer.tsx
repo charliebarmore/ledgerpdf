@@ -30,6 +30,7 @@ export function TapeLayer({
   height,
   scale,
   activeId,
+  armed,
   buffer,
   pendingOp,
   onActivate,
@@ -44,6 +45,8 @@ export function TapeLayer({
   /** Effective zoom: CSS pixels per PDF point. */
   scale: number
   activeId: string | null
+  /** Any armed tool: while one is armed, tapes let the pointer through. */
+  armed: unknown
   /** What is mid-keying. Owned by App so the keypad and the card agree. */
   buffer: string
   pendingOp: TapeOp
@@ -133,7 +136,8 @@ export function TapeLayer({
               width: (cols * TAPE_CHAR_W + 2 * TAPE_PAD) * scale,
               padding: TAPE_PAD * scale,
               fontSize: fs,
-              lineHeight: `${TAPE_LINE_HEIGHT * scale}px`
+              lineHeight: `${TAPE_LINE_HEIGHT * scale}px`,
+              pointerEvents: armed ? 'none' : 'auto'
             }}
             onPointerDown={(e) => startDrag(e, tape.id)}
             onKeyDown={(e) => {

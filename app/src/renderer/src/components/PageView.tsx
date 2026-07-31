@@ -384,6 +384,7 @@ export function PageView({
                             height={h}
                             scale={effective}
                             activeId={activeTapeId}
+                            armed={armed}
                             buffer={tapeBuffer}
                             pendingOp={tapeOp}
                             onActivate={onActivateTape}

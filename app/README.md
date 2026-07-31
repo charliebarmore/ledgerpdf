@@ -429,6 +429,14 @@ are routed at the window level rather than from the tape card, because the
 moment you touch a keypad button focus leaves the card and card-level handling
 goes dead — which it did.
 
+**Click a tape to pick it back up.** Any tape on the page reopens the 10 Key
+panel on that tape, so a total can be corrected later without rebuilding it.
+Closing the panel puts the tape down as well — an "active" tape with no visible
+keypad is a mode you cannot see.
+
+While a tool is armed, tapes let the pointer through, so a tick aimed near one
+lands on the page rather than opening the calculator. Same rule as shapes.
+
 **Every button routes through the same key handler as the keyboard**, and the
 transition itself is a pure function in the model (`tapeKeyPress`), so the
 panel, the keyboard and the tests all exercise one implementation. The
