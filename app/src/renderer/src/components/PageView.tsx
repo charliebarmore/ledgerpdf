@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   marksOnPage,
   pageProvenance,
-  sourceOf,
+  pageSize,
   shapesOnPage,
+  sourceOf,
   tapesOnPage,
   type BinderPage,
   type Session,
@@ -11,20 +12,70 @@ import {
   type TapeOp,
   type ToolKind
 } from '../session'
-import { renderInto, type Sizing } from '../pdf'
+import { renderInto } from '../pdf'
 import { MarkLayer } from './MarkLayer'
 import { TapeLayer } from './TapeLayer'
 import { ShapeLayer } from './ShapeLayer'
 
-/** Zoom state: a fit mode, or an absolute scale where 1 = 100%. */
+/**
+ * The binder, as one continuously scrolling column of pages.
+ *
+ * Every page gets a slot laid out from its recorded size, but only pages near
+ * the viewport actually render — a 62-page master file cannot hold 62 live
+ * canvases, and a scroller that renders everything stalls the moment a real
+ * file is opened. Slots keep their height whether or not their canvas exists,
+ * so scrolling past unrendered pages never reflows the column under the cursor.
+ *
+ * Each page carries its OWN annotation layers, sized to its own canvas. That is
+ * what preserves the invariant everything else depends on: coordinates are
+ * normalized per page, so what you place is what exports.
+ */
+
 type Zoom = { mode: 'fitWidth' } | { mode: 'fitPage' } | { mode: 'scale'; factor: number }
 
 const STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8]
 const PAD = 40
+/** Gap between pages, CSS pixels. */
+const GAP = 16
+/** How far beyond the viewport to keep canvases alive, in viewport heights. */
+const OVERSCAN = 0.6
 
 function stepFrom(current: number, dir: 1 | -1): number {
   if (dir > 0) return STEPS.find((s) => s > current + 0.001) ?? STEPS[STEPS.length - 1]
   return [...STEPS].reverse().find((s) => s < current - 0.001) ?? STEPS[0]
+}
+
+/** One page's canvas, mounted only while it is near the viewport. */
+function PageCanvas({
+  session,
+  page,
+  zoom,
+  onError
+}: {
+  session: Session
+  page: BinderPage
+  zoom: number
+  onError: (msg: string | null) => void
+}): React.JSX.Element {
+  const canvas = useRef<HTMLCanvasElement>(null)
+
+  useEffect(() => {
+    const src = sourceOf(session, page)
+    if (!src || !canvas.current) return
+    renderInto(
+      canvas.current,
+      src.id,
+      src.path,
+      page.index,
+      page.rotate,
+      { mode: 'scale', factor: zoom },
+      src.kind
+    )
+      .then(() => onError(null))
+      .catch((e) => onError(String(e?.message ?? e)))
+  }, [page.id, page.rotate, zoom, session.sources])
+
+  return <canvas ref={canvas} className="sheet" />
 }
 
 export function PageView({
@@ -33,6 +84,7 @@ export function PageView({
   pageIndex,
   pageCount,
   onGoto,
+  onCurrentPage,
   armed,
   selectedMarkId,
   onPlaceMark,
@@ -56,13 +108,14 @@ export function PageView({
 }: {
   session: Session
   page: BinderPage | null
-  /** 0-based position of `page` in the binder, and the total, for navigation. */
   pageIndex: number
   pageCount: number
   onGoto: (index: number) => void
+  /** Reports the page the reader is actually looking at, as they scroll. */
+  onCurrentPage: (id: string) => void
   armed: { kind: ToolKind; text?: string } | null
   selectedMarkId: string | null
-  onPlaceMark: (nx: number, ny: number) => void
+  onPlaceMark: (pageId: string, nx: number, ny: number) => void
   onSelectMark: (id: string | null) => void
   onMoveMark: (id: string, nx: number, ny: number) => void
   activeTapeId: string | null
@@ -75,19 +128,22 @@ export function PageView({
   onDeleteTape: (id: string) => void
   shapeColor: string
   selectedShapeId: string | null
-  onDrawShape: (nx: number, ny: number, nx2: number, ny2: number) => void
+  onDrawShape: (pageId: string, nx: number, ny: number, nx2: number, ny2: number) => void
   onSelectShape: (id: string | null) => void
   onMoveShape: (id: string, dx: number, dy: number) => void
   onResizeShape: (id: string, patch: Partial<Shape>) => void
   onTextShape: (id: string, text: string) => void
 }): React.JSX.Element {
   const holder = useRef<HTMLDivElement>(null)
-  const canvas = useRef<HTMLCanvasElement>(null)
+  const scroller = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState({ w: 800, h: 900 })
   const [zoom, setZoom] = useState<Zoom>({ mode: 'fitWidth' })
-  const [effective, setEffective] = useState(1)
-  const [canvasBox, setCanvasBox] = useState({ w: 0, h: 0 })
+  const [scrollTop, setScrollTop] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  /** Set while WE scroll, so the scroll handler doesn't fight the jump. */
+  const programmatic = useRef(false)
+
+  const pages = session.pages
 
   useEffect(() => {
     const el = holder.current
@@ -102,26 +158,68 @@ export function PageView({
     return () => ro.disconnect()
   }, [])
 
-  useEffect(() => {
-    const src = page ? sourceOf(session, page) : undefined
-    if (!page || !src || !canvas.current) return
-    const sizing: Sizing =
-      zoom.mode === 'scale'
-        ? { mode: 'scale', factor: zoom.factor }
-        : zoom.mode === 'fitWidth'
-          ? { mode: 'fitWidth', boxW: box.w }
-          : { mode: 'fitPage', boxW: box.w, boxH: box.h }
-    setError(null)
-    renderInto(canvas.current, src.id, src.path, page.index, page.rotate, sizing, src.kind)
-      .then((zoom) => {
-        setEffective(zoom)
-        const el = canvas.current
-        if (el) setCanvasBox({ w: el.clientWidth, h: el.clientHeight })
-      })
-      .catch((e) => setError(String(e?.message ?? e)))
-  }, [page?.id, page?.rotate, box.w, box.h, zoom, session.sources])
+  // Fit measures the CURRENT page. Mixed page sizes are normal in a binder, and
+  // fitting to the widest would shrink every other page to suit one outlier.
+  const fitRef = page ?? pages[0] ?? null
+  const fitSize = fitRef ? pageSize(fitRef) : { w: 612, h: 792 }
+  const effective =
+    zoom.mode === 'scale'
+      ? zoom.factor
+      : zoom.mode === 'fitWidth'
+        ? box.w / fitSize.w
+        : Math.min(box.w / fitSize.w, box.h / fitSize.h)
 
-  /** Zoom steps operate on whatever is currently on screen. */
+  /** Slot offsets, so a page can be scrolled to without measuring the DOM. */
+  let y = 0
+  const tops: number[] = []
+  const heights: number[] = []
+  for (const p of pages) {
+    const s = pageSize(p)
+    const h = Math.ceil(s.h * effective)
+    tops.push(y)
+    heights.push(h)
+    y += h + GAP
+  }
+  const totalHeight = Math.max(0, y - GAP)
+
+  const viewH = box.h + PAD
+  const lo = scrollTop - viewH * OVERSCAN
+  const hi = scrollTop + viewH * (1 + OVERSCAN)
+
+  /** The page the reader is looking at: the last one starting above the fold. */
+  const onScroll = useCallback(() => {
+    const el = scroller.current
+    if (!el) return
+    setScrollTop(el.scrollTop)
+    if (programmatic.current) return
+    // A third down the viewport, not the very top: at a page boundary the page
+    // filling most of the screen is the one you are reading, and a fixed 80px
+    // offset kept naming the page that was mostly scrolled past.
+    const probe = el.scrollTop + (el.clientHeight || 1) * 0.35
+    let idx = 0
+    for (let i = 0; i < tops.length; i++) {
+      if (tops[i] <= probe) idx = i
+      else break
+    }
+    const id = pages[idx]?.id
+    if (id && id !== page?.id) onCurrentPage(id)
+  }, [tops, pages, page?.id, onCurrentPage])
+
+  /** Bring a page into view when NAVIGATION changed it, not scrolling. */
+  useLayoutEffect(() => {
+    const el = scroller.current
+    const top = tops[pageIndex]
+    if (!el || top === undefined) return
+    // Already comfortably in view? Leave the reader where they are, or every
+    // scroll would yank the column back to the page boundary.
+    if (top >= el.scrollTop - 4 && top < el.scrollTop + viewH * 0.6) return
+    programmatic.current = true
+    el.scrollTo({ top, behavior: 'auto' })
+    window.setTimeout(() => {
+      programmatic.current = false
+    }, 60)
+  }, [pageIndex])
+
   const nudgeZoom = useCallback(
     (dir: 1 | -1) => setZoom({ mode: 'scale', factor: stepFrom(effective, dir) }),
     [effective]
@@ -148,22 +246,22 @@ export function PageView({
     return () => window.removeEventListener('keydown', onKey)
   }, [nudgeZoom])
 
-  /** Ctrl/⌘ + wheel = continuous zoom, like every other document viewer. */
+  /** ⌘/Ctrl + wheel zooms; a plain wheel scrolls the binder, as it should. */
   const onWheel = useCallback(
     (e: React.WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
-      const next = Math.min(8, Math.max(0.1, effective * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
-      setZoom({ mode: 'scale', factor: next })
+      setZoom({
+        mode: 'scale',
+        factor: Math.min(8, Math.max(0.1, effective * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
+      })
     },
     [effective]
   )
 
-  const isFit = zoom.mode !== 'scale'
-
   return (
     <div className="pageview" ref={holder} onWheel={onWheel}>
-      {page ? (
+      {pages.length > 0 ? (
         <>
           <div className="pageview-bar">
             <span className="pagenav">
@@ -192,9 +290,9 @@ export function PageView({
                 ›
               </button>
             </span>
-            <span className="pageview-caption" title={pageProvenance(session, page)}>
-              {pageProvenance(session, page)}
-              {page.rotate !== 0 && <span className="tag">rotated {page.rotate}°</span>}
+            <span className="pageview-caption" title={page ? pageProvenance(session, page) : ''}>
+              {page ? pageProvenance(session, page) : ''}
+              {page && page.rotate !== 0 && <span className="tag">rotated {page.rotate}°</span>}
             </span>
             <span className="zoom">
               <button onClick={() => nudgeZoom(-1)} title="Zoom out  ⌘−">
@@ -229,51 +327,81 @@ export function PageView({
               </button>
             </span>
           </div>
-          <div className={`sheet-scroll${isFit ? '' : ' is-zoomed'}`}>
+
+          <div className="sheet-scroll" ref={scroller} onScroll={onScroll}>
             {error ? (
               <div className="error">{error}</div>
             ) : (
-              <div className="sheet-stack">
-                <canvas ref={canvas} className="sheet" />
-                <MarkLayer
-                  marks={marksOnPage(session, page.id)}
-                  width={canvasBox.w}
-                  height={canvasBox.h}
-                  scale={effective}
-                  armed={armed}
-                  selectedId={selectedMarkId}
-                  onPlace={onPlaceMark}
-                  onSelect={onSelectMark}
-                  onMove={onMoveMark}
-                />
-                <ShapeLayer
-                  shapes={shapesOnPage(session, page.id)}
-                  width={canvasBox.w}
-                  height={canvasBox.h}
-                  scale={effective}
-                  armed={armed}
-                  color={shapeColor}
-                  selectedId={selectedShapeId}
-                  onDraw={onDrawShape}
-                  onSelect={onSelectShape}
-                  onMove={onMoveShape}
-                  onResize={onResizeShape}
-                  onText={onTextShape}
-                />
-                <TapeLayer
-                  tapes={tapesOnPage(session, page.id)}
-                  width={canvasBox.w}
-                  height={canvasBox.h}
-                  scale={effective}
-                  activeId={activeTapeId}
-                  onActivate={onActivateTape}
-                  buffer={tapeBuffer}
-                  pendingOp={tapeOp}
-                  onKey={onTapeKey}
-                  onMove={onMoveTape}
-                  onTitle={onTitleTape}
-                  onDelete={onDeleteTape}
-                />
+              <div className="sheet-column" style={{ height: totalHeight }}>
+                {pages.map((p, i) => {
+                  const top = tops[i]
+                  const h = heights[i]
+                  const near = top + h >= lo && top <= hi
+                  const w = Math.ceil(pageSize(p).w * effective)
+                  return (
+                    <div
+                      key={p.id}
+                      className={`page-slot${page?.id === p.id ? ' is-current' : ''}`}
+                      data-page-id={p.id}
+                      style={{ top, height: h, width: w }}
+                    >
+                      {near ? (
+                        <div className="sheet-stack">
+                          <PageCanvas
+                            session={session}
+                            page={p}
+                            zoom={effective}
+                            onError={setError}
+                          />
+                          <MarkLayer
+                            marks={marksOnPage(session, p.id)}
+                            width={w}
+                            height={h}
+                            scale={effective}
+                            armed={armed}
+                            selectedId={selectedMarkId}
+                            onPlace={(nx, ny) => onPlaceMark(p.id, nx, ny)}
+                            onSelect={onSelectMark}
+                            onMove={onMoveMark}
+                          />
+                          <ShapeLayer
+                            shapes={shapesOnPage(session, p.id)}
+                            width={w}
+                            height={h}
+                            scale={effective}
+                            armed={armed}
+                            color={shapeColor}
+                            selectedId={selectedShapeId}
+                            onDraw={(a, b, c, d) => onDrawShape(p.id, a, b, c, d)}
+                            onSelect={onSelectShape}
+                            onMove={onMoveShape}
+                            onResize={onResizeShape}
+                            onText={onTextShape}
+                          />
+                          <TapeLayer
+                            tapes={tapesOnPage(session, p.id)}
+                            width={w}
+                            height={h}
+                            scale={effective}
+                            activeId={activeTapeId}
+                            buffer={tapeBuffer}
+                            pendingOp={tapeOp}
+                            onActivate={onActivateTape}
+                            onKey={onTapeKey}
+                            onMove={onMoveTape}
+                            onTitle={onTitleTape}
+                            onDelete={onDeleteTape}
+                          />
+                        </div>
+                      ) : (
+                        // A placeholder holds the slot's height, so scrolling
+                        // past unrendered pages never reflows the column.
+                        <div className="sheet sheet-pending" style={{ width: w, height: h }} />
+                      )}
+                      <span className="page-slot-num">{i + 1}</span>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>

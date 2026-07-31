@@ -306,12 +306,14 @@ export default function App(): React.JSX.Element {
   // -------------------------------------------------------------------- marks
 
   const placeTool = useCallback(
-    (nx: number, ny: number) => {
-      if (!current || !armed) return
+    (pageId: string, nx: number, ny: number) => {
+      if (!armed) return
+      const target = pages.find((p) => p.id === pageId)
+      if (!target) return
       if (armed.kind === 'tape') {
-        const onPage = (session.tapes ?? []).filter((t) => t.page === current.id).length
+        const onPage = (session.tapes ?? []).filter((t) => t.page === pageId).length
         const { session: next, id } = addTape(session, {
-          page: current.id,
+          page: pageId,
           nx,
           ny,
           entries: [],
@@ -330,7 +332,7 @@ export default function App(): React.JSX.Element {
       // Shapes are dragged out, not clicked into place — drawShape handles them.
       if (isShapeKind(armed.kind)) return
       const { session: next, id } = addMark(session, {
-        page: current.id,
+        page: pageId,
         kind: armed.kind,
         nx,
         ny,
@@ -340,7 +342,7 @@ export default function App(): React.JSX.Element {
       apply(next, `${armed.kind === 'text' ? armed.text : armed.kind} placed.`)
       setSelectedMarkId(id)
     },
-    [current, armed, session, markSize, apply]
+    [pages, armed, session, markSize, apply]
   )
 
   const moveMark = useCallback(
@@ -475,8 +477,9 @@ export default function App(): React.JSX.Element {
 
   /** Commit a drag as a shape. A stray click is not a shape. */
   const drawShape = useCallback(
-    (nx: number, ny: number, nx2: number, ny2: number) => {
-      if (!current || !armed || !isShapeKind(armed.kind)) return
+    (pageId: string, nx: number, ny: number, nx2: number, ny2: number) => {
+      if (!armed || !isShapeKind(armed.kind)) return
+      if (!pages.some((p) => p.id === pageId)) return
       let [x2, y2] = [nx2, ny2]
       if (!isDragMeaningful(nx, ny, x2, y2)) {
         // A text note is PLACED, not sized — a plain click should give a box
@@ -486,7 +489,7 @@ export default function App(): React.JSX.Element {
         y2 = Math.min(1, ny + 0.07)
       }
       const { session: next, id } = addShape(session, {
-        page: current.id,
+        page: pageId,
         kind: armed.kind,
         nx,
         ny,
@@ -513,7 +516,7 @@ export default function App(): React.JSX.Element {
       // another one on top instead.
       setArmed(null)
     },
-    [current, armed, session, shapeColor, apply]
+    [pages, armed, session, shapeColor, apply]
   )
 
   const selectedShape = useMemo<Shape | null>(
@@ -1309,6 +1312,7 @@ export default function App(): React.JSX.Element {
               onGoto={goto}
               armed={armed}
               selectedMarkId={selectedMarkId}
+              onCurrentPage={setCurrentId}
               onPlaceMark={placeTool}
               onSelectMark={setSelectedMarkId}
               onMoveMark={moveMark}

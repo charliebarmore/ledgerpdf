@@ -170,6 +170,26 @@ While the cursor is in a text field, the field owns the keyboard — none of the
 single-key shortcuts fire. Without that, typing initials armed the `F` stamp and
 `⌫` deleted a binder page.
 
+## Scrolling
+
+The page area is a **continuous column** — scroll straight through the binder
+with the wheel or a trackpad, as in any PDF reader. The page number tracks what
+you are reading, taken a third of the way down the viewport rather than at the
+very top, so at a page boundary it names the page filling the screen rather
+than the one you have mostly scrolled past.
+
+**Only pages near the viewport are rendered.** A 62-page master file cannot
+hold 62 live canvases. Unrendered pages still occupy their exact height, taken
+from the page size recorded at import (`BinderPage.w/h`), so scrolling past
+them never reflows the column under the cursor — which is why the size is in
+the model rather than measured from a canvas that may not exist yet.
+
+Every page carries its own annotation layers, sized to its own canvas. That is
+what preserves the invariant everything depends on: coordinates are normalized
+**per page**, so a mark placed on page 40 exports to page 40 at the same spot.
+Clicking with a tool armed acts on the page you clicked, not on "the current
+page".
+
 **Navigating vs. moving are different actions.** `‹ 3 / 62 ›` in the page bar
 navigates (and the page number is editable — type to jump). The `Move ↑` /
 `Move ↓` toolbar buttons reorder the selected page and deliberately leave you on

@@ -325,18 +325,45 @@ button.link {
   text-align: center;
 }
 
-/* the scrolling sheet area */
+/* the scrolling binder */
 .sheet-scroll {
   overflow: auto;
   padding: var(--lg);
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
 }
 
-/* when zoomed past the viewport, don't center-clip the top-left */
-.sheet-scroll.is-zoomed {
-  justify-content: safe center;
+/* Slots are absolutely positioned from a computed layout, so an unrendered
+   page still occupies its exact height and scrolling never reflows. */
+.sheet-column {
+  position: relative;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.page-slot {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.page-slot.is-current .sheet {
+  outline: 2px solid #a9cccd;
+  outline-offset: -1px;
+}
+
+.page-slot-num {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: -14px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* an unrendered page: the right size, visibly not yet drawn */
+.sheet-pending {
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
 
 .tag {

@@ -51,6 +51,22 @@ export interface BinderPage {
   index: number
   /** User's rotation DELTA in degrees on top of the page's own /Rotate. */
   rotate: number
+  /**
+   * Displayed size in points WITH the page's own /Rotate already applied, but
+   * not the user's delta. Recorded at import so the continuous scroller can lay
+   * out 62 page slots without rendering them first — windowed rendering needs
+   * to know how tall a page is before it decides not to draw it.
+   */
+  w?: number
+  h?: number
+}
+
+/** Displayed size of a binder page, including the user's rotation delta. */
+export function pageSize(p: BinderPage): { w: number; h: number } {
+  const w = p.w ?? 612
+  const h = p.h ?? 792
+  const quarter = (((p.rotate % 360) + 360) % 360) % 180 !== 0
+  return quarter ? { w: h, h: w } : { w, h }
 }
 
 /**
@@ -377,12 +393,21 @@ export function addSource(session: Session, probe: ProbeWire): Session {
     ...(probe.fingerprint ? { fingerprint: probe.fingerprint } : {}),
     outline: normalizeOutline(probe.outline)
   }
-  const newPages: BinderPage[] = probe.pages.map((p) => ({
-    id: `pg_${++seq}`,
-    source: sourceId,
-    index: p.index,
-    rotate: 0
-  }))
+  const newPages: BinderPage[] = probe.pages.map((p) => {
+    // CropBox is what viewers show; fall back to MediaBox when absent.
+    const box = p.cropbox ?? p.mediabox
+    const cw = Math.abs(box[2] - box[0])
+    const ch = Math.abs(box[3] - box[1])
+    const quarter = (((p.rotate % 360) + 360) % 360) % 180 !== 0
+    return {
+      id: `pg_${++seq}`,
+      source: sourceId,
+      index: p.index,
+      rotate: 0,
+      w: quarter ? ch : cw,
+      h: quarter ? cw : ch
+    }
+  })
   return {
     ...session,
     seq,
