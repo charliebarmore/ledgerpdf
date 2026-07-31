@@ -69,9 +69,8 @@ body {
   padding: 5px 8px;
 }
 
-/* Two purposeful rows rather than one overflowing one: the document above,
-   annotation below. Adding a tool now costs height, not legibility — the
-   labels were being abbreviated away to buy pixels. */
+/* One row, with wrap as a safety net on a narrow window. It fits again since
+   the Initials field moved into the status menu. */
 .toolbar-row {
   display: flex;
   align-items: center;
@@ -80,10 +79,6 @@ body {
   gap: 6px;
 }
 
-.toolbar-annotate {
-  padding-top: var(--xs);
-  border-top: 1px solid var(--border);
-}
 
 .toolbar .sep {
   width: 1px;
@@ -668,6 +663,53 @@ button.link {
 
 .shape-text:focus {
   background: rgb(255 255 255 / 0.65);
+}
+
+/* colour: one button and a popover, not six inline swatches */
+
+.colormenu {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.color-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 5px;
+}
+
+.color-chip {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgb(0 0 0 / 0.25);
+}
+
+.color-caret {
+  font-size: 8px;
+  color: var(--muted);
+}
+
+.color-pop {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 4px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+
+.color-pop .swatch {
+  width: 20px;
+  height: 20px;
 }
 
 /* colour swatches for new shapes */

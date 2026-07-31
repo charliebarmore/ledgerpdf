@@ -4,6 +4,7 @@ import { MarkInspector } from './components/MarkInspector'
 import { ShapeInspector } from './components/ShapeInspector'
 import { Keypad } from './components/Keypad'
 import { StatusMenu } from './components/StatusMenu'
+import { ColorMenu } from './components/ColorMenu'
 import { PageView } from './components/PageView'
 import { ThumbnailRail } from './components/ThumbnailRail'
 import { MARK_COLOR } from './components/MarkLayer'
@@ -1032,7 +1033,6 @@ export default function App(): React.JSX.Element {
       onDrop={onDrop}
     >
       <header className="toolbar">
-        {/* Row 1 — the document: what pages are and where they go. */}
         <div className="toolbar-row">
         <button onClick={addViaDialog} disabled={busy} title={`Add PDFs or images  ${MOD}I`}>
           Add
@@ -1079,39 +1079,6 @@ export default function App(): React.JSX.Element {
           onReviewer={(v) => setSession((prev) => ({ ...prev, reviewer: v }))}
         />
         <span className="sep" />
-        <button onClick={undo} title={`Undo  ${MOD}Z`}>
-          ↶
-        </button>
-        <button onClick={redo} title={`Redo  ${MOD}⇧Z`}>
-          ↷
-        </button>
-        <span className="spacer" />
-        <button onClick={openSession} title={`Open a saved .wptsession.json  ${MOD}O`}>
-          Open
-        </button>
-        <button
-          onClick={() => saveSession(false)}
-          disabled={!pages.length}
-          title={`Save the editable session (.wptsession.json) — your work in progress, sources untouched  ${MOD}S`}
-        >
-          Save session
-        </button>
-        {/* An export option belongs beside the export button, not in a panel. */}
-        <label
-          className="toggle flatten"
-          title="Burn marks and tapes into the page for a binder that leaves the building — nothing a viewer can drag or delete. One-way: a flattened PDF can't be re-edited, so keep the session file as your master."
-        >
-          <input type="checkbox" checked={flatten} onChange={(e) => setFlatten(e.target.checked)} />
-          Flatten
-        </label>
-        <button className="primary" onClick={() => void exportBinder()} disabled={busy || !pages.length}>
-          Export PDF
-        </button>
-        </div>
-
-        {/* Row 2 — annotation: what you put ON a page. Kept apart so
-            adding a tool never squeezes Export off the end again. */}
-        <div className="toolbar-row toolbar-annotate">
         <span className="palette" title="Review marks — click a tool, then click the page">
           <button
             className={!armed ? 'on' : ''}
@@ -1210,24 +1177,14 @@ export default function App(): React.JSX.Element {
               {kind === 'textbox' ? <span className="glyph-note">{glyph}</span> : glyph}
             </button>
           ))}
-          {/* Swatches only when they apply — a colour picker with nothing to
-              colour is just five more buttons competing for the row. */}
-          {(shapeArmed || selectedShapeId) && (
-          <span className="swatches" title="Color for new shapes">
-            {SHAPE_COLOR_NAMES.map((c) => (
-              <button
-                key={c}
-                className={`swatch${shapeColor === c ? ' on' : ''}`}
-                style={{ background: SHAPE_COLORS[c] }}
-                onClick={() => {
-                  setShapeColor(c)
-                  if (selectedShapeId) editShape({ color: c })
-                }}
-                title={`${c}${selectedShapeId ? ' — also recolors the selected shape' : ''}`}
-              />
-            ))}
-          </span>
-          )}
+          <ColorMenu
+            color={shapeColor}
+            appliesToSelection={!!selectedShapeId}
+            onPick={(c) => {
+              setShapeColor(c)
+              if (selectedShapeId) editShape({ color: c })
+            }}
+          />
           <span className="sep-thin" />
           {addingStamp ? (
             <input
@@ -1262,6 +1219,35 @@ export default function App(): React.JSX.Element {
             </button>
           )}
         </span>
+        <span className="sep" />
+        <button onClick={undo} title={`Undo  ${MOD}Z`}>
+          ↶
+        </button>
+        <button onClick={redo} title={`Redo  ${MOD}⇧Z`}>
+          ↷
+        </button>
+        <span className="spacer" />
+        <button onClick={openSession} title={`Open a saved .wptsession.json  ${MOD}O`}>
+          Open
+        </button>
+        <button
+          onClick={() => saveSession(false)}
+          disabled={!pages.length}
+          title={`Save the editable session (.wptsession.json) — your work in progress, sources untouched  ${MOD}S`}
+        >
+          Save session
+        </button>
+        {/* An export option belongs beside the export button, not in a panel. */}
+        <label
+          className="toggle flatten"
+          title="Burn marks and tapes into the page for a binder that leaves the building — nothing a viewer can drag or delete. One-way: a flattened PDF can't be re-edited, so keep the session file as your master."
+        >
+          <input type="checkbox" checked={flatten} onChange={(e) => setFlatten(e.target.checked)} />
+          Flatten
+        </label>
+        <button className="primary" onClick={() => void exportBinder()} disabled={busy || !pages.length}>
+          Export PDF
+        </button>
         </div>
       </header>
 

@@ -316,11 +316,11 @@ inside of a circled figure was not a target at all. Shapes also stop
 intercepting the pointer while any tool is armed, so a tick aimed inside a
 circled figure lands on the page rather than selecting the circle.
 
-Color is a fixed five (red, green, blue, black, orange) rather than a free
+Color is a fixed six (red, green, blue, black, orange, grey) rather than a free
 picker: red-for-problem and green-for-agreed already mean something in review
-work, and an arbitrary color has no legend to explain it. The swatches appear
-only when a drawing tool is armed or a shape is selected — a color picker with
-nothing to color is just more buttons competing for the row.
+work, and an arbitrary color has no legend to explain it. The color button sits in the
+toolbar and also recolors the selected shape, so picking a color before *or*
+after drawing both work.
 
 Geometry is two normalized corners on the page *as displayed*, the same
 convention marks and tapes use, so what you draw is what exports — pixel-checked
