@@ -621,6 +621,19 @@ button.link {
   filter: drop-shadow(0 0 2px var(--primary));
 }
 
+/* grab handles on the selected shape */
+.shape-handle {
+  fill: var(--surface);
+  stroke: var(--primary);
+  stroke-width: 1.5;
+  pointer-events: all;
+  cursor: nwse-resize;
+}
+
+.shape-handle:hover {
+  fill: var(--primary);
+}
+
 .shape-draft {
   opacity: 0.75;
 }

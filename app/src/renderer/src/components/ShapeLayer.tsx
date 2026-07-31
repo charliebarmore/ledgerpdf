@@ -3,6 +3,8 @@ import {
   HIGHLIGHT_FILL,
   SHAPE_COLORS,
   isShapeKind,
+  resizeShape,
+  type ShapeHandle,
   type Shape,
   type ShapeKind,
   type ToolKind
@@ -42,6 +44,41 @@ function constrain(
   // after correcting for the page's aspect ratio.
   const size = Math.max(Math.abs(dx), Math.abs(dy) * aspect)
   return { nx2: nx + Math.sign(dx || 1) * size, ny2: ny + (Math.sign(dy || 1) * size) / aspect }
+}
+
+/**
+ * An invisible, fat version of the shape purely to catch the pointer.
+ *
+ * SVG hit-testing follows what is painted: a `fill="none"` outline is only
+ * clickable ON its stroke, so a 2pt arrow means hitting a 2px line exactly, and
+ * the inside of a circle is not a target at all. This sits underneath and gives
+ * every shape a real grab area.
+ */
+function HitArea({ shape, w, h, scale }: { shape: Shape; w: number; h: number; scale: number }) {
+  const x1 = shape.nx * w
+  const y1 = shape.ny * h
+  const x2 = shape.nx2 * w
+  const y2 = shape.ny2 * h
+  const left = Math.min(x1, x2)
+  const top = Math.min(y1, y2)
+  const bw = Math.abs(x2 - x1)
+  const bh = Math.abs(y2 - y1)
+  const grab = Math.max(shape.width * scale * 3, 12)
+  const common = {
+    fill: 'transparent',
+    stroke: 'transparent',
+    strokeWidth: grab,
+    // `all` so the transparent fill counts as a target too — clicking inside a
+    // circled figure to select it is what every PDF tool does.
+    pointerEvents: 'all' as const
+  }
+  if (shape.kind === 'line' || shape.kind === 'arrow') {
+    return <line x1={x1} y1={y1} x2={x2} y2={y2} {...common} strokeLinecap="round" />
+  }
+  if (shape.kind === 'ellipse') {
+    return <ellipse cx={left + bw / 2} cy={top + bh / 2} rx={bw / 2} ry={bh / 2} {...common} />
+  }
+  return <rect x={left} y={top} width={bw} height={bh} {...common} />
 }
 
 function ShapeGraphic({
@@ -130,6 +167,32 @@ function ShapeGraphic({
   }
 }
 
+type HandleKey = ShapeHandle
+
+/** Where the grab handles sit, in CSS pixels. */
+function handlesFor(
+  s: Shape,
+  w: number,
+  h: number
+): Array<{ key: HandleKey; x: number; y: number }> {
+  if (s.kind === 'line' || s.kind === 'arrow') {
+    return [
+      { key: 'a', x: s.nx * w, y: s.ny * h },
+      { key: 'b', x: s.nx2 * w, y: s.ny2 * h }
+    ]
+  }
+  const x0 = Math.min(s.nx, s.nx2) * w
+  const x1 = Math.max(s.nx, s.nx2) * w
+  const y0 = Math.min(s.ny, s.ny2) * h
+  const y1 = Math.max(s.ny, s.ny2) * h
+  return [
+    { key: 'nw', x: x0, y: y0 },
+    { key: 'ne', x: x1, y: y0 },
+    { key: 'se', x: x1, y: y1 },
+    { key: 'sw', x: x0, y: y1 }
+  ]
+}
+
 export function ShapeLayer({
   shapes,
   width,
@@ -141,6 +204,7 @@ export function ShapeLayer({
   onDraw,
   onSelect,
   onMove,
+  onResize,
   onText
 }: {
   shapes: Shape[]
@@ -154,6 +218,7 @@ export function ShapeLayer({
   onDraw: (nx: number, ny: number, nx2: number, ny2: number) => void
   onSelect: (id: string | null) => void
   onMove: (id: string, dx: number, dy: number) => void
+  onResize: (id: string, patch: Partial<Shape>) => void
   onText: (id: string, text: string) => void
 }): React.JSX.Element {
   const box = useRef<HTMLDivElement>(null)
@@ -225,6 +290,26 @@ export function ShapeLayer({
     [drawing, toNorm, onMove, onSelect]
   )
 
+  const selectedShape = shapes.find((s) => s.id === selectedId) ?? null
+
+  const startResize = useCallback(
+    (e: React.PointerEvent, shape: Shape, key: HandleKey) => {
+      e.stopPropagation()
+      e.preventDefault()
+      const move = (ev: PointerEvent): void => {
+        const p = toNorm(ev.clientX, ev.clientY)
+        onResize(shape.id, resizeShape(shape, key, p.nx, p.ny))
+      }
+      const up = (): void => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+    },
+    [toNorm, onResize]
+  )
+
   const editing = shapes.find((s) => s.id === selectedId && s.kind === 'textbox')
 
   return (
@@ -242,11 +327,31 @@ export function ShapeLayer({
           <g
             key={s.id}
             className={`shape${selectedId === s.id ? ' is-selected' : ''}`}
+            // With any tool armed, shapes must not intercept — otherwise a tick
+            // aimed inside a circled figure would select the circle instead.
+            style={{ pointerEvents: armed ? 'none' : 'auto' }}
             onPointerDown={(e) => startMove(e, s.id)}
           >
+            <HitArea shape={s} w={width} h={height} scale={scale} />
             <ShapeGraphic shape={s} w={width} h={height} scale={scale} />
           </g>
         ))}
+        {/* Resize handles on the selected shape. Endpoints for a line or
+            arrow (direction matters — the head is the second point); corners
+            for everything else. */}
+        {!armed &&
+          selectedShape &&
+          handlesFor(selectedShape, width, height).map((hd) => (
+            <rect
+              key={hd.key}
+              className="shape-handle"
+              x={hd.x - 4}
+              y={hd.y - 4}
+              width={8}
+              height={8}
+              onPointerDown={(e) => startResize(e, selectedShape, hd.key)}
+            />
+          ))}
         {draft && drawing && (
           <g className="shape-draft">
             <ShapeGraphic

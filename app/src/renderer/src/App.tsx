@@ -1146,6 +1146,7 @@ export default function App(): React.JSX.Element {
               onDrawShape={drawShape}
               onSelectShape={setSelectedShapeId}
               onMoveShape={nudgeShape}
+              onResizeShape={(id, patch) => setSession((prev) => updateShape(prev, id, patch))}
               onTextShape={(id, text) => setSession((prev) => updateShape(prev, id, { text }))}
             />
             <ThumbnailRail

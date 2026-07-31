@@ -7,6 +7,7 @@ import {
   tapesOnPage,
   type BinderPage,
   type Session,
+  type Shape,
   type ToolKind
 } from '../session'
 import { renderInto, type Sizing } from '../pdf'
@@ -48,6 +49,7 @@ export function PageView({
   onDrawShape,
   onSelectShape,
   onMoveShape,
+  onResizeShape,
   onTextShape
 }: {
   session: Session
@@ -73,6 +75,7 @@ export function PageView({
   onDrawShape: (nx: number, ny: number, nx2: number, ny2: number) => void
   onSelectShape: (id: string | null) => void
   onMoveShape: (id: string, dx: number, dy: number) => void
+  onResizeShape: (id: string, patch: Partial<Shape>) => void
   onTextShape: (id: string, text: string) => void
 }): React.JSX.Element {
   const holder = useRef<HTMLDivElement>(null)
@@ -251,6 +254,7 @@ export function PageView({
                   onDraw={onDrawShape}
                   onSelect={onSelectShape}
                   onMove={onMoveShape}
+                  onResize={onResizeShape}
                   onText={onTextShape}
                 />
                 <TapeLayer

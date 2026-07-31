@@ -41,6 +41,7 @@ import {
   isDragMeaningful,
   moveShape,
   removeShapes,
+  resizeShape,
   removeStamp,
   removeTapes,
   shapesOnPage,
@@ -843,6 +844,49 @@ async function main(): Promise<number> {
     })(),
     JSON.stringify(moveShape(drawn, sh1.id, 5, 0).shapes![0])
   )
+  // Resizing: the handles rewrite corners, and a shape dragged out
+  // right-to-left must still resize the way it looks, not the way it was keyed.
+  const boxShape = drawn.shapes![0] // (0.2,0.3) -> (0.6,0.5)
+  check(
+    'dragging a corner handle moves that corner only',
+    (() => {
+      const r = resizeShape(boxShape, 'nw', 0.1, 0.15)
+      return r.nx === 0.1 && r.ny === 0.15 && r.nx2 === 0.6 && r.ny2 === 0.5
+    })(),
+    JSON.stringify(resizeShape(boxShape, 'nw', 0.1, 0.15))
+  )
+  check(
+    'a box drawn right-to-left still resizes by what you see',
+    (() => {
+      const backwards = { ...boxShape, nx: 0.6, ny: 0.5, nx2: 0.2, ny2: 0.3 }
+      // 'se' is visually the bottom-right regardless of how it was dragged.
+      const r = resizeShape(backwards, 'se', 0.8, 0.7)
+      return r.nx === 0.2 && r.ny === 0.3 && r.nx2 === 0.8 && r.ny2 === 0.7
+    })(),
+    JSON.stringify(
+      resizeShape({ ...boxShape, nx: 0.6, ny: 0.5, nx2: 0.2, ny2: 0.3 }, 'se', 0.8, 0.7)
+    )
+  )
+  check(
+    'dragging a corner past its opposite flips the box instead of inverting it',
+    (() => {
+      const r = resizeShape(boxShape, 'nw', 0.9, 0.9)
+      return r.nx === 0.6 && r.nx2 === 0.9 && r.ny === 0.5 && r.ny2 === 0.9
+    })(),
+    JSON.stringify(resizeShape(boxShape, 'nw', 0.9, 0.9))
+  )
+  check(
+    'an arrow keeps its direction when either end is dragged — the head is the second point',
+    (() => {
+      const arrow = { ...boxShape, kind: 'arrow' as const }
+      const tail = resizeShape(arrow, 'a', 0.05, 0.05)
+      const head = resizeShape(arrow, 'b', 0.95, 0.95)
+      return (
+        tail.nx === 0.05 && tail.nx2 === undefined && head.nx2 === 0.95 && head.nx === undefined
+      )
+    })()
+  )
+
   check(
     'a stray click is not a shape, but a real drag is',
     !isDragMeaningful(0.5, 0.5, 0.5, 0.5) &&

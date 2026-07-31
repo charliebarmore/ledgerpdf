@@ -490,6 +490,42 @@ export function moveShape(session: Session, id: string, dx: number, dy: number):
   })
 }
 
+/** Which grab handle is being dragged. */
+export type ShapeHandle = 'nw' | 'ne' | 'se' | 'sw' | 'a' | 'b'
+
+/**
+ * The new corner set after dragging one handle to (nx, ny).
+ *
+ * Box shapes are rewritten as (min, max), so the stored corners end up
+ * normalized however the user originally dragged them out — that is what keeps
+ * the handle mapping honest on a shape drawn right-to-left. Lines and arrows
+ * keep their direction: the second point is the arrow head.
+ */
+export function resizeShape(
+  s: Shape,
+  handle: ShapeHandle,
+  nx: number,
+  ny: number
+): Partial<Shape> {
+  if (s.kind === 'line' || s.kind === 'arrow') {
+    return handle === 'a' ? { nx, ny } : { nx2: nx, ny2: ny }
+  }
+  let x0 = Math.min(s.nx, s.nx2)
+  let x1 = Math.max(s.nx, s.nx2)
+  let y0 = Math.min(s.ny, s.ny2)
+  let y1 = Math.max(s.ny, s.ny2)
+  if (handle === 'nw' || handle === 'sw') x0 = nx
+  else x1 = nx
+  if (handle === 'nw' || handle === 'ne') y0 = ny
+  else y1 = ny
+  return {
+    nx: Math.min(x0, x1),
+    ny: Math.min(y0, y1),
+    nx2: Math.max(x0, x1),
+    ny2: Math.max(y0, y1)
+  }
+}
+
 export function removeShapes(session: Session, ids: string[]): Session {
   const set = new Set(ids)
   return { ...session, shapes: (session.shapes ?? []).filter((s) => !set.has(s.id)) }

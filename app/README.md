@@ -264,6 +264,17 @@ Rectangle, ellipse, line, arrow, highlighter and text note — drag to draw. Hol
 `V`/`Esc` back to select. A selected shape drags to move, `⌫` deletes it, and
 the side inspector edits color, stroke weight and note after the fact.
 
+**Selecting and editing.** With no tool armed (`V`/`Esc`), click a shape to
+select it, drag to move, drag a corner handle to resize — endpoints for a line
+or arrow, four corners for everything else. `⌫` deletes.
+
+Every shape carries an **invisible fat hit area** underneath it. SVG
+hit-testing follows what is painted, so a `fill="none"` outline is only
+clickable on its stroke — a 2pt arrow meant hitting a 2px line exactly, and the
+inside of a circled figure was not a target at all. Shapes also stop
+intercepting the pointer while any tool is armed, so a tick aimed inside a
+circled figure lands on the page rather than selecting the circle.
+
 Color is a fixed five (red, green, blue, black, orange) rather than a free
 picker: red-for-problem and green-for-agreed already mean something in review
 work, and an arbitrary color has no legend to explain it. The swatches appear
