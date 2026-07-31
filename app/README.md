@@ -580,6 +580,45 @@ Note this does not change the *product's* local-only claim: the app still has no
 telemetry and reaches no network. What leaves the machine is whatever the agent
 you point at it chooses to send to its own model.
 
+## Viewer conformance
+
+Every annotation this tool writes is a **hand-authored appearance stream**. That
+is the core risk in the whole design: a viewer that reads `/Matrix` or `/BBox`
+differently, or synthesises its own appearance, would put a reviewer's tick
+somewhere other than where it was placed — and a tick pointing at the wrong
+number is worse than no tick.
+
+```bash
+engine/.venv/bin/python spike/make_conformance.py   # build the fixture
+npm run verify:viewers                              # check it in two engines
+```
+
+`spike/make_conformance.py` builds a six-page binder carrying every kind —
+tick, lettered stamp, rectangle, ellipse, arrow, highlight, text note, tape,
+status stamp, page border, page number, coloured bookmarks — across the page
+geometries that actually break things: a normal page, one where **CropBox ≠
+MediaBox**, one with **`/Rotate 90`**, and a legal-size page that already
+carries annotations from its source. Page 6 repeats page 1's marks **flattened**
+into page content.
+
+`spike/verify_viewers.py` renders it in **pdfium** (what Chrome and Edge use)
+and **poppler** (an unrelated codebase) and asserts every mark's centroid.
+Agreement across two independent implementations makes the geometry a property
+of the PDF rather than of one renderer's interpretation. Neither is shipped —
+both are dev-only subprocesses, the same posture as pypdfium2, and the
+MuPDF/AGPL guard in the engine requirements is untouched. poppler comes from
+`brew install poppler`.
+
+One rule the harness depends on: **at most one asserted colour per page.** Two
+objects of the same colour average into a centroid that proves nothing — which
+is exactly what an orange arrow sharing a page with the brown tape did the
+first time.
+
+**Acrobat is a separate, manual pass** and is not automated. Acrobat DC opens
+the fixture, renders the streams, and its Comments panel enumerates exactly the
+annotations in the file. A page-by-page visual check is still a human job; see
+`spike/ACROBAT-CHECKLIST.md`.
+
 ## Save session vs Export PDF
 
 Two different outputs, and the distinction is the whole design:
