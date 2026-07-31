@@ -1325,6 +1325,28 @@ button.link {
   background: #fffdf7;
 }
 
+/* the amount, editable in place — the total recomputes as soon as it commits */
+.kp-amt-input {
+  font: inherit;
+  font-family: var(--mono);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.kp-amt-input:hover {
+  background: #f4f2ec;
+  border-radius: 2px;
+}
+
+.kp-amt-input:focus {
+  outline: 1px solid var(--primary);
+  border-radius: 2px;
+  background: #fffdf7;
+}
+
 .kp-op,
 .kp-del {
   border: 0;

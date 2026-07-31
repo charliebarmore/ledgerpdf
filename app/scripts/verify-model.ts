@@ -60,6 +60,7 @@ import {
   tapeKeyPress,
   type TapeKeyState,
   tapeRunning,
+  updateTapeEntry,
   tapeTotal,
   toTapeEntry,
   tapesOnPage,
@@ -726,6 +727,53 @@ async function main(): Promise<number> {
     'a tape carries reviewer initials and a timestamp like a mark does',
     taped.tapes![0].author === 'CJB' && typeof taped.tapes![0].created === 'string'
   )
+  // Editing a keyed figure must re-foot the whole tape — the reason this
+  // exists: a statement said 302.50 and the tape said 305.50.
+  check(
+    'correcting one line recomputes the total',
+    (() => {
+      let t = { ...s, reviewer: 'CJB' } as Session
+      const tp = addTape(t, {
+        page: t.pages[0].id,
+        nx: 0.5,
+        ny: 0.5,
+        entries: [
+          { value: 305.5, op: '+' },
+          { value: 461.03, op: '-' },
+          { value: 745.61, op: '+' }
+        ]
+      })
+      t = tp.session
+      const before = tapeTotal(t.tapes![0].entries)
+      t = updateTapeEntry(t, tp.id, 0, { value: 302.5 })
+      return before === 590.08 && tapeTotal(t.tapes![0].entries) === 587.08
+    })()
+  )
+  check(
+    'correcting a line leaves the others, and their operators, alone',
+    (() => {
+      let t = { ...s } as Session
+      const tp = addTape(t, {
+        page: t.pages[0].id,
+        nx: 0.5,
+        ny: 0.5,
+        entries: [
+          { value: 10, op: '+', note: 'first' },
+          { value: 4, op: '-', note: 'second' }
+        ]
+      })
+      t = updateTapeEntry(tp.session, tp.id, 1, { value: 6 })
+      const e = t.tapes![0].entries
+      return (
+        e[0].value === 10 &&
+        e[0].note === 'first' &&
+        e[1].op === '-' &&
+        e[1].note === 'second' &&
+        tapeTotal(e) === 4
+      )
+    })()
+  )
+
   check(
     'backspace takes back the last line only',
     popTapeEntry(taped, t1.id).tapes![0].entries.map((e) => e.value).join(',') === '1200,340'

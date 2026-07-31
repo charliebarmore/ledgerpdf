@@ -1,5 +1,14 @@
 import { useRef, useState } from 'react'
-import { TAPE_OPS, formatAmount, tapeRunning, tapeTotal, type Tape, type TapeEntry, type TapeOp } from '../session'
+import {
+  TAPE_OPS,
+  formatAmount,
+  parseAmount,
+  tapeRunning,
+  tapeTotal,
+  type Tape,
+  type TapeEntry,
+  type TapeOp
+} from '../session'
 
 /**
  * The 10-key panel: a keypad, the current figure, and the tape's lines as an
@@ -14,6 +23,53 @@ import { TAPE_OPS, formatAmount, tapeRunning, tapeTotal, type Tape, type TapeEnt
  * to cents at every step, so the printed figures always foot to the printed
  * total.
  */
+/**
+ * One line's amount, editable in place.
+ *
+ * Keeps a local draft while focused so a half-typed figure ("3", "30.") never
+ * reaches the model and momentarily wrecks the total; commits on blur or Enter,
+ * reverts on Escape. An unparseable entry is discarded rather than zeroed —
+ * silently turning a mis-key into 0.00 would be worse than ignoring it.
+ */
+function AmountCell({
+  value,
+  onCommit
+}: {
+  value: number
+  onCommit: (v: number) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState<string | null>(null)
+  const shown = draft ?? formatAmount(value)
+
+  const commit = (): void => {
+    if (draft === null) return
+    const parsed = parseAmount(draft)
+    if (parsed !== null && parsed !== value) onCommit(parsed)
+    setDraft(null)
+  }
+
+  return (
+    <input
+      className="kp-amt kp-amt-input"
+      value={shown}
+      onFocus={(e) => {
+        setDraft(String(value))
+        requestAnimationFrame(() => e.target.select())
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        if (e.key === 'Escape') {
+          setDraft(null)
+          ;(e.target as HTMLInputElement).blur()
+        }
+      }}
+    />
+  )
+}
+
 export function Keypad({
   tape,
   buffer,
@@ -98,7 +154,7 @@ export function Keypad({
               placeholder="—"
               onChange={(ev) => onEditEntry(i, { note: ev.target.value })}
             />
-            <span className="kp-amt">{formatAmount(e.value)}</span>
+            <AmountCell value={e.value} onCommit={(v) => onEditEntry(i, { value: v })} />
             <button
               className="kp-op"
               title="Cycle this line's operator: + − × ÷"

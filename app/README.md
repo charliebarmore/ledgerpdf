@@ -435,8 +435,16 @@ panel, the keyboard and the tests all exercise one implementation. The
 panel is a second way in, not the primary one — typing is faster than clicking
 digits.
 
-In the panel each line's note is editable, its operator toggles, and it can be
-deleted individually: a mis-key in the middle shouldn't mean retyping the tape.
+In the panel every part of a line is editable — **click an amount and retype
+it**, edit its note, click the operator to cycle `+ − × ÷`, or delete just that
+line. The total and every running Result re-foot immediately. A mis-key in the
+middle should never mean retyping the tape, and correcting a figure against the
+source document is the normal case, not an edge case.
+
+An amount keeps a local draft while you type, so a half-entered figure ("3",
+"30.") never reaches the model and momentarily wrecks the total; Enter or click
+away commits, Escape reverts. An unparseable entry is discarded rather than
+zeroed — silently turning a mis-key into 0.00 would be worse than ignoring it.
 
 **Chain semantics.** Every operator applies to the **running total**, exactly
 like a physical 10-key — `1,200 + 340` then `× 0.35` gives `539.00`, because
