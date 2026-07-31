@@ -3,6 +3,7 @@ import {
   marksOnPage,
   pageProvenance,
   sourceOf,
+  shapesOnPage,
   tapesOnPage,
   type BinderPage,
   type Session,
@@ -11,6 +12,7 @@ import {
 import { renderInto, type Sizing } from '../pdf'
 import { MarkLayer } from './MarkLayer'
 import { TapeLayer } from './TapeLayer'
+import { ShapeLayer } from './ShapeLayer'
 
 /** Zoom state: a fit mode, or an absolute scale where 1 = 100%. */
 type Zoom = { mode: 'fitWidth' } | { mode: 'fitPage' } | { mode: 'scale'; factor: number }
@@ -40,7 +42,13 @@ export function PageView({
   onBackspaceTape,
   onMoveTape,
   onTitleTape,
-  onDeleteTape
+  onDeleteTape,
+  shapeColor,
+  selectedShapeId,
+  onDrawShape,
+  onSelectShape,
+  onMoveShape,
+  onTextShape
 }: {
   session: Session
   page: BinderPage | null
@@ -60,6 +68,12 @@ export function PageView({
   onMoveTape: (id: string, nx: number, ny: number) => void
   onTitleTape: (id: string, title: string) => void
   onDeleteTape: (id: string) => void
+  shapeColor: string
+  selectedShapeId: string | null
+  onDrawShape: (nx: number, ny: number, nx2: number, ny2: number) => void
+  onSelectShape: (id: string | null) => void
+  onMoveShape: (id: string, dx: number, dy: number) => void
+  onTextShape: (id: string, text: string) => void
 }): React.JSX.Element {
   const holder = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -225,6 +239,19 @@ export function PageView({
                   onPlace={onPlaceMark}
                   onSelect={onSelectMark}
                   onMove={onMoveMark}
+                />
+                <ShapeLayer
+                  shapes={shapesOnPage(session, page.id)}
+                  width={canvasBox.w}
+                  height={canvasBox.h}
+                  scale={effective}
+                  armed={armed}
+                  color={shapeColor}
+                  selectedId={selectedShapeId}
+                  onDraw={onDrawShape}
+                  onSelect={onSelectShape}
+                  onMove={onMoveShape}
+                  onText={onTextShape}
                 />
                 <TapeLayer
                   tapes={tapesOnPage(session, page.id)}

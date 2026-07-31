@@ -12,9 +12,12 @@ const api = {
   /** Open dialog; returns chosen paths (also authorizes them). PDFs or images. */
   openPdfs: (): Promise<string[]> => ipcRenderer.invoke('dialog:openPdfs'),
 
-  /** Authorize drag-dropped / session-restored paths. Returns the accepted ones. */
-  registerFiles: (paths: string[]): Promise<string[]> =>
-    ipcRenderer.invoke('files:register', paths),
+  /** Authorize genuine OS drag-dropped Files without exposing arbitrary paths. */
+  registerDroppedFiles: (files: File[]): Promise<string[]> =>
+    ipcRenderer.invoke(
+      'files:registerDropped',
+      files.map((file) => webUtils.getPathForFile(file)).filter(Boolean)
+    ),
 
   /** Raw bytes of a source file — a PDF for PDF.js, or an image for the canvas. */
   readSource: (filePath: string): Promise<Uint8Array> =>
@@ -32,13 +35,23 @@ const api = {
   saveSession: (session: unknown, existingPath: string | null): Promise<string | null> =>
     ipcRenderer.invoke('session:save', session, existingPath),
 
-  openSession: (): Promise<{ path: string; session: unknown } | null> =>
+  openSession: (): Promise<{
+    path: string
+    session?: unknown
+    recoverySession?: unknown
+    recoveredFrom?: string
+    error?: string
+  } | null> =>
     ipcRenderer.invoke('session:open'),
 
-  reveal: (filePath: string): Promise<void> => ipcRenderer.invoke('shell:reveal', filePath),
+  confirmDiscard: (): Promise<boolean> => ipcRenderer.invoke('session:confirmDiscard'),
 
-  /** File.path was removed from Electron; this is the sanctioned replacement. */
-  pathForFile: (file: File): string => webUtils.getPathForFile(file),
+  relinkSource: (sourceName: string): Promise<string | null> =>
+    ipcRenderer.invoke('dialog:relinkSource', sourceName),
+
+  setDirty: (dirty: boolean): void => ipcRenderer.send('session:setDirty', dirty),
+
+  reveal: (filePath: string): Promise<void> => ipcRenderer.invoke('shell:reveal', filePath),
 
   /** Dev seam (WPT_DEV_OPEN) — preload a binder without clicking dialogs. */
   onDevOpen: (

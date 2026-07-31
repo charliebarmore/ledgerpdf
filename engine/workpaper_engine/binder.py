@@ -24,15 +24,17 @@ Binder spec (JSON-friendly dict):
 
 from __future__ import annotations
 
+import os
 from contextlib import ExitStack
 from pathlib import Path
+from uuid import uuid4
 
 import pikepdf
 from pikepdf import Array, Name, OutlineItem
 
-from . import appearance, images
+from . import appearance, images, shapes
 from .geometry import PageGeom
-from .probe import sanitize_text
+from .probe import fingerprint_file, sanitize_text
 
 
 def _page_geom(page_obj: pikepdf.Object) -> PageGeom:
@@ -111,113 +113,153 @@ def export_binder(spec: dict) -> dict:
     """
     output = Path(spec["output"])
     output.parent.mkdir(parents=True, exist_ok=True)
+    temp_output = output.with_name(f".{output.name}.{os.getpid()}.{uuid4().hex}.tmp.pdf")
 
-    with ExitStack() as stack:
-        # An image source is wrapped into a one-page PDF in memory here and is
-        # then indistinguishable from any other source for the rest of export.
-        # The file on disk is never touched.
-        sources: dict[str, pikepdf.Pdf] = {
-            key: stack.enter_context(
-                images.image_to_pdf(path) if images.is_image(path) else pikepdf.open(path)
+    source_paths = {Path(value).resolve() for value in spec["sources"].values()}
+    if output.resolve() in source_paths:
+        raise ValueError("export destination must not overwrite a source file")
+
+    # A saved session points at external source files. Refuse to export if any
+    # one of those paths now contains different bytes: silently attaching old
+    # review marks to a replacement PDF is worse than failing loudly.
+    expected_fingerprints = spec.get("source_fingerprints", {})
+    for key, expected in expected_fingerprints.items():
+        actual = fingerprint_file(spec["sources"][key])
+        if actual["sha256"] != expected.get("sha256"):
+            raise ValueError(
+                f"source changed since import: {spec['sources'][key]} "
+                f"(expected {expected.get('sha256', 'unknown')}, got {actual['sha256']})"
             )
-            for key, path in spec["sources"].items()
-        }
-        out = stack.enter_context(pikepdf.new())
 
-        # 1. Assemble pages in final order; record page_id -> final index.
-        #    `rotate` is the user's DELTA on top of the source page's own
-        #    /Rotate, applied here so annotation geometry (step 3) sees the
-        #    final displayed orientation.
-        final_index: dict[str, int] = {}
-        for i, entry in enumerate(spec["pages"]):
-            src = sources[entry["source"]]
-            out.pages.append(src.pages[entry["index"]])
-            final_index[entry["id"]] = i
-            delta = int(entry.get("rotate", 0)) % 360
-            if delta:
-                page_obj = out.pages[i].obj
-                current = int(page_obj.get(Name.Rotate, 0))
-                page_obj.Rotate = (current + delta) % 360
-
-        # 2. Normalize pre-existing annotations on imported pages: repoint /P
-        #    at the new page so no annotation references its old document.
-        for page in out.pages:
-            if Name.Annots in page.obj:
-                for annot in page.obj.Annots:
-                    if isinstance(annot, pikepdf.Dictionary) or (
-                        isinstance(annot, pikepdf.Object)
-                        and annot.get(Name.Type, None) == Name.Annot
-                    ):
-                        annot[Name("/P")] = page.obj
-
-        def _annots_array(page_obj: pikepdf.Object) -> pikepdf.Object:
-            if Name.Annots not in page_obj:
-                page_obj.Annots = out.make_indirect(Array([]))
-            return page_obj.Annots
-
-        # 3. Our annotations (ticks, tapes).
-        #    With flatten=True the very same appearance is painted into the page
-        #    content instead of being attached as an annotation — the binder
-        #    leaves the building as a flat record. The trade is deliberate and
-        #    one-way: flattened marks carry no /WPT_Data, so that PDF can no
-        #    longer be re-edited. The session file remains the editable master.
-        flatten = bool(spec.get("flatten"))
-        n_marks = 0
-        pending_flat: dict[int, list[bytes]] = {}
-        for i, a in enumerate(spec.get("annotations", [])):
-            idx = final_index[a["page"]]
-            page = out.pages[idx]
-            page_obj = page.obj
-            geom = _page_geom(page_obj)
-            nm = f"wpt-{a['kind']}-{i:04d}"
-            if a["kind"] in ("tick", "cross", "text"):
-                annot = appearance.make_mark(out, geom, a, nm)
-            elif a["kind"] == "tape":
-                annot = appearance.make_tape(
-                    out, geom, a["nx"], a["ny"], a["lines"], a.get("tape", {}),
-                    nm, author=a.get("author", ""),
+    try:
+        with ExitStack() as stack:
+            # An image source is wrapped into a one-page PDF in memory here and is
+            # then indistinguishable from any other source for the rest of export.
+            # The file on disk is never touched.
+            sources: dict[str, pikepdf.Pdf] = {
+                key: stack.enter_context(
+                    images.image_to_pdf(path) if images.is_image(path) else pikepdf.open(path)
                 )
-            else:
-                raise ValueError(f"unknown annotation kind: {a['kind']}")
-            if flatten:
-                pending_flat.setdefault(idx, []).append(_flatten_op(page, annot))
-            else:
+                for key, path in spec["sources"].items()
+            }
+            out = stack.enter_context(pikepdf.new())
+
+            # 1. Assemble pages in final order; record page_id -> final index.
+            #    `rotate` is the user's DELTA on top of the source page's own
+            #    /Rotate, applied here so annotation geometry (step 3) sees the
+            #    final displayed orientation.
+            final_index: dict[str, int] = {}
+            for i, entry in enumerate(spec["pages"]):
+                src = sources[entry["source"]]
+                out.pages.append(src.pages[entry["index"]])
+                final_index[entry["id"]] = i
+                delta = int(entry.get("rotate", 0)) % 360
+                if delta:
+                    page_obj = out.pages[i].obj
+                    current = int(page_obj.get(Name.Rotate, 0))
+                    page_obj.Rotate = (current + delta) % 360
+
+            # 2. Normalize pre-existing annotations on imported pages: repoint /P
+            #    at the new page so no annotation references its old document.
+            for page in out.pages:
+                if Name.Annots in page.obj:
+                    for annot in page.obj.Annots:
+                        if isinstance(annot, pikepdf.Dictionary) or (
+                            isinstance(annot, pikepdf.Object)
+                            and annot.get(Name.Type, None) == Name.Annot
+                        ):
+                            annot[Name("/P")] = page.obj
+
+            def _annots_array(page_obj: pikepdf.Object) -> pikepdf.Object:
+                if Name.Annots not in page_obj:
+                    page_obj.Annots = out.make_indirect(Array([]))
+                return page_obj.Annots
+
+            # 3. Our annotations (ticks, tapes).
+            #    With flatten=True the very same appearance is painted into the page
+            #    content instead of being attached as an annotation — the binder
+            #    leaves the building as a flat record. The trade is deliberate and
+            #    one-way: flattened marks carry no /WPT_Data, so that PDF can no
+            #    longer be re-edited. The session file remains the editable master.
+            flatten = bool(spec.get("flatten"))
+            n_marks = 0
+            pending_flat: dict[int, list[bytes]] = {}
+            for i, a in enumerate(spec.get("annotations", [])):
+                idx = final_index[a["page"]]
+                page = out.pages[idx]
+                page_obj = page.obj
+                geom = _page_geom(page_obj)
+                nm = f"wpt-{a['kind']}-{i:04d}"
+                if a["kind"] in ("tick", "cross", "text"):
+                    annot = appearance.make_mark(out, geom, a, nm)
+                elif a["kind"] in ("rect", "ellipse", "line", "arrow", "highlight", "textbox"):
+                    annot = shapes.make_shape(out, geom, a, nm)
+                elif a["kind"] == "tape":
+                    annot = appearance.make_tape(
+                        out, geom, a["nx"], a["ny"], a["lines"], a.get("tape", {}),
+                        nm, author=a.get("author", ""),
+                    )
+                else:
+                    raise ValueError(f"unknown annotation kind: {a['kind']}")
+                if flatten:
+                    pending_flat.setdefault(idx, []).append(_flatten_op(page, annot))
+                else:
+                    _annots_array(page_obj).append(annot)
+                n_marks += 1
+
+            # Balance imported content with q/Q before painting on top of it, so
+            # a dirty source graphics state cannot smear or clip our marks.
+            for idx, ops in pending_flat.items():
+                page = out.pages[idx]
+                page.contents_add(b"q\n", prepend=True)
+                page.contents_add(b"\nQ\n" + b"\n".join(ops) + b"\n")
+
+            # 4. Internal links.
+            for i, ln in enumerate(spec.get("links", [])):
+                idx = final_index[ln["page"]]
+                page_obj = out.pages[idx].obj
+                geom = _page_geom(page_obj)
+                dest = _fit_dest(out, final_index[ln["target_page"]])
+                annot = appearance.make_link(
+                    out, geom, tuple(ln["rect_n"]), dest, nm=f"wpt-link-{i:04d}"
+                )
                 _annots_array(page_obj).append(annot)
-            n_marks += 1
 
-        # Balance the imported content with q/Q before painting on top of it, so
-        # a source page that leaves the graphics state dirty can't smear its
-        # colors or clip onto our marks.
-        for idx, ops in pending_flat.items():
-            page = out.pages[idx]
-            page.contents_add(b"q\n", prepend=True)
-            page.contents_add(b"\nQ\n" + b"\n".join(ops) + b"\n")
+            # 5. Bookmarks (file-level + nested imported outlines, retargeted).
+            with out.open_outline() as outline:
+                for item in _build_outline_items(out, spec.get("bookmarks", []), final_index):
+                    outline.root.append(item)
 
-        # 4. Internal links.
-        for i, ln in enumerate(spec.get("links", [])):
-            idx = final_index[ln["page"]]
-            page_obj = out.pages[idx].obj
-            geom = _page_geom(page_obj)
-            dest = _fit_dest(out, final_index[ln["target_page"]])
-            annot = appearance.make_link(
-                out, geom, tuple(ln["rect_n"]), dest, nm=f"wpt-link-{i:04d}"
-            )
-            _annots_array(page_obj).append(annot)
+            out.save(temp_output)
 
-        # 5. Bookmarks (file-level + nested imported outlines, retargeted).
-        with out.open_outline() as outline:
-            for item in _build_outline_items(out, spec.get("bookmarks", []), final_index):
-                outline.root.append(item)
+        # 6. Validate the temporary artifact before it can replace a prior good
+        #    binder. Syntax warnings are treated as export failure for a record.
+        with pikepdf.open(temp_output) as reopened:
+            problems = reopened.check_pdf_syntax()
+            n_pages = len(reopened.pages)
+        if problems:
+            raise ValueError(f"export validation failed: {'; '.join(str(p) for p in problems)}")
 
-        out.save(output)
+        # Recheck identity after materialization to catch a source changed while
+        # qpdf was reading it. Only then durably replace the destination.
+        for key, expected in expected_fingerprints.items():
+            actual = fingerprint_file(spec["sources"][key])
+            if actual["sha256"] != expected.get("sha256"):
+                raise ValueError(f"source changed during export: {spec['sources'][key]}")
 
-    # 6. Validate: reopen fresh and run qpdf's syntax checks (silent API —
-    #    pikepdf.Job's --check would print to stdout, which is the sidecar's
-    #    JSON protocol channel; the spike harness runs the full `qpdf --check`
-    #    independently on its side).
-    with pikepdf.open(output) as reopened:
-        problems = reopened.check_pdf_syntax()
-        n_pages = len(reopened.pages)
+        with temp_output.open("rb") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temp_output, output)
+        try:
+            directory_fd = os.open(output.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            pass
+    finally:
+        temp_output.unlink(missing_ok=True)
 
     return {
         "output": str(output),
@@ -225,5 +267,5 @@ def export_binder(spec: dict) -> dict:
         "marks": n_marks,
         "flattened": flatten,
         "final_index": final_index,
-        "check_problems": [str(p) for p in problems],
+        "check_problems": [],
     }

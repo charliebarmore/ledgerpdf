@@ -1,8 +1,17 @@
-import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
+import {
+  BrowserWindow,
+  app,
+  dialog,
+  ipcMain,
+  shell,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent
+} from 'electron'
+import { atomicWriteJson, readSessionWithRecovery } from './persistence'
+import { restrictedProcessEnv, runJsonCommand } from '../shared/json-process'
 
 /**
  * Main process. Owns ALL filesystem and subprocess access; the renderer gets a
@@ -17,6 +26,7 @@ import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
  */
 
 const isDev = !app.isPackaged
+const packageUiSmoke = !isDev && process.argv.includes('--wpt-package-ui-smoke')
 
 /**
  * Identity. Without this Electron calls itself "Electron" in the menu bar,
@@ -35,6 +45,27 @@ function engineDir(): string {
   return path.join(repoRoot(), 'engine')
 }
 
+/**
+ * Development uses the checked-out virtualenv. A packaged build carries a
+ * platform-native, one-folder PyInstaller sidecar in Resources/engine so the
+ * CPA workstation does not need Python or project dependencies installed.
+ */
+function engineCommand(): { executable: string; args: string[]; cwd: string } {
+  if (isDev) {
+    const cwd = engineDir()
+    const venv = path.join(cwd, '.venv')
+    const executable =
+      process.platform === 'win32'
+        ? path.join(venv, 'Scripts', 'python.exe')
+        : path.join(venv, 'bin', 'python')
+    return { executable, args: ['-m', 'workpaper_engine.cli'], cwd }
+  }
+
+  const cwd = path.join(process.resourcesPath, 'engine')
+  const executable = path.join(cwd, process.platform === 'win32' ? 'workpaper-engine.exe' : 'workpaper-engine')
+  return { executable, args: [], cwd }
+}
+
 /** The Dock icon. Optional — a missing file must never stop the app starting. */
 function appIconPath(): string | null {
   const candidates = [
@@ -44,17 +75,23 @@ function appIconPath(): string | null {
   return candidates.find((p) => p && existsSync(p)) ?? null
 }
 
-function pythonExe(): string {
-  const venv = path.join(engineDir(), '.venv')
-  return process.platform === 'win32'
-    ? path.join(venv, 'Scripts', 'python.exe')
-    : path.join(venv, 'bin', 'python')
-}
-
 /** Files the user explicitly opened. Gate for every read/probe. */
 const allowedInputs = new Set<string>()
 /** Paths the user picked in a save dialog. Gate for every write. */
 const allowedOutputs = new Set<string>()
+/** Session paths chosen in a save/open dialog. Existing saves must stay here. */
+const allowedSessions = new Set<string>()
+let rendererDirty = false
+const trustedWebContents = new Set<number>()
+
+function assertTrustedIpc(event: IpcMainInvokeEvent | IpcMainEvent): void {
+  if (
+    !trustedWebContents.has(event.sender.id) ||
+    (event.senderFrame && event.senderFrame !== event.sender.mainFrame)
+  ) {
+    throw new Error('refused IPC from an untrusted renderer')
+  }
+}
 
 function assertAllowed(set: Set<string>, p: unknown, what: string): string {
   if (typeof p !== 'string' || !set.has(path.resolve(p))) {
@@ -75,29 +112,15 @@ interface EngineErr {
   trace?: string
 }
 
-/** Spawn the Python engine for one JSON command. One process per command. */
+/** Spawn the Python engine for one bounded JSON command. */
 function runEngine(command: unknown): Promise<EngineOk | EngineErr> {
-  return new Promise((resolve) => {
-    const child = spawn(pythonExe(), ['-m', 'workpaper_engine.cli'], {
-      cwd: engineDir(),
-      env: { ...process.env, PYTHONPATH: engineDir() }
-    })
-    let out = ''
-    let err = ''
-    child.stdout.on('data', (d) => (out += d))
-    child.stderr.on('data', (d) => (err += d))
-    child.on('error', (e) =>
-      resolve({ ok: false, error: `engine not runnable (${pythonExe()}): ${e.message}` })
-    )
-    child.on('close', () => {
-      try {
-        resolve(JSON.parse(out.trim()))
-      } catch {
-        resolve({ ok: false, error: `engine returned no JSON. stderr: ${err.slice(0, 500)}` })
-      }
-    })
-    child.stdin.write(JSON.stringify(command))
-    child.stdin.end()
+  const engine = engineCommand()
+  return runJsonCommand<EngineOk | EngineErr>({
+    executable: engine.executable,
+    args: engine.args,
+    cwd: engine.cwd,
+    env: restrictedProcessEnv(isDev ? { PYTHONPATH: engine.cwd } : {}),
+    command
   })
 }
 
@@ -117,9 +140,13 @@ function isSourcePath(p: string): boolean {
 // --------------------------------------------------------------------- IPC
 
 function registerIpc(): void {
-  ipcMain.handle('engine:ping', () => runEngine({ cmd: 'ping' }))
+  ipcMain.handle('engine:ping', (event) => {
+    assertTrustedIpc(event)
+    return runEngine({ cmd: 'ping' })
+  })
 
-  ipcMain.handle('dialog:openPdfs', async () => {
+  ipcMain.handle('dialog:openPdfs', async (event) => {
+    assertTrustedIpc(event)
     const res = await dialog.showOpenDialog({
       title: 'Add files to binder',
       properties: ['openFile', 'multiSelections'],
@@ -134,12 +161,13 @@ function registerIpc(): void {
     return res.filePaths
   })
 
-  /** Authorize paths that arrived by drag-drop or from a reopened session. */
-  ipcMain.handle('files:register', (_e, paths: unknown) => {
+  /** Authorize paths extracted by the preload from genuine dropped Files. */
+  ipcMain.handle('files:registerDropped', (event, paths: unknown) => {
+    assertTrustedIpc(event)
     if (!Array.isArray(paths)) return []
     const ok: string[] = []
     for (const p of paths) {
-      if (typeof p === 'string' && isSourcePath(p)) {
+      if (typeof p === 'string' && isSourcePath(p) && existsSync(path.resolve(p))) {
         const abs = path.resolve(p)
         allowedInputs.add(abs)
         ok.push(abs)
@@ -150,17 +178,20 @@ function registerIpc(): void {
 
   /** Source bytes for rendering: a PDF for PDF.js, or an image for the canvas. */
   ipcMain.handle('fs:readSource', async (_e, p: unknown) => {
+    assertTrustedIpc(_e)
     const abs = assertAllowed(allowedInputs, p, 'file')
     const buf = await readFile(abs)
     return new Uint8Array(buf)
   })
 
   ipcMain.handle('engine:probe', async (_e, p: unknown) => {
+    assertTrustedIpc(_e)
     const abs = assertAllowed(allowedInputs, p, 'file')
     return runEngine({ cmd: 'probe', path: abs })
   })
 
   ipcMain.handle('dialog:saveBinderAs', async (_e, suggested: unknown) => {
+    assertTrustedIpc(_e)
     const res = await dialog.showSaveDialog({
       title: 'Export binder',
       defaultPath: typeof suggested === 'string' ? suggested : 'binder.pdf',
@@ -173,6 +204,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('engine:export', async (_e, spec: unknown) => {
+    assertTrustedIpc(_e)
     if (typeof spec !== 'object' || spec === null) {
       return { ok: false, error: 'bad spec' }
     }
@@ -185,7 +217,8 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('session:save', async (_e, session: unknown, existing: unknown) => {
-    let target = typeof existing === 'string' ? path.resolve(existing) : null
+    assertTrustedIpc(_e)
+    let target = typeof existing === 'string' ? assertAllowed(allowedSessions, existing, 'session path') : null
     if (!target) {
       const res = await dialog.showSaveDialog({
         title: 'Save binder session',
@@ -194,12 +227,14 @@ function registerIpc(): void {
       })
       if (res.canceled || !res.filePath) return null
       target = path.resolve(res.filePath)
+      allowedSessions.add(target)
     }
-    await writeFile(target, JSON.stringify(session, null, 2), 'utf8')
+    await atomicWriteJson(target, session)
     return target
   })
 
-  ipcMain.handle('session:open', async () => {
+  ipcMain.handle('session:open', async (event) => {
+    assertTrustedIpc(event)
     const res = await dialog.showOpenDialog({
       title: 'Open binder session',
       properties: ['openFile'],
@@ -207,12 +242,67 @@ function registerIpc(): void {
     })
     if (res.canceled || !res.filePaths[0]) return null
     const target = path.resolve(res.filePaths[0])
-    const text = await readFile(target, 'utf8')
-    return { path: target, session: JSON.parse(text) }
+    allowedSessions.add(target)
+    const read = await readSessionWithRecovery(target)
+    // Selecting a session authorizes only the PDF/image paths it explicitly
+    // references. The renderer never gets a generic string-to-file capability.
+    for (const raw of [read.session, read.recoverySession]) {
+      if (typeof raw !== 'object' || raw === null) continue
+      const sources = (raw as { sources?: unknown }).sources
+      if (!Array.isArray(sources)) continue
+      for (const source of sources) {
+        const candidate = (source as { path?: unknown })?.path
+        if (typeof candidate === 'string' && isSourcePath(candidate)) {
+          allowedInputs.add(path.resolve(candidate))
+        }
+      }
+    }
+    return { path: target, ...read }
+  })
+
+  ipcMain.handle('dialog:relinkSource', async (_e, sourceName: unknown) => {
+    assertTrustedIpc(_e)
+    const res = await dialog.showOpenDialog({
+      title: `Locate ${typeof sourceName === 'string' ? sourceName : 'missing source'}`,
+      properties: ['openFile'],
+      filters: [
+        { name: 'PDFs and images', extensions: [...SOURCE_EXTS] },
+        { name: 'PDF', extensions: ['pdf'] },
+        { name: 'Images', extensions: [...IMAGE_EXTS] }
+      ]
+    })
+    if (res.canceled || !res.filePaths[0]) return null
+    const target = path.resolve(res.filePaths[0])
+    if (!isSourcePath(target)) return null
+    allowedInputs.add(target)
+    return target
+  })
+
+  ipcMain.handle('session:confirmDiscard', async (event) => {
+    assertTrustedIpc(event)
+    if (!rendererDirty) return true
+    const result = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Unsaved workpaper changes',
+      message: 'This binder has changes that have not been saved.',
+      detail: 'Continue only if you want to discard those changes.',
+      buttons: ['Keep editing', 'Discard changes'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    })
+    return result.response === 1
+  })
+
+  ipcMain.on('session:setDirty', (_e, dirty: unknown) => {
+    assertTrustedIpc(_e)
+    rendererDirty = dirty === true
   })
 
   ipcMain.handle('shell:reveal', (_e, p: unknown) => {
-    if (typeof p === 'string') shell.showItemInFolder(path.resolve(p))
+    assertTrustedIpc(_e)
+    const target = assertAllowed(allowedOutputs, p, 'revealed output')
+    shell.showItemInFolder(target)
   })
 
   /**
@@ -222,7 +312,12 @@ function registerIpc(): void {
    * without OS screen-recording permission. Dev builds only.
    */
   ipcMain.on('dev:rendered', async (e) => {
-    const shot = isDev ? process.env.WPT_DEV_SHOT : undefined
+    assertTrustedIpc(e)
+    const shot = isDev
+      ? process.env.WPT_DEV_SHOT
+      : packageUiSmoke
+        ? process.env.WPT_PACKAGE_SMOKE_SHOT
+        : undefined
     if (!shot) return
     const wc = e.sender
     // Give thumbnails/canvas a beat to paint before snapshotting.
@@ -234,13 +329,14 @@ function registerIpc(): void {
     } catch (err) {
       console.error('[dev] capture failed', err)
     }
-    if (process.env.WPT_DEV_EXIT) app.quit()
+    if ((isDev && process.env.WPT_DEV_EXIT) || packageUiSmoke) app.quit()
   })
 }
 
 // ------------------------------------------------------------------ window
 
 function createWindow(): void {
+  let allowWindowClose = false
   const win = new BrowserWindow({
     width: 1440,
     height: 920,
@@ -256,13 +352,26 @@ function createWindow(): void {
       sandbox: true
     }
   })
+  trustedWebContents.add(win.webContents.id)
+  win.webContents.once('destroyed', () => trustedWebContents.delete(win.webContents.id))
+
+  // This application never needs browser permissions, webviews, or navigation.
+  // Deny them centrally so a future renderer bug cannot silently widen scope.
+  win.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
+  win.webContents.session.setPermissionCheckHandler(() => false)
+  win.webContents.on('will-attach-webview', (event) => event.preventDefault())
+  win.webContents.on('will-navigate', (event) => event.preventDefault())
 
   win.once('ready-to-show', () => {
     win.show()
     // Dev seam: WPT_DEV_OPEN="/a.pdf:/b.pdf" preloads a binder so the import →
     // organize → export flow can be exercised without clicking through dialogs.
     // Dev builds only; packaged builds ignore it.
-    const preopen = isDev ? process.env.WPT_DEV_OPEN : undefined
+    const preopen = isDev
+      ? process.env.WPT_DEV_OPEN
+      : packageUiSmoke
+        ? process.env.WPT_PACKAGE_SMOKE_OPEN
+        : undefined
     if (preopen) {
       const paths = preopen
         .split(path.delimiter)
@@ -271,20 +380,43 @@ function createWindow(): void {
       for (const p of paths) allowedInputs.add(p)
       // Optional: WPT_DEV_EXPORT lets the smoke test drive a real export
       // through IPC + the engine without a save dialog.
-      const exportTo = process.env.WPT_DEV_EXPORT
+      const exportTo = isDev && process.env.WPT_DEV_EXPORT
         ? path.resolve(process.env.WPT_DEV_EXPORT)
         : undefined
       if (exportTo) allowedOutputs.add(exportTo)
       win.webContents.send('dev:open', {
         paths,
         exportTo,
-        seedMarks: !!process.env.WPT_DEV_MARKS
+        seedMarks: isDev && !!process.env.WPT_DEV_MARKS
       })
     }
   })
 
   // Never let the app navigate away or spawn windows — it is a local tool.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+
+  win.on('close', (event) => {
+    if (
+      allowWindowClose ||
+      !rendererDirty ||
+      (isDev && process.env.WPT_DEV_EXIT) ||
+      packageUiSmoke
+    ) {
+      return
+    }
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      title: 'Unsaved workpaper changes',
+      message: 'This binder has changes that have not been saved.',
+      detail: 'Keep editing and save the session before closing.',
+      buttons: ['Keep editing', 'Discard changes'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    })
+    if (choice === 0) event.preventDefault()
+    else allowWindowClose = true
+  })
 
   const devUrl = process.env.ELECTRON_RENDERER_URL
   if (isDev && devUrl) {
@@ -294,7 +426,21 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Release-pipeline health check: exercises the packaged main-process path and
+  // bundled native engine without opening client files or exposing dev IPC.
+  if (!isDev && process.argv.includes('--wpt-package-smoke')) {
+    const result = await runEngine({ cmd: 'ping' })
+    if (!result.ok) {
+      console.error(`[package-smoke] ${result.error}`)
+      app.exit(1)
+      return
+    }
+    console.log(`[package-smoke] engine ${String(result.version)} ready`)
+    app.exit(0)
+    return
+  }
+
   // Dock icon, macOS only. In dev this is the difference between a generic
   // Electron diamond and something recognisable in ⌘-Tab.
   if (process.platform === 'darwin' && app.dock) {

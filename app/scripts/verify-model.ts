@@ -11,6 +11,7 @@
 
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import {
   SESSION_FORMAT_VERSION,
@@ -19,6 +20,7 @@ import {
   addBookmark,
   addMark,
   addSource,
+  addShape,
   addStamp,
   addTape,
   buildBookmarks,
@@ -36,8 +38,13 @@ import {
   marksOnPage,
   removeBookmark,
   removeMarks,
+  isDragMeaningful,
+  moveShape,
+  removeShapes,
   removeStamp,
   removeTapes,
+  shapesOnPage,
+  updateShape,
   rotatePages,
   sanitizeTitle,
   setBookmarkTitle,
@@ -125,6 +132,10 @@ async function main(): Promise<number> {
   s = addSource(s, pb.probe as ProbeWire)
   check('import two sources', s.sources.length === 2 && s.pages.length === 6, `pages=${s.pages.length}`)
   check('page ids unique', new Set(s.pages.map((p) => p.id)).size === 6)
+  check(
+    'imports fingerprint the exact source bytes',
+    s.sources.every((source) => /^[a-f0-9]{64}$/.test(source.fingerprint?.sha256 ?? ''))
+  )
 
   const bIds = s.pages.filter((p) => p.source === s.sources[1].id).map((p) => p.id)
   const aIds = s.pages.filter((p) => p.source === s.sources[0].id).map((p) => p.id)
@@ -772,6 +783,171 @@ async function main(): Promise<number> {
     )
   }
 
+  // --- drawn annotations: rectangle, ellipse, line, arrow, highlight, note.
+  //     These are DRAGGED, so the model works in two corners rather than a
+  //     point — a different shape of bug is possible and worth pinning down.
+  let drawn: Session = { ...s, reviewer: 'CJB' }
+  const sh1 = addShape(drawn, {
+    page: drawn.pages[0].id,
+    kind: 'rect',
+    nx: 0.2,
+    ny: 0.3,
+    nx2: 0.6,
+    ny2: 0.5,
+    color: 'red',
+    width: 2
+  })
+  drawn = sh1.session
+  check(
+    'a drawn shape keeps both corners, its color and its weight',
+    (() => {
+      const x = shapesOnPage(drawn, drawn.pages[0].id)[0]
+      return x.nx === 0.2 && x.ny2 === 0.5 && x.color === 'red' && x.width === 2
+    })()
+  )
+  check(
+    'shapes carry reviewer initials and a timestamp like marks do',
+    drawn.shapes![0].author === 'CJB' && typeof drawn.shapes![0].created === 'string'
+  )
+  check(
+    'corners are clamped onto the page',
+    (() => {
+      const x = addShape(drawn, {
+        page: drawn.pages[0].id,
+        kind: 'line',
+        nx: -3,
+        ny: 0.5,
+        nx2: 9,
+        ny2: 0.5,
+        color: 'blue',
+        width: 1
+      }).session.shapes!.slice(-1)[0]
+      return x.nx === 0 && x.nx2 === 1
+    })()
+  )
+  check(
+    'stroke weight is clamped to the allowed range',
+    updateShape(drawn, sh1.id, { width: 99 }).shapes![0].width === 8 &&
+      updateShape(drawn, sh1.id, { width: 0 }).shapes![0].width === 0.5
+  )
+  check(
+    'moving a shape slides both corners together and stops at the edge',
+    (() => {
+      // Pushed hard right: the shape must stop flush, not deform.
+      const moved = moveShape(drawn, sh1.id, 5, 0).shapes![0]
+      return (
+        Math.abs(moved.nx2 - 1) < 1e-9 &&
+        Math.abs(moved.nx2 - moved.nx - 0.4) < 1e-9 &&
+        moved.ny === 0.3
+      )
+    })(),
+    JSON.stringify(moveShape(drawn, sh1.id, 5, 0).shapes![0])
+  )
+  check(
+    'a stray click is not a shape, but a real drag is',
+    !isDragMeaningful(0.5, 0.5, 0.5, 0.5) &&
+      !isDragMeaningful(0.5, 0.5, 0.501, 0.501) &&
+      isDragMeaningful(0.5, 0.5, 0.52, 0.5),
+    'min-drag guard'
+  )
+  check(
+    'shapes survive save/reopen',
+    (() => {
+      const rt = parseSession(JSON.parse(JSON.stringify(drawn)))
+      return 'session' in rt && rt.session.shapes?.length === 1 && rt.session.shapes[0].color === 'red'
+    })()
+  )
+  check(
+    'a shape with a junk color or weight is repaired, not rejected',
+    (() => {
+      const junk = parseSession({
+        ...drawn,
+        shapes: [{ ...drawn.shapes![0], color: 'chartreuse', width: 'thick' }]
+      })
+      return (
+        'session' in junk && junk.session.shapes![0].color === 'red' && junk.session.shapes![0].width === 1.5
+      )
+    })()
+  )
+  check(
+    'deleting a page takes its shapes with it',
+    deletePages(drawn, [drawn.pages[0].id]).shapes?.length === 0
+  )
+  check('removeShapes drops just the named one', removeShapes(drawn, [sh1.id]).shapes?.length === 0)
+
+  // Every kind through the real engine, including the degenerate case: a
+  // perfectly horizontal line has zero height, and a zero-height /BBox makes an
+  // invalid annotation unless it is padded.
+  let allKinds: Session = { ...s, reviewer: 'CJB' }
+  const KINDS = ['rect', 'ellipse', 'line', 'arrow', 'highlight', 'textbox'] as const
+  KINDS.forEach((kind, i) => {
+    allKinds = addShape(allKinds, {
+      page: allKinds.pages[0].id,
+      kind,
+      nx: 0.1,
+      ny: 0.1 + i * 0.12,
+      nx2: 0.6,
+      // line/arrow deliberately flat -> zero height
+      ny2: kind === 'line' || kind === 'arrow' ? 0.1 + i * 0.12 : 0.18 + i * 0.12,
+      color: 'red',
+      width: 2,
+      ...(kind === 'textbox' ? { text: 'Agreed to the general ledger.' } : {})
+    }).session
+  })
+  const SHAPES_OUT = path.join(REPO, 'spike', 'out', 'app_binder_shapes.pdf')
+  const shapeExport = await runEngine({
+    cmd: 'export',
+    binder: toExportSpec(allKinds, SHAPES_OUT)
+  })
+  check(
+    'every shape kind exports cleanly, flat lines included',
+    shapeExport.ok === true && shapeExport.result.check_problems.length === 0,
+    JSON.stringify(shapeExport.error ?? shapeExport.result?.check_problems)
+  )
+  if (shapeExport.ok) {
+    const sp = await runEngine({ cmd: 'probe', path: SHAPES_OUT })
+    const got = sp.ok
+      ? sp.probe.pages
+          .flatMap((p: any) => (p.annotations ?? []).filter((a: any) => a.wpt_kind))
+          .map((a: any) => a.wpt_kind)
+      : []
+    check(
+      'all six kinds land in the PDF with their metadata',
+      KINDS.every((k) => got.includes(k)),
+      JSON.stringify(got)
+    )
+  }
+
+  // The property that matters: a shape must export where it was drawn. A red
+  // rectangle alone on a page — its outline's centroid is the drag's centre.
+  const RECT_OUT = path.join(REPO, 'spike', 'out', 'app_binder_rect.pdf')
+  let rectOnly: Session = newSession()
+  rectOnly = addSource(rectOnly, pa.probe as ProbeWire)
+  rectOnly = addShape(rectOnly, {
+    page: rectOnly.pages[0].id,
+    kind: 'rect',
+    nx: 0.3,
+    ny: 0.25,
+    nx2: 0.7,
+    ny2: 0.55,
+    color: 'red',
+    width: 3
+  }).session
+  const rectExport = await runEngine({ cmd: 'export', binder: toExportSpec(rectOnly, RECT_OUT) })
+  if (rectExport.ok) {
+    const pos = await runPython([
+      path.join(REPO, 'spike', 'check_mark_positions.py'),
+      RECT_OUT,
+      '0',
+      'red',
+      '0.5',
+      '0.4'
+    ])
+    check('a drawn rectangle exports centred where it was dragged', pos.code === 0, pos.out.trim())
+  } else {
+    check('a drawn rectangle exports centred where it was dragged', false, String(rectExport.error))
+  }
+
   // --- the real thing: export through the engine and re-probe.
   //     A tape rides along, low on the page so it can't overlap the marks the
   //     pixel checks below are looking for.
@@ -786,6 +962,10 @@ async function main(): Promise<number> {
 
   const spec = toExportSpec(marked, OUT)
   check('spec only lists used sources', Object.keys(spec.sources).length === 2)
+  check(
+    'export spec carries every used source fingerprint',
+    Object.keys(spec.source_fingerprints ?? {}).length === Object.keys(spec.sources).length
+  )
   check('spec carries marks and tapes as annotations', spec.annotations.length === 3,
     JSON.stringify(spec.annotations.map((a) => a.kind)))
   const tapeSpec = spec.annotations.find((a) => a.kind === 'tape') as any
@@ -800,6 +980,34 @@ async function main(): Promise<number> {
   const exported = await runEngine({ cmd: 'export', binder: spec })
   check('engine accepts app-built spec', exported.ok === true, String(exported.error ?? '').slice(0, 300))
   if (!exported.ok) return report()
+
+  const wrongIdentity = structuredClone(spec)
+  const fingerprintId = Object.keys(wrongIdentity.source_fingerprints ?? {})[0]
+  if (fingerprintId) wrongIdentity.source_fingerprints![fingerprintId].sha256 = '0'.repeat(64)
+  const priorOutput = await readFile(OUT)
+  wrongIdentity.output = OUT
+  const refused = await runEngine({ cmd: 'export', binder: wrongIdentity })
+  check(
+    'engine refuses a source whose bytes no longer match the reviewed file',
+    refused.ok === false && /source changed since import/i.test(refused.error ?? ''),
+    String(refused.error ?? '').slice(0, 240)
+  )
+  check(
+    'a failed export preserves the previous complete binder',
+    (await readFile(OUT)).equals(priorOutput)
+  )
+  check(
+    'failed/successful exports leave no temporary PDF behind',
+    !(await readdir(path.dirname(OUT))).some((name) => name.endsWith('.tmp.pdf'))
+  )
+
+  const overwriteSource = structuredClone(spec)
+  overwriteSource.output = Object.values(overwriteSource.sources)[0]
+  const protectedSource = await runEngine({ cmd: 'export', binder: overwriteSource })
+  check(
+    'export can never overwrite one of its source files',
+    protectedSource.ok === false && /must not overwrite a source/i.test(protectedSource.error ?? '')
+  )
   check(
     'exported page count + clean check',
     exported.result.pages === 5 && exported.result.check_problems.length === 0,

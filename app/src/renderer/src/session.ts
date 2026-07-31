@@ -26,12 +26,20 @@ export interface OutlineNode {
  */
 export type SourceKind = 'pdf' | 'image'
 
+export interface SourceFingerprint {
+  sha256: string
+  size: number
+  mtime_ns: number
+}
+
 export interface SourceDoc {
   id: string
   path: string
   name: string
   nPages: number
   kind: SourceKind
+  /** Identity of the exact bytes reviewed; verified again before export. */
+  fingerprint?: SourceFingerprint
   /** The source's own bookmark tree, to nest under its file-level bookmark. */
   outline: OutlineNode[]
 }
@@ -60,8 +68,65 @@ export interface UserBookmark {
 /** The review-mark palette. Colors and glyphs are defined by the engine. */
 export type MarkKind = 'tick' | 'cross' | 'text'
 
-/** What the toolbar can arm: a mark to stamp, or a tape to lay down. */
-export type ToolKind = MarkKind | 'tape'
+/**
+ * Drawn annotations — dragged, not stamped. A mark is placed at a point and has
+ * a fixed size; these take their geometry from two corners.
+ */
+export type ShapeKind = 'rect' | 'ellipse' | 'line' | 'arrow' | 'highlight' | 'textbox'
+
+/** Must match engine shapes.SHAPE_COLORS — these are content, not UI theme. */
+export const SHAPE_COLORS: Record<string, string> = {
+  red: 'rgb(184,38,38)',
+  green: 'rgb(33,140,33)',
+  blue: 'rgb(26,84,153)',
+  black: 'rgb(31,31,36)',
+  orange: 'rgb(217,115,26)'
+}
+export const SHAPE_COLOR_NAMES = ['red', 'green', 'blue', 'black', 'orange'] as const
+export type ShapeColor = (typeof SHAPE_COLOR_NAMES)[number]
+
+export const SHAPE_WIDTH_DEFAULT = 1.5
+export const SHAPE_WIDTH_MIN = 0.5
+export const SHAPE_WIDTH_MAX = 8
+
+/** Highlighter appearance, mirrored from engine shapes.py for the preview. */
+export const HIGHLIGHT_FILL = 'rgba(255,235,59,0.4)'
+
+export interface Shape {
+  id: string
+  page: string
+  kind: ShapeKind
+  /** The two dragged corners, normalized to the page as displayed. */
+  nx: number
+  ny: number
+  nx2: number
+  ny2: number
+  color: ShapeColor
+  /** Stroke width in points. */
+  width: number
+  /** For kind 'textbox'. */
+  text?: string
+  author?: string
+  note?: string
+  created?: string
+}
+
+/** What the toolbar can arm: a mark to stamp, a tape, or a shape to drag out. */
+export type ToolKind = MarkKind | 'tape' | ShapeKind
+
+/** Tools that are drawn by dragging rather than placed with one click. */
+export const DRAG_TOOLS: readonly ShapeKind[] = [
+  'rect',
+  'ellipse',
+  'line',
+  'arrow',
+  'highlight',
+  'textbox'
+]
+
+export function isShapeKind(k: ToolKind): k is ShapeKind {
+  return (DRAG_TOOLS as readonly string[]).includes(k)
+}
 
 /**
  * A review mark placed on a page. Coordinates are normalized against the page
@@ -144,6 +209,8 @@ export interface Session {
   stamps?: string[]
   /** Calculator tapes, anchored to page ids exactly as marks are. */
   tapes?: Tape[]
+  /** Drawn annotations — rectangles, ellipses, lines, arrows, highlights, notes. */
+  shapes?: Shape[]
 }
 
 export interface BookmarkNode {
@@ -163,6 +230,7 @@ export interface BookmarkNode {
 
 export interface ExportSpec {
   sources: Record<string, string>
+  source_fingerprints?: Record<string, SourceFingerprint>
   pages: Array<{ id: string; source: string; index: number; rotate: number }>
   bookmarks: BookmarkNode[]
   /** Engine-side annotation specs — review marks today, tapes/links later. */
@@ -186,6 +254,7 @@ export interface ProbeWire {
   pages: Array<{ index: number; rotate: number; mediabox: number[]; cropbox: number[] | null }>
   outline: Array<{ title: string; dest_page: number | null; children: unknown[] }>
   image?: { pixels: number[]; lossless: boolean; reason: string }
+  fingerprint?: SourceFingerprint
 }
 
 // --------------------------------------------------------------- construction
@@ -234,6 +303,7 @@ export function addSource(session: Session, probe: ProbeWire): Session {
     name: baseName(probe.path),
     nPages: probe.n_pages,
     kind: probe.kind === 'image' ? 'image' : 'pdf',
+    ...(probe.fingerprint ? { fingerprint: probe.fingerprint } : {}),
     outline: normalizeOutline(probe.outline)
   }
   const newPages: BinderPage[] = probe.pages.map((p) => ({
@@ -290,6 +360,7 @@ export function deletePages(session: Session, ids: string[]): Session {
     // Anything anchored to a deleted page goes with it (undo restores both).
     ...(session.marks ? { marks: session.marks.filter((m) => !idSet.has(m.page)) } : {}),
     ...(session.tapes ? { tapes: session.tapes.filter((t) => !idSet.has(t.page)) } : {}),
+    ...(session.shapes ? { shapes: session.shapes.filter((x) => !idSet.has(x.page)) } : {}),
     ...(session.bookmarks
       ? { bookmarks: session.bookmarks.filter((b) => !idSet.has(b.page)) }
       : {})
@@ -354,6 +425,86 @@ export function marksByPage(session: Session): Map<string, Mark[]> {
     else out.set(m.page, [m])
   }
   return out
+}
+
+// --------------------------------------------------------------------- shapes
+
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
+
+export function addShape(
+  session: Session,
+  shape: Omit<Shape, 'id' | 'created' | 'author'> & { author?: string }
+): { session: Session; id: string } {
+  const seq = session.seq + 1
+  const id = `sh_${seq}`
+  const next: Shape = {
+    ...shape,
+    id,
+    nx: clamp01(shape.nx),
+    ny: clamp01(shape.ny),
+    nx2: clamp01(shape.nx2),
+    ny2: clamp01(shape.ny2),
+    author: shape.author ?? session.reviewer ?? '',
+    created: new Date().toISOString()
+  }
+  return { session: { ...session, seq, shapes: [...(session.shapes ?? []), next] }, id }
+}
+
+export function updateShape(session: Session, id: string, patch: Partial<Shape>): Session {
+  return {
+    ...session,
+    shapes: (session.shapes ?? []).map((s) =>
+      s.id === id
+        ? {
+            ...s,
+            ...patch,
+            nx: patch.nx === undefined ? s.nx : clamp01(patch.nx),
+            ny: patch.ny === undefined ? s.ny : clamp01(patch.ny),
+            nx2: patch.nx2 === undefined ? s.nx2 : clamp01(patch.nx2),
+            ny2: patch.ny2 === undefined ? s.ny2 : clamp01(patch.ny2),
+            width:
+              patch.width === undefined
+                ? s.width
+                : Math.min(SHAPE_WIDTH_MAX, Math.max(SHAPE_WIDTH_MIN, patch.width))
+          }
+        : s
+    )
+  }
+}
+
+/**
+ * Slide a shape by a normalized delta, keeping BOTH corners on the page. Moving
+ * is clamped as a whole so a shape never silently deforms when dragged into an
+ * edge — which is what per-corner clamping would do.
+ */
+export function moveShape(session: Session, id: string, dx: number, dy: number): Session {
+  const s = (session.shapes ?? []).find((x) => x.id === id)
+  if (!s) return session
+  const clampedDx = Math.min(1 - Math.max(s.nx, s.nx2), Math.max(-Math.min(s.nx, s.nx2), dx))
+  const clampedDy = Math.min(1 - Math.max(s.ny, s.ny2), Math.max(-Math.min(s.ny, s.ny2), dy))
+  return updateShape(session, id, {
+    nx: s.nx + clampedDx,
+    ny: s.ny + clampedDy,
+    nx2: s.nx2 + clampedDx,
+    ny2: s.ny2 + clampedDy
+  })
+}
+
+export function removeShapes(session: Session, ids: string[]): Session {
+  const set = new Set(ids)
+  return { ...session, shapes: (session.shapes ?? []).filter((s) => !set.has(s.id)) }
+}
+
+export function shapesOnPage(session: Session, pageId: string | null): Shape[] {
+  if (!pageId) return []
+  return (session.shapes ?? []).filter((s) => s.page === pageId)
+}
+
+/** Is this drag big enough to be a shape, or was it a stray click? */
+export const SHAPE_MIN_DRAG = 0.004
+
+export function isDragMeaningful(nx: number, ny: number, nx2: number, ny2: number): boolean {
+  return Math.abs(nx2 - nx) >= SHAPE_MIN_DRAG || Math.abs(ny2 - ny) >= SHAPE_MIN_DRAG
 }
 
 // --------------------------------------------------------------- image pages
@@ -851,11 +1002,16 @@ export function toExportSpec(
   const { flatten = false, ...bookmarkOpts } = opts
   const used = new Set(session.pages.map((p) => p.source))
   const sources: Record<string, string> = {}
+  const sourceFingerprints: Record<string, SourceFingerprint> = {}
   for (const s of session.sources) {
-    if (used.has(s.id)) sources[s.id] = s.path
+    if (used.has(s.id)) {
+      sources[s.id] = s.path
+      if (s.fingerprint) sourceFingerprints[s.id] = s.fingerprint
+    }
   }
   return {
     sources,
+    ...(Object.keys(sourceFingerprints).length ? { source_fingerprints: sourceFingerprints } : {}),
     pages: session.pages.map((p) => ({
       id: p.id,
       source: p.source,
@@ -878,6 +1034,24 @@ export function toExportSpec(
         ...(m.note ? { note: m.note } : {}),
         ...(m.created ? { created: m.created } : {})
       })),
+      // Drawn annotations. Two corners, not a point — the engine turns them
+      // into stroked paths sized to the drag.
+      ...(session.shapes ?? [])
+        .filter((x) => session.pages.some((p) => p.id === x.page))
+        .map((x) => ({
+          kind: x.kind,
+          page: x.page,
+          nx: x.nx,
+          ny: x.ny,
+          nx2: x.nx2,
+          ny2: x.ny2,
+          color: x.color,
+          width: x.width,
+          ...(x.text ? { text: x.text } : {}),
+          ...(x.author ? { author: x.author } : {}),
+          ...(x.note ? { note: x.note } : {}),
+          ...(x.created ? { created: x.created } : {})
+        })),
       // Tapes carry BOTH the drawn lines and the structured entries: the lines
       // are what a viewer shows, the entries are what a tie-out layer reads.
       ...(session.tapes ?? [])
@@ -934,6 +1108,22 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
         : {}),
       ...(Array.isArray(s.marks)
         ? { marks: s.marks.filter((m) => pageIds.has(m.page)) }
+        : {}),
+      ...(Array.isArray(s.shapes)
+        ? {
+            shapes: s.shapes
+              .filter((x) => pageIds.has(x.page))
+              .map((x) => ({
+                ...x,
+                color: (SHAPE_COLOR_NAMES as readonly string[]).includes(x.color)
+                  ? x.color
+                  : 'red',
+                width:
+                  typeof x.width === 'number' && Number.isFinite(x.width)
+                    ? x.width
+                    : SHAPE_WIDTH_DEFAULT
+              }))
+          }
         : {}),
       ...(Array.isArray(s.tapes)
         ? {

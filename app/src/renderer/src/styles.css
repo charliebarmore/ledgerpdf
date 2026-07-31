@@ -64,11 +64,8 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-.brand {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  margin-right: var(--sm);
+.toolbar button {
+  white-space: nowrap;
 }
 
 .toolbar .sep {
@@ -580,6 +577,113 @@ button.link {
 .tape-close:hover {
   color: var(--error);
   border-color: var(--error);
+}
+
+/* drawn annotations: shapes, highlights, text notes */
+
+.shapelayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.shapelayer.is-armed {
+  pointer-events: auto;
+  cursor: crosshair;
+  z-index: 3;
+}
+
+.shapesvg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+
+.shape {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.shape:active {
+  cursor: grabbing;
+}
+
+/* A hairline stroke is hard to grab, so widen the hit area without changing
+   what is drawn. */
+.shape > * {
+  vector-effect: non-scaling-stroke;
+}
+
+.shape.is-selected {
+  filter: drop-shadow(0 0 2px var(--primary));
+}
+
+.shape-draft {
+  opacity: 0.75;
+}
+
+.shape-text {
+  position: absolute;
+  font-family: var(--ui);
+  background: transparent;
+  border: 0;
+  resize: none;
+  outline: none;
+  overflow: hidden;
+}
+
+.shape-text:focus {
+  background: rgb(255 255 255 / 0.6);
+}
+
+/* colour swatches for new shapes */
+
+.swatches {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid rgb(0 0 0 / 0.25);
+}
+
+.swatch.on {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.sep-thin {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+  flex: none;
+}
+
+.glyph-note {
+  display: inline-block;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 3px;
+}
+
+/* the palette carries a lot of tools now — keep each one tight */
+.palette button {
+  padding: 4px 7px;
+}
+
+.glyph-tape {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: -0.5px;
 }
 
 /* custom stamps — the firm's own tick-mark legend, in the mark palette */

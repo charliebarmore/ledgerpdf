@@ -20,11 +20,11 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { readFile, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { runEngine } from './engine'
+import { atomicWriteJson, readSessionWithRecovery } from '../main/persistence'
 import {
   addBookmark,
   addMark,
@@ -78,9 +78,49 @@ const SOURCE_EXTS = [
   '.webp'
 ]
 
+/**
+ * MCP is an agent boundary, not part of the local desktop app. It gets no file
+ * access unless the user explicitly scopes one or more roots when registering
+ * the server: WPT_MCP_ROOTS=/engagements/client-a (path-delimited).
+ */
+const MCP_ROOTS = (process.env.WPT_MCP_ROOTS ?? '')
+  .split(path.delimiter)
+  .map((root) => root.trim())
+  .filter(Boolean)
+  .map((root) => {
+    const absolute = path.resolve(root)
+    return existsSync(absolute) ? realpathSync(absolute) : absolute
+  })
+
+function inside(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate)
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+}
+
+function resolveAllowedPath(p: string, options: { mustExist: boolean; purpose: string }): string {
+  if (MCP_ROOTS.length === 0) {
+    throw new Error(
+      `MCP file access is disabled; set WPT_MCP_ROOTS to an approved engagement folder before ${options.purpose}`
+    )
+  }
+  const requested = path.resolve(p)
+  let canonical: string
+  if (options.mustExist) {
+    if (!existsSync(requested)) throw new Error(`no such file: ${requested}`)
+    canonical = realpathSync(requested)
+  } else {
+    const parent = path.dirname(requested)
+    if (!existsSync(parent)) throw new Error(`destination folder does not exist: ${parent}`)
+    canonical = path.join(realpathSync(parent), path.basename(requested))
+  }
+  if (!MCP_ROOTS.some((root) => inside(root, canonical))) {
+    throw new Error(`${options.purpose} is outside WPT_MCP_ROOTS: ${canonical}`)
+  }
+  return canonical
+}
+
 function resolveSource(p: string): string {
-  const abs = path.resolve(p)
-  if (!existsSync(abs)) throw new Error(`no such file: ${abs}`)
+  const abs = resolveAllowedPath(p, { mustExist: true, purpose: 'reading a source' })
   if (!SOURCE_EXTS.some((e) => abs.toLowerCase().endsWith(e))) {
     throw new Error(`not a PDF or supported image: ${abs}`)
   }
@@ -215,14 +255,28 @@ server.registerTool(
   },
   async ({ path: p }) => {
     try {
-      const abs = path.resolve(p)
-      const parsed = parseSession(JSON.parse(await readFile(abs, 'utf8')))
+      const abs = resolveAllowedPath(p, { mustExist: true, purpose: 'opening a session' })
+      const read = await readSessionWithRecovery(abs)
+      if (read.session === undefined) return fail(`cannot open session — ${read.error}`)
+      let parsed = parseSession(read.session)
+      let recovered = !!read.recoveredFrom
+      if ('error' in parsed && read.recoverySession !== undefined) {
+        const fallback = parseSession(read.recoverySession)
+        if (!('error' in fallback)) {
+          parsed = fallback
+          recovered = true
+        }
+      }
       if ('error' in parsed) return fail(`cannot open session — ${parsed.error}`)
       session = parsed.session
-      sessionPath = abs
+      for (const source of session.sources) {
+        resolveAllowedPath(source.path, { mustExist: true, purpose: 'opening a session source' })
+      }
+      sessionPath = recovered ? null : abs
       const missing = session.sources.filter((s) => !existsSync(s.path))
       return text(
         `Opened ${baseName(abs)} — ${summary(session)}` +
+          (recovered ? '\nWARNING: recovered the previous complete generation; save to a new path.' : '') +
           (missing.length
             ? `\nWARNING: ${missing.length} source file(s) missing: ${missing.map((s) => s.path).join(', ')}`
             : '')
@@ -247,10 +301,12 @@ server.registerTool(
     }
   },
   async ({ path: p }) => {
-    const target = p ? path.resolve(p) : sessionPath
+    const target = p
+      ? resolveAllowedPath(p, { mustExist: false, purpose: 'saving a session' })
+      : sessionPath
     if (!target) return fail('no path given and this session has never been saved')
     try {
-      await writeFile(target, JSON.stringify(session, null, 2), 'utf8')
+      await atomicWriteJson(target, session)
       sessionPath = target
       return text(`Saved ${summary(session)}\n→ ${target}\nOpen it in Workpaper Binder to review.`)
     } catch (e) {
@@ -535,7 +591,7 @@ server.registerTool(
   },
   async ({ output, pageCounts, flatten }) => {
     if (session.pages.length === 0) return fail('nothing to export — the binder is empty')
-    const out = path.resolve(output)
+    const out = resolveAllowedPath(output, { mustExist: false, purpose: 'exporting a binder' })
     const spec = toExportSpec(session, out, {
       pageCounts: pageCounts ?? false,
       flatten: flatten ?? false

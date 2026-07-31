@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookmarkPanel } from './components/BookmarkPanel'
 import { MarkInspector } from './components/MarkInspector'
+import { ShapeInspector } from './components/ShapeInspector'
 import { PageView } from './components/PageView'
 import { ThumbnailRail } from './components/ThumbnailRail'
 import { MARK_COLOR } from './components/MarkLayer'
@@ -11,6 +12,7 @@ import {
   addBookmark,
   addMark,
   addSource,
+  addShape,
   addStamp,
   addTape,
   baseName,
@@ -25,20 +27,38 @@ import {
   pushTapeEntry,
   removeBookmark,
   removeMarks,
+  isShapeKind,
+  moveShape,
+  removeShapes,
   removeStamp,
   removeTapes,
   rotatePages,
   setBookmarkTitle,
   toExportSpec,
   updateMark,
+  updateShape,
   updateTape,
+  isDragMeaningful,
+  SHAPE_COLOR_NAMES,
+  SHAPE_COLORS,
+  SHAPE_WIDTH_DEFAULT,
   type Mark,
   type ProbeWire,
+  type Shape,
+  type ShapeColor,
   type Session,
+  type SourceDoc,
   type ToolKind
 } from './session'
 
 const MOD = window.wpt.platform === 'darwin' ? '⌘' : 'Ctrl'
+
+function sourceMatches(source: SourceDoc, probe: ProbeWire): boolean {
+  if (source.nPages !== probe.n_pages) return false
+  if (source.kind !== (probe.kind === 'image' ? 'image' : 'pdf')) return false
+  if (!source.fingerprint) return true // Legacy session: establish identity on this open.
+  return source.fingerprint.sha256 === probe.fingerprint?.sha256
+}
 
 export default function App(): React.JSX.Element {
   const [session, setSession] = useState<Session>(newSession)
@@ -57,16 +77,29 @@ export default function App(): React.JSX.Element {
   const [markSize] = useState(MARK_SIZE_DEFAULT)
   const [stampDraft, setStampDraft] = useState('')
   const [addingStamp, setAddingStamp] = useState(false)
+  const [shapeColor, setShapeColor] = useState<ShapeColor>('red')
+  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
+  const shapeArmed = !!armed && isShapeKind(armed.kind)
   const reviewerInitials = session.reviewer ?? ''
   const stamps = session.stamps ?? []
   const past = useRef<Session[]>([])
   const future = useRef<Session[]>([])
+  const lastSaved = useRef(JSON.stringify(newSession()))
+  const saving = useRef(false)
 
   const pages = session.pages
+  const serializedSession = useMemo(() => JSON.stringify(session), [session])
+  const dirty = serializedSession !== lastSaved.current
   const current = useMemo(
     () => pages.find((p) => p.id === currentId) ?? pages[0] ?? null,
     [pages, currentId]
   )
+
+  // The main process owns the native close prompt. Keep it informed without
+  // exposing any session contents beyond the renderer/main boundary.
+  useEffect(() => {
+    window.wpt.setDirty(dirty)
+  }, [dirty])
 
   /** Every mutation goes through here so undo/redo is never bypassed. */
   const apply = useCallback((next: Session, note?: string) => {
@@ -213,6 +246,7 @@ export default function App(): React.JSX.Element {
       setCurrentId(target.id)
       setSelected(new Set([target.id]))
       setSelectedMarkId(null)
+      setSelectedShapeId(null)
       setActiveTapeId(null)
     },
     [pages]
@@ -254,6 +288,8 @@ export default function App(): React.JSX.Element {
         setArmed(null)
         return
       }
+      // Shapes are dragged out, not clicked into place — drawShape handles them.
+      if (isShapeKind(armed.kind)) return
       const { session: next, id } = addMark(session, {
         page: current.id,
         kind: armed.kind,
@@ -350,6 +386,57 @@ export default function App(): React.JSX.Element {
     [session, apply]
   )
 
+  // -------------------------------------------------------------------- shapes
+
+  /** Commit a drag as a shape. A stray click is not a shape. */
+  const drawShape = useCallback(
+    (nx: number, ny: number, nx2: number, ny2: number) => {
+      if (!current || !armed || !isShapeKind(armed.kind)) return
+      if (!isDragMeaningful(nx, ny, nx2, ny2)) return
+      const { session: next, id } = addShape(session, {
+        page: current.id,
+        kind: armed.kind,
+        nx,
+        ny,
+        nx2,
+        ny2,
+        color: shapeColor,
+        width: SHAPE_WIDTH_DEFAULT,
+        ...(armed.kind === 'textbox' ? { text: '' } : {})
+      })
+      apply(next, `${armed.kind} drawn.`)
+      setSelectedShapeId(id)
+      setSelectedMarkId(null)
+      // A text box is useless empty, so drop straight into typing it.
+      if (armed.kind === 'textbox') setArmed(null)
+    },
+    [current, armed, session, shapeColor, apply]
+  )
+
+  const selectedShape = useMemo<Shape | null>(
+    () => (session.shapes ?? []).find((x) => x.id === selectedShapeId) ?? null,
+    [session.shapes, selectedShapeId]
+  )
+
+  const editShape = useCallback(
+    (patch: Partial<Shape>) => {
+      if (!selectedShapeId) return
+      apply(updateShape(session, selectedShapeId, patch), 'Shape updated.')
+    },
+    [selectedShapeId, session, apply]
+  )
+
+  // Dragging fires continuously; fold the gesture into one undo entry.
+  const nudgeShape = useCallback((id: string, dx: number, dy: number) => {
+    setSession((prev) => moveShape(prev, id, dx, dy))
+  }, [])
+
+  const deleteShape = useCallback(() => {
+    if (!selectedShapeId) return
+    apply(removeShapes(session, [selectedShapeId]), `Shape deleted. ${MOD}Z to undo.`)
+    setSelectedShapeId(null)
+  }, [selectedShapeId, session, apply])
+
   // ----------------------------------------------------------- custom stamps
 
   /** Save whatever is in the box as a reusable stamp, and arm it immediately. */
@@ -371,6 +458,42 @@ export default function App(): React.JSX.Element {
   )
 
   // --------------------------------------------------------------- persistence
+
+  const persistSession = useCallback(
+    async (value: Session, existingPath: string | null, mode: 'manual' | 'auto') => {
+      if (saving.current) return null
+      saving.current = true
+      try {
+        const target = await window.wpt.saveSession(value, existingPath)
+        if (!target) return null
+        lastSaved.current = JSON.stringify(value)
+        setSessionPath(target)
+        setStatus(
+          mode === 'auto'
+            ? `Autosaved ${baseName(target)}`
+            : `Session saved to ${baseName(target)}`
+        )
+        return target
+      } catch (error) {
+        setStatus(`${mode === 'auto' ? 'Autosave' : 'Save'} failed — ${String((error as Error).message ?? error)}`)
+        return null
+      } finally {
+        saving.current = false
+      }
+    },
+    []
+  )
+
+  // Once the user chooses where the engagement lives, every subsequent edit
+  // is saved after a short quiet period. The write is atomic in the main
+  // process and retains the previous complete generation beside the session.
+  useEffect(() => {
+    if (!sessionPath || !dirty) return
+    const timer = window.setTimeout(() => {
+      void persistSession(session, sessionPath, 'auto')
+    }, 1500)
+    return () => window.clearTimeout(timer)
+  }, [session, sessionPath, dirty, persistSession])
 
   /** Core export. Takes the session explicitly — never reads render-time state. */
   const exportSession = useCallback(async (target: Session, out: string, reveal = true) => {
@@ -405,36 +528,95 @@ export default function App(): React.JSX.Element {
 
   const saveSession = useCallback(
     async (forceDialog = false) => {
-      const target = await window.wpt.saveSession(session, forceDialog ? null : sessionPath)
-      if (target) {
-        setSessionPath(target)
-        setStatus(`Session saved to ${baseName(target)}`)
-      }
+      await persistSession(session, forceDialog ? null : sessionPath, 'manual')
     },
-    [session, sessionPath]
+    [session, sessionPath, persistSession]
   )
 
   const openSession = useCallback(async () => {
+    if (dirty) {
+      if (sessionPath) {
+        const saved = await persistSession(session, sessionPath, 'auto')
+        if (!saved) return
+      } else if (!(await window.wpt.confirmDiscard())) {
+        return
+      }
+    }
     const res = await window.wpt.openSession()
     if (!res) return
-    const parsed = parseSession(res.session)
+    if (res.session === undefined) {
+      return setStatus(`Cannot open session — ${res.error ?? 'unreadable file'}`)
+    }
+    let parsed = parseSession(res.session)
+    let recovered = !!res.recoveredFrom
+    if ('error' in parsed && res.recoverySession !== undefined) {
+      const fallback = parseSession(res.recoverySession)
+      if (!('error' in fallback)) {
+        parsed = fallback
+        recovered = true
+      }
+    }
     if ('error' in parsed) return setStatus(`Cannot open session — ${parsed.error}`)
-    const paths = parsed.session.sources.map((s) => s.path)
-    const okPaths = new Set(await window.wpt.registerFiles(paths))
-    const missing = parsed.session.sources.filter((s) => !okPaths.has(s.path))
+    const originalSerialized = JSON.stringify(parsed.session)
+    const resolvedSources: SourceDoc[] = []
+
+    for (const source of parsed.session.sources) {
+      let candidate: string | null = source.path
+      let probe: ProbeWire | null = null
+
+      if (candidate) {
+        const checked = await window.wpt.probe(candidate)
+        if (checked.ok && checked.probe) {
+          probe = checked.probe as ProbeWire
+        }
+      }
+
+      if (!candidate || !probe || !sourceMatches(source, probe)) {
+        const replacement = await window.wpt.relinkSource(source.name)
+        if (!replacement) {
+          return setStatus(
+            `Open cancelled — locate the original ${source.name} to preserve mark/page integrity.`
+          )
+        }
+        const checked = await window.wpt.probe(replacement)
+        if (!checked.ok || !checked.probe) {
+          return setStatus(`Cannot use ${baseName(replacement)} — ${checked.error ?? 'unreadable'}`)
+        }
+        candidate = replacement
+        probe = checked.probe as ProbeWire
+        if (!sourceMatches(source, probe)) {
+          return setStatus(
+            `Cannot use ${baseName(replacement)} — it is not the same source that was originally reviewed.`
+          )
+        }
+      }
+
+      resolvedSources.push({
+        ...source,
+        path: candidate,
+        ...(probe.fingerprint ? { fingerprint: probe.fingerprint } : {})
+      })
+    }
+
+    const openedSession = { ...parsed.session, sources: resolvedSources }
     for (const s of parsed.session.sources) forgetDoc(s.id)
     past.current = []
     future.current = []
-    setSession(parsed.session)
-    setSessionPath(res.path)
+    // A relink or first fingerprinting of a legacy session is a real change and
+    // will autosave. Recovered data remains clean until the explicit Save As.
+    lastSaved.current = recovered ? JSON.stringify(openedSession) : originalSerialized
+    setSession(openedSession)
+    // Never overwrite an unreadable primary with recovered data implicitly.
+    // Save As makes the recovery decision explicit and preserves both files.
+    setSessionPath(recovered ? null : res.path)
     setSelected(new Set())
-    setCurrentId(parsed.session.pages[0]?.id ?? null)
+    setCurrentId(openedSession.pages[0]?.id ?? null)
     setStatus(
-      missing.length
-        ? `Opened, but ${missing.length} source file(s) could not be found: ${missing.map((s) => s.name).join(', ')}`
-        : `Opened ${baseName(res.path)} — ${parsed.session.pages.length} pages.`
+      recovered
+        ? `Recovered ${baseName(res.path)} from its previous complete save — use Save to choose a safe destination.`
+        : `Opened ${baseName(res.path)} — ${openedSession.pages.length} pages; source identity verified.`
     )
-  }, [])
+  }, [dirty, sessionPath, session, persistSession])
 
   // Dev seam (WPT_DEV_OPEN / WPT_DEV_EXPORT): drive the whole Phase 1 flow —
   // import, then optionally a real export through IPC + engine — with no
@@ -543,6 +725,7 @@ export default function App(): React.JSX.Element {
         if (e.key === 'Escape') {
           setArmed(null)
           setSelectedMarkId(null)
+          setSelectedShapeId(null)
           setActiveTapeId(null)
           return
         }
@@ -554,6 +737,12 @@ export default function App(): React.JSX.Element {
         if (e.key === 'x' || e.key === 'X') return setArmed({ kind: 'cross' })
         if (e.key === 'f' || e.key === 'F') return setArmed({ kind: 'text', text: 'F' })
         if (e.key === 'c' || e.key === 'C') return setArmed({ kind: 'tape' })
+        if (e.key === 'r' || e.key === 'R') return setArmed({ kind: 'rect' })
+        if (e.key === 'o' || e.key === 'O') return setArmed({ kind: 'ellipse' })
+        if (e.key === 'l' || e.key === 'L') return setArmed({ kind: 'line' })
+        if (e.key === 'a' || e.key === 'A') return setArmed({ kind: 'arrow' })
+        if (e.key === 'h' || e.key === 'H') return setArmed({ kind: 'highlight' })
+        if (e.key === 'n' || e.key === 'N') return setArmed({ kind: 'textbox' })
         if (e.key === '+' || e.key === '=') return resizeMark(4)
         if (e.key === '_' || e.key === '-') return resizeMark(-4)
       }
@@ -561,8 +750,10 @@ export default function App(): React.JSX.Element {
       if (e.key === ']') return rotate(90)
       if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault()
-        // A selected mark is the more specific target; fall through to pages.
-        return selectedMarkId ? deleteMark() : remove()
+        // The most specific selection wins; fall through to pages.
+        if (selectedMarkId) return deleteMark()
+        if (selectedShapeId) return deleteShape()
+        return remove()
       }
       if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
         e.preventDefault()
@@ -589,7 +780,9 @@ export default function App(): React.JSX.Element {
     addBookmarkHere,
     resizeMark,
     deleteMark,
-    selectedMarkId
+    deleteShape,
+    selectedMarkId,
+    selectedShapeId
   ])
 
   /** Drag the divider to widen the bookmark panel — real titles are long.
@@ -615,9 +808,9 @@ export default function App(): React.JSX.Element {
       e.preventDefault()
       // Hand everything to the main process — it owns the list of what may
       // enter a binder and returns only what it authorized.
-      const paths = [...e.dataTransfer.files].map((f) => window.wpt.pathForFile(f)).filter(Boolean)
-      if (!paths.length) return
-      const allowed = await window.wpt.registerFiles(paths)
+      const files = [...e.dataTransfer.files]
+      if (!files.length) return
+      const allowed = await window.wpt.registerDroppedFiles(files)
       if (!allowed.length) return setStatus('Nothing added — drop PDFs or images.')
       await importPaths(allowed)
     },
@@ -642,7 +835,6 @@ export default function App(): React.JSX.Element {
       onDrop={onDrop}
     >
       <header className="toolbar">
-        <strong className="brand">Workpaper Binder</strong>
         <button onClick={addViaDialog} disabled={busy}>
           Add files
         </button>
@@ -677,7 +869,7 @@ export default function App(): React.JSX.Element {
           <button
             className={!armed ? 'on' : ''}
             onClick={() => setArmed(null)}
-            title="Select / move marks  (V)"
+            title="Select — click a mark or shape to move it  (V or Esc)"
           >
             ↖
           </button>
@@ -685,7 +877,7 @@ export default function App(): React.JSX.Element {
             className={armed?.kind === 'tick' ? 'on' : ''}
             style={{ color: MARK_COLOR.tick }}
             onClick={() => setArmed({ kind: 'tick' })}
-            title="Tick — agreed  (T)"
+            title="Tick — agreed  (T). Click the page to place."
           >
             ✓
           </button>
@@ -693,7 +885,7 @@ export default function App(): React.JSX.Element {
             className={armed?.kind === 'cross' ? 'on' : ''}
             style={{ color: MARK_COLOR.cross }}
             onClick={() => setArmed({ kind: 'cross' })}
-            title="Cross — does not agree  (X)"
+            title="Cross — does not agree  (X). Click the page to place."
           >
             ✕
           </button>
@@ -701,7 +893,7 @@ export default function App(): React.JSX.Element {
             className={armed?.kind === 'text' && armed.text === 'F' ? 'on' : ''}
             style={{ color: MARK_COLOR.text }}
             onClick={() => setArmed({ kind: 'text', text: 'F' })}
-            title="Footed  (F)"
+            title="F — footed  (F). Click the page to place."
           >
             F
           </button>
@@ -710,16 +902,16 @@ export default function App(): React.JSX.Element {
             style={{ color: MARK_COLOR.text }}
             onClick={() => setArmed({ kind: 'text', text: reviewerInitials })}
             disabled={!reviewerInitials}
-            title="Stamp your initials"
+            title={reviewerInitials ? `Stamp your initials (${reviewerInitials})` : 'Stamp your initials — type them in the Initials box first'}
           >
             {reviewerInitials || '—'}
           </button>
           <button
             className={armed?.kind === 'tape' ? 'on' : ''}
             onClick={() => setArmed({ kind: 'tape' })}
-            title="Calculator tape — click the page, then key numbers  (C)"
+            title="Calculator tape — click the page, then key numbers like a 10-key  (C)"
           >
-            🖩
+            <span className="glyph-tape">123</span>
           </button>
           {/* The firm's own legend sits with the fixed palette — they are the
               same gesture: arm a stamp, click the page. */}
@@ -744,6 +936,48 @@ export default function App(): React.JSX.Element {
               </button>
             </span>
           ))}
+          <span className="sep-thin" />
+          {(
+            [
+              ['rect', '▭', 'Rectangle', 'R'],
+              ['ellipse', '◯', 'Ellipse — circle a figure', 'O'],
+              ['line', '╱', 'Line', 'L'],
+              ['arrow', '➔', 'Arrow', 'A'],
+              ['highlight', '▬', 'Highlighter', 'H'],
+              ['textbox', 'T', 'Text note', 'N']
+            ] as const
+          ).map(([kind, glyph, label, key]) => (
+            <button
+              key={kind}
+              className={armed?.kind === kind ? 'on' : ''}
+              style={{ color: kind === 'highlight' ? '#c9a800' : SHAPE_COLORS[shapeColor] }}
+              onClick={() => setArmed({ kind })}
+              title={`${label} — drag to draw  (${key})${
+                kind === 'rect' || kind === 'ellipse' ? '. Hold ⇧ for a square/circle.' : ''
+              }`}
+            >
+              {kind === 'textbox' ? <span className="glyph-note">{glyph}</span> : glyph}
+            </button>
+          ))}
+          {/* Swatches only when they apply — a colour picker with nothing to
+              colour is just five more buttons competing for the row. */}
+          {(shapeArmed || selectedShapeId) && (
+          <span className="swatches" title="Color for new shapes">
+            {SHAPE_COLOR_NAMES.map((c) => (
+              <button
+                key={c}
+                className={`swatch${shapeColor === c ? ' on' : ''}`}
+                style={{ background: SHAPE_COLORS[c] }}
+                onClick={() => {
+                  setShapeColor(c)
+                  if (selectedShapeId) editShape({ color: c })
+                }}
+                title={`${c}${selectedShapeId ? ' — also recolors the selected shape' : ''}`}
+              />
+            ))}
+          </span>
+          )}
+          <span className="sep-thin" />
           {addingStamp ? (
             <input
               className="stamp-input"
@@ -784,7 +1018,7 @@ export default function App(): React.JSX.Element {
             className="rev-input"
             value={reviewerInitials}
             maxLength={4}
-            placeholder="CJB"
+            placeholder="—"
             onChange={(e) =>
               setSession((prev) => ({ ...prev, reviewer: e.target.value.toUpperCase().slice(0, 4) }))
             }
@@ -792,10 +1026,10 @@ export default function App(): React.JSX.Element {
         </label>
         <span className="sep" />
         <button onClick={undo} title={`Undo  ${MOD}Z`}>
-          Undo
+          ↶
         </button>
         <button onClick={redo} title={`Redo  ${MOD}⇧Z`}>
-          Redo
+          ↷
         </button>
         <span className="spacer" />
         <button onClick={openSession} title={`Open session  ${MOD}O`}>
@@ -813,7 +1047,7 @@ export default function App(): React.JSX.Element {
           Flatten
         </label>
         <button className="primary" onClick={() => void exportBinder()} disabled={busy || !pages.length}>
-          Export binder
+          Export
         </button>
       </header>
 
@@ -857,6 +1091,9 @@ export default function App(): React.JSX.Element {
               {selectedMark && (
                 <MarkInspector mark={selectedMark} onChange={editMark} onDelete={deleteMark} />
               )}
+              {selectedShape && (
+                <ShapeInspector shape={selectedShape} onChange={editShape} onDelete={deleteShape} />
+              )}
             </aside>
             <div
               className="splitter"
@@ -882,6 +1119,12 @@ export default function App(): React.JSX.Element {
               onMoveTape={moveTape}
               onTitleTape={titleTape}
               onDeleteTape={deleteTape}
+              shapeColor={shapeColor}
+              selectedShapeId={selectedShapeId}
+              onDrawShape={drawShape}
+              onSelectShape={setSelectedShapeId}
+              onMoveShape={nudgeShape}
+              onTextShape={(id, text) => setSession((prev) => updateShape(prev, id, { text }))}
             />
             <ThumbnailRail
               session={session}
@@ -914,7 +1157,8 @@ export default function App(): React.JSX.Element {
           ) : null}
         </span>
         <span className="muted">
-          {sessionPath ? baseName(sessionPath) : 'unsaved session'} · drag to reorder · [ ] rotate ·
+          {sessionPath ? baseName(sessionPath) : 'unsaved session'}
+          {dirty ? ' · unsaved changes' : sessionPath ? ' · autosaved' : ''} · drag to reorder · [ ] rotate ·
           ⌫ delete · {MOD}Z undo
         </span>
       </footer>

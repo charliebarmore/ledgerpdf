@@ -1,0 +1,3 @@
+# Build-time only. Install beside requirements.txt on each target OS; PyInstaller
+# deliberately does not cross-compile native Python dependencies.
+pyinstaller==6.21.0

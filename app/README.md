@@ -12,7 +12,8 @@ npm run dev        # copies pdfjs assets, then launches
 ```
 
 The engine venv must exist (`../engine/.venv`) — created by the Phase 0 spike:
-`engine/.venv/bin/python spike/run_spike.py`.
+`engine/.venv/bin/python spike/run_spike.py`. Packaging also needs the pinned
+build requirement in `../engine/requirements-build.txt`.
 
 ## Verify it
 
@@ -23,11 +24,58 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | Script | What it proves |
 |---|---|
 | `typecheck` | main/preload and renderer both typecheck |
-| `verify:model` | 100 checks on the pure session model, ending in **two real engine exports + re-probes** (reorder, rotation, bookmark hoisting, session round-trip, version guard, marks, custom stamps, and a flattened binder pixel-compared against the annotated one) |
-| `verify:mcp` | 32 checks driving the **MCP server** as a real MCP client through a whole binder build — import (PDFs and images), reorder, bookmark, mark, tape, export, save, reopen — plus the error paths, then verifies the PDF it produced |
+| `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
+| `verify:model` | 106 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
+| `verify:mcp` | 34 checks driving the **MCP server** as a real MCP client through a whole binder build, including default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs and a receipt photo → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
+| `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, then renders a synthetic PDF under `file://` and captures the native window |
 
-All three suites use synthetic fixtures only — **never client documents**.
+All suites use synthetic fixtures only — **never client documents**.
+
+## Package it
+
+The desktop package includes a platform-native, one-folder PyInstaller engine;
+the destination machine needs neither Python nor this repository. Build on each
+target OS because native Python dependencies are deliberately not cross-compiled.
+
+```bash
+# Once per build environment:
+../engine/.venv/bin/python -m pip install \
+  -r ../engine/requirements.txt -r ../engine/requirements-build.txt
+
+# Local macOS/Windows directory build — for verification only, not distribution:
+npm run package:dir
+npm run verify:package
+```
+
+`package:dir` is explicitly ad-hoc/unsigned. `npm run dist` refuses to produce a
+distributable unless `WPT_SIGNED_RELEASE=true`; electron-builder then requires a
+valid platform identity and `forceCodeSigning` prevents an unsigned artifact.
+
+For macOS, use a Developer ID Application certificate plus one of
+electron-builder's notarization credential sets (App Store Connect API key is
+preferred for CI). The release config enables hardened runtime, notarization,
+and the Electron JIT entitlements; verify the result with `codesign`, `spctl`,
+and `xcrun stapler validate` before distribution.
+
+For Windows, create the release on Windows x64. The config uses Azure Trusted
+Signing when these product-specific values are set:
+
+```text
+WPT_AZURE_PUBLISHER_NAME
+WPT_AZURE_ENDPOINT
+WPT_AZURE_CERTIFICATE_PROFILE
+WPT_AZURE_SIGNING_ACCOUNT
+```
+
+Azure authentication itself uses its standard `AZURE_TENANT_ID`,
+`AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` environment variables. No signing
+secret or certificate is stored in the repository.
+
+The bundle identifier is currently `com.charliebarmore.workpaperbinder` and the
+visible product name is still the working name “Workpaper Binder.” Decide the
+real product name before issuing certificates or giving a build to a design
+partner; changing identity later disrupts OS trust and update continuity.
 
 ## Layout
 
@@ -39,7 +87,8 @@ src/renderer/
   src/session.ts    the binder model: stable page ids, bookmarks, export spec (pure)
   src/pdf.ts        PDF.js rendering, image-page painting, render cancellation
   src/App.tsx       state, undo/redo, keyboard
-  src/components/   ThumbnailRail · PageView · BookmarkPanel · MarkLayer · MarkInspector · TapeLayer
+  src/components/   ThumbnailRail · PageView · BookmarkPanel · MarkLayer · MarkInspector
+                    TapeLayer · ShapeLayer · ShapeInspector
 scripts/        asset copy, model verification, smoke test
 ```
 
@@ -51,12 +100,45 @@ This app holds client tax documents, so the boundaries are deliberate:
 - The renderer can only read/probe paths the **user explicitly chose this
   session** (`allowedInputs`) and only write to a path from a **save dialog**
   (`allowedOutputs`). There is no generic "read any file" IPC.
+- Every privileged IPC call is accepted only from the registered main frame of
+  the app window. Navigation, webviews, popups, and browser permissions are
+  denied. Drag/drop paths are extracted from genuine OS `File` objects inside
+  preload; the renderer cannot authorize an arbitrary path string.
 - CSP permits no remote origin at all — no `https:` source anywhere, so the
   renderer cannot reach the network. `wasm-unsafe-eval` is present only for
   PDF.js's JBIG2/JPEG2000 decoders.
 - No telemetry. Nothing leaves the machine.
 - Source files are opened read-only; a binder is always written to a new file.
   Images are converted in memory at export — the original is never rewritten.
+- Every imported source is SHA-256 fingerprinted. Reopen verifies the same
+  bytes (and offers a relink dialog when a file moved); export checks again
+  before and after materialization, so old marks can never silently land on a
+  replacement document at the same path.
+- The Python PDF sidecar receives a minimal environment (no inherited API keys),
+  is limited to five minutes and 16 MB of protocol output per command, and is
+  killed if either bound is exceeded.
+- Packaged builds run that engine as a frozen, platform-native executable from
+  the app's sealed resources; they never discover or invoke a workstation's
+  ambient Python installation.
+
+## Session durability
+
+The session is the editable engagement record, not a disposable preference
+file. After its first manual save:
+
+- edits autosave after 1.5 seconds of inactivity;
+- every write is flushed to a same-directory temporary file and atomically
+  renamed over the destination;
+- the previous complete generation is retained as
+  `*.recovery.wptsession.json`;
+- a damaged primary automatically opens from that recovery generation and
+  requires Save As, preserving both originals;
+- closing or opening another binder with unsaved changes is guarded; and
+- session and recovery files are owner-only (`0600`) on POSIX systems.
+
+An engagement that has never been manually saved has no user-approved storage
+location, so it cannot autosave. The status bar says `unsaved changes`, and the
+native close/open guard prevents accidental loss until the user chooses Save.
 
 ## Keyboard
 
@@ -72,9 +154,12 @@ This app holds client tax documents, so the boundaries are deliberate:
 | `⌘/Ctrl Z` / `⇧⌘Z` | undo / redo |
 | `T` `X` `F` | arm the tick / cross / footed mark tool |
 | `C` | arm the calculator tape |
+| `R` `O` `L` `A` | rectangle · ellipse · line · arrow (drag to draw) |
+| `H` `N` | highlighter · text note |
+| `⇧` while drawing | constrain to square / circle / 45° |
 | `V` or `Esc` | back to the select tool |
 | `+` `−` | resize the selected mark |
-| `⌫` | delete the selected mark (else the selected pages) |
+| `⌫` | delete the selected mark or shape (else the selected pages) |
 | `⌘/Ctrl B` | add a bookmark on the current page |
 | `⌘/Ctrl I` · `E` · `S` · `O` | add files · export · save session · open session |
 
@@ -172,6 +257,40 @@ in `images.py`. If those ever disagree, a tick placed over a receipt exports
 somewhere else, silently. `verify:model` compares the two implementations
 directly rather than trusting them to agree; keep it that way.
 
+## Drawn annotations
+
+Rectangle, ellipse, line, arrow, highlighter and text note — drag to draw. Hold
+`⇧` for a true square, circle or 45° line. Keys: `R` `O` `L` `A` `H` `N`, with
+`V`/`Esc` back to select. A selected shape drags to move, `⌫` deletes it, and
+the side inspector edits color, stroke weight and note after the fact.
+
+Color is a fixed five (red, green, blue, black, orange) rather than a free
+picker: red-for-problem and green-for-agreed already mean something in review
+work, and an arbitrary color has no legend to explain it. The swatches appear
+only when a drawing tool is armed or a shape is selected — a color picker with
+nothing to color is just more buttons competing for the row.
+
+Geometry is two normalized corners on the page *as displayed*, the same
+convention marks and tapes use, so what you draw is what exports — pixel-checked
+in pdfium by `verify:model`.
+
+Two engine details worth knowing before touching `engine/shapes.py`, because
+both produce **invalid PDFs** rather than ugly ones:
+
+- **Degenerate drags.** A perfectly horizontal line has zero height. A
+  zero-height `/BBox` makes the viewer's BBox→Rect fit divide by zero. Every
+  shape is padded by its stroke width so the box always has real extent.
+- **Stroke overflow.** A stroke straddles its path, so a rectangle drawn on the
+  BBox edge is clipped in half. The same padding gives it room.
+
+The highlighter is a translucent multiply-blend fill, not a stroke — multiply so
+the number underneath stays readable. A highlight that hides what it marks is
+worse than none.
+
+Text notes render through a real `<textarea>` in the app so wrapping and editing
+behave like text; the engine re-wraps with Helvetica metrics at export. Base-14
+fonts only, so nothing is embedded — same rule as the lettered stamps.
+
 ## Calculator tape (Phase 3)
 
 `C` (or the 🖩 button), then click the page. The tape is a **10-key adding
@@ -239,7 +358,9 @@ npm run verify:mcp    # drives it as a real MCP client through a whole build
 Registered for Claude Code with:
 
 ```bash
-claude mcp add --scope user workpaper-binder -- node <repo>/app/out/mcp-server.cjs
+claude mcp add --scope user \
+  -e WPT_MCP_ROOTS=/absolute/path/to/approved/engagements \
+  workpaper-binder -- node <repo>/app/out/mcp-server.cjs
 ```
 
 **The session file is the handoff.** There is no live link to a running app
@@ -271,11 +392,12 @@ server cannot put the figures off a client return into a model's context.
 That is still not zero-disclosure. **File names and bookmark titles routinely
 carry client names** — a real 62-page master file had `Revenue – Triland Partners LLC`
 in its outline. Pointing an agent at real client files is therefore an IRC §7216
-disclosure decision. The tool does not make that decision, gate it, or redact
-anything: that was a deliberate call (2026-07-30), taken so the agent workflow
-stays frictionless. If a client-safe mode is ever wanted, the place for it is a
-handle-mapping layer in `src/mcp/server.ts` that swaps identifying strings before
-they reach the transport.
+disclosure decision. File access is now **disabled by default**. Registration
+must set `WPT_MCP_ROOTS` to one or more path-delimited engagement roots; reads,
+session opens/saves, and exports outside those canonical roots are refused,
+including symlink escapes. This limits accidental reach but does not redact
+identifying strings inside an allowed engagement. A future client-safe mode can
+add handle mapping in `src/mcp/server.ts` before those strings reach transport.
 
 Note this does not change the *product's* local-only claim: the app still has no
 telemetry and reaches no network. What leaves the machine is whatever the agent
@@ -336,9 +458,10 @@ Findings from dogfooding actual tax-software output, each pinned by a test:
 
 ## Known gaps (tracked in ../ROADMAP.md)
 
-- Packaging is not set up (Phase 5). In particular PDF.js's WASM/cmap assets are
-  loaded relative to `document.baseURI`, which works in dev; `file://` fetch
-  behavior in a packaged build still needs verifying.
+- The unsigned local macOS arm64 package and PDF.js `file://` rendering are
+  verified. Developer-ID signing/notarization and the Windows x64 build,
+  SmartScreen, Acrobat, Edge, and installer checks require the real credentials
+  and Windows hardware before any design-partner distribution.
 - No links UI yet — that is Phase 4. The engine already supports links (proven
   in the Phase 0 spike). Marks (Phase 2) and tapes (Phase 3) are done.
 - A tape's caption and drag position are not individually undoable — they fold
@@ -347,3 +470,5 @@ Findings from dogfooding actual tax-software output, each pinned by a test:
   stay annotations. Deliberate for now — worth revisiting when a binder first
   goes to someone outside the firm.
 - Thumbnails render eagerly as they mount; a 300-page binder needs windowing.
+- Recovery retains one previous generation, not a configurable history. There
+  is not yet a recent-engagement/recovery browser.

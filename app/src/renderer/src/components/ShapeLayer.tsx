@@ -1,0 +1,304 @@
+import { useCallback, useRef, useState } from 'react'
+import {
+  HIGHLIGHT_FILL,
+  SHAPE_COLORS,
+  isShapeKind,
+  type Shape,
+  type ShapeKind,
+  type ToolKind
+} from '../session'
+
+/**
+ * Drawn annotations — rectangles, ellipses, lines, arrows, highlights, notes.
+ *
+ * Drag-to-draw, so this owns the pointer while a shape tool is armed. SVG
+ * rather than divs: a 1.5pt stroke and an ellipse are what SVG is for, and it
+ * scales exactly with zoom instead of accumulating rounding.
+ *
+ * Geometry is normalized to the page AS DISPLAYED — the same convention marks
+ * and tapes use, and exactly what the engine consumes, so what you draw is what
+ * exports.
+ */
+
+/** Shift constrains: square, circle, or a 45° line — the Acrobat convention. */
+function constrain(
+  kind: ShapeKind,
+  nx: number,
+  ny: number,
+  nx2: number,
+  ny2: number,
+  aspect: number
+): { nx2: number; ny2: number } {
+  const dx = nx2 - nx
+  const dy = ny2 - ny
+  if (kind === 'line' || kind === 'arrow') {
+    // Snap to the nearest 45°, measured in on-screen space so it looks square.
+    const ang = Math.atan2(dy * aspect, dx)
+    const snapped = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4)
+    const len = Math.hypot(dx, dy * aspect)
+    return { nx2: nx + Math.cos(snapped) * len, ny2: ny + (Math.sin(snapped) * len) / aspect }
+  }
+  // Square/circle: equal on-screen extent, so equal in normalized terms only
+  // after correcting for the page's aspect ratio.
+  const size = Math.max(Math.abs(dx), Math.abs(dy) * aspect)
+  return { nx2: nx + Math.sign(dx || 1) * size, ny2: ny + (Math.sign(dy || 1) * size) / aspect }
+}
+
+function ShapeGraphic({
+  shape,
+  w,
+  h,
+  scale
+}: {
+  shape: Shape
+  w: number
+  h: number
+  scale: number
+}): React.JSX.Element {
+  const x1 = shape.nx * w
+  const y1 = shape.ny * h
+  const x2 = shape.nx2 * w
+  const y2 = shape.ny2 * h
+  const left = Math.min(x1, x2)
+  const top = Math.min(y1, y2)
+  const bw = Math.abs(x2 - x1)
+  const bh = Math.abs(y2 - y1)
+  const stroke = SHAPE_COLORS[shape.color] ?? SHAPE_COLORS.red
+  const sw = shape.width * scale
+
+  switch (shape.kind) {
+    case 'highlight':
+      return <rect x={left} y={top} width={bw} height={bh} fill={HIGHLIGHT_FILL} />
+    case 'rect':
+      return (
+        <rect x={left} y={top} width={bw} height={bh} fill="none" stroke={stroke} strokeWidth={sw} />
+      )
+    case 'ellipse':
+      return (
+        <ellipse
+          cx={left + bw / 2}
+          cy={top + bh / 2}
+          rx={bw / 2}
+          ry={bh / 2}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={sw}
+        />
+      )
+    case 'textbox':
+      return (
+        <>
+          <rect
+            x={left}
+            y={top}
+            width={bw}
+            height={bh}
+            fill="#ffffff"
+            stroke={stroke}
+            strokeWidth={sw}
+          />
+          {/* Text itself is drawn by the HTML overlay so it wraps like the
+              engine's does; SVG here is only the card. */}
+        </>
+      )
+    default: {
+      // line / arrow — drawn corner to corner in the direction dragged
+      const head = Math.max(sw * 4, 6 * scale)
+      const ang = Math.atan2(y2 - y1, x2 - x1)
+      const spread = (24 * Math.PI) / 180
+      const ax = x2 - head * Math.cos(ang - spread)
+      const ay = y2 - head * Math.sin(ang - spread)
+      const bx = x2 - head * Math.cos(ang + spread)
+      const by = y2 - head * Math.sin(ang + spread)
+      return (
+        <>
+          <line
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            stroke={stroke}
+            strokeWidth={sw}
+            strokeLinecap="round"
+          />
+          {shape.kind === 'arrow' && (
+            <polygon points={`${x2},${y2} ${ax},${ay} ${bx},${by}`} fill={stroke} />
+          )}
+        </>
+      )
+    }
+  }
+}
+
+export function ShapeLayer({
+  shapes,
+  width,
+  height,
+  scale,
+  armed,
+  color,
+  selectedId,
+  onDraw,
+  onSelect,
+  onMove,
+  onText
+}: {
+  shapes: Shape[]
+  width: number
+  height: number
+  /** Effective zoom: CSS pixels per PDF point. */
+  scale: number
+  armed: { kind: ToolKind; text?: string } | null
+  color: string
+  selectedId: string | null
+  onDraw: (nx: number, ny: number, nx2: number, ny2: number) => void
+  onSelect: (id: string | null) => void
+  onMove: (id: string, dx: number, dy: number) => void
+  onText: (id: string, text: string) => void
+}): React.JSX.Element {
+  const box = useRef<HTMLDivElement>(null)
+  const [draft, setDraft] = useState<{ nx: number; ny: number; nx2: number; ny2: number } | null>(
+    null
+  )
+  const drawing = armed && isShapeKind(armed.kind) ? (armed.kind as ShapeKind) : null
+
+  const toNorm = useCallback((clientX: number, clientY: number) => {
+    const r = box.current!.getBoundingClientRect()
+    return {
+      nx: Math.min(1, Math.max(0, (clientX - r.left) / r.width)),
+      ny: Math.min(1, Math.max(0, (clientY - r.top) / r.height))
+    }
+  }, [])
+
+  /** Draw a new shape. */
+  const startDraw = useCallback(
+    (e: React.PointerEvent) => {
+      if (!drawing) return
+      e.preventDefault()
+      const start = toNorm(e.clientX, e.clientY)
+      const aspect = width / Math.max(height, 1)
+      setDraft({ nx: start.nx, ny: start.ny, nx2: start.nx, ny2: start.ny })
+
+      const move = (ev: PointerEvent): void => {
+        const p = toNorm(ev.clientX, ev.clientY)
+        const end = ev.shiftKey
+          ? constrain(drawing, start.nx, start.ny, p.nx, p.ny, aspect)
+          : { nx2: p.nx, ny2: p.ny }
+        setDraft({ nx: start.nx, ny: start.ny, ...end })
+      }
+      const up = (ev: PointerEvent): void => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+        const p = toNorm(ev.clientX, ev.clientY)
+        const end = ev.shiftKey
+          ? constrain(drawing, start.nx, start.ny, p.nx, p.ny, aspect)
+          : { nx2: p.nx, ny2: p.ny }
+        setDraft(null)
+        onDraw(start.nx, start.ny, end.nx2, end.ny2)
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+    },
+    [drawing, toNorm, onDraw, width, height]
+  )
+
+  /** Move an existing shape. */
+  const startMove = useCallback(
+    (e: React.PointerEvent, id: string) => {
+      if (drawing) return
+      e.stopPropagation()
+      e.preventDefault()
+      onSelect(id)
+      let last = toNorm(e.clientX, e.clientY)
+      const move = (ev: PointerEvent): void => {
+        const p = toNorm(ev.clientX, ev.clientY)
+        onMove(id, p.nx - last.nx, p.ny - last.ny)
+        last = p
+      }
+      const up = (): void => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+    },
+    [drawing, toNorm, onMove, onSelect]
+  )
+
+  const editing = shapes.find((s) => s.id === selectedId && s.kind === 'textbox')
+
+  return (
+    <div
+      ref={box}
+      className={`shapelayer${drawing ? ' is-armed' : ''}`}
+      style={{ width, height }}
+      onPointerDown={(e) => {
+        if (drawing) return startDraw(e)
+        if (e.target === box.current) onSelect(null)
+      }}
+    >
+      <svg width={width} height={height} className="shapesvg">
+        {shapes.map((s) => (
+          <g
+            key={s.id}
+            className={`shape${selectedId === s.id ? ' is-selected' : ''}`}
+            onPointerDown={(e) => startMove(e, s.id)}
+          >
+            <ShapeGraphic shape={s} w={width} h={height} scale={scale} />
+          </g>
+        ))}
+        {draft && drawing && (
+          <g className="shape-draft">
+            <ShapeGraphic
+              shape={{
+                id: 'draft',
+                page: '',
+                kind: drawing,
+                ...draft,
+                color: color as Shape['color'],
+                width: 1.5
+              }}
+              w={width}
+              h={height}
+              scale={scale}
+            />
+          </g>
+        )}
+      </svg>
+
+      {/* Text boxes get a real textarea so wrapping and editing behave like
+          text, not like a canvas. */}
+      {shapes
+        .filter((s) => s.kind === 'textbox')
+        .map((s) => {
+          const left = Math.min(s.nx, s.nx2) * width
+          const top = Math.min(s.ny, s.ny2) * height
+          const w = Math.abs(s.nx2 - s.nx) * width
+          const h = Math.abs(s.ny2 - s.ny) * height
+          return (
+            <textarea
+              key={`t-${s.id}`}
+              className="shape-text"
+              value={s.text ?? ''}
+              placeholder={editing?.id === s.id ? 'Type a note…' : ''}
+              spellCheck={false}
+              style={{
+                left,
+                top,
+                width: w,
+                height: h,
+                fontSize: 11 * scale,
+                lineHeight: `${13 * scale}px`,
+                padding: 4 * scale,
+                color: SHAPE_COLORS[s.color] ?? SHAPE_COLORS.red,
+                pointerEvents: drawing ? 'none' : 'auto'
+              }}
+              onFocus={() => onSelect(s.id)}
+              onChange={(e) => onText(s.id, e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+            />
+          )
+        })}
+    </div>
+  )
+}

@@ -2,6 +2,7 @@
   "name": "workpaper-tool",
   "version": "0.1.0",
   "private": true,
+  "author": "Charlie Barmore",
   "description": "Tax workpaper binder — organize, mark up, and export PDF binders locally",
   "main": "out/main/index.js",
   "scripts": {
@@ -9,15 +10,22 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "verify:persistence": "esbuild scripts/verify-persistence.ts --bundle --platform=node --format=cjs --outfile=out/verify-persistence.cjs --log-level=warning && node out/verify-persistence.cjs",
     "verify:model": "esbuild scripts/verify-model.ts --bundle --platform=node --format=cjs --outfile=out/verify-model.cjs --log-level=warning && node out/verify-model.cjs",
     "prepare:assets": "node scripts/copy-pdfjs-assets.mjs",
     "predev": "npm run prepare:assets",
     "prebuild": "npm run prepare:assets",
+    "build:engine": "node scripts/build-engine.mjs",
+    "prepackage:dir": "npm run build:engine && npm run build",
+    "package:dir": "electron-builder --dir --config electron-builder.config.cjs -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false",
+    "verify:package": "node scripts/verify-package.mjs",
+    "predist": "npm run build:engine && npm run build",
+    "dist": "node scripts/build-release.mjs",
     "smoke": "node scripts/smoke.mjs",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --outfile=out/mcp-server.cjs --log-level=warning",
     "mcp": "npm run build:mcp && node out/mcp-server.cjs",
     "verify:mcp": "npm run build:mcp && node scripts/mcp-check.mjs",
-    "verify": "npm run typecheck && npm run verify:model && npm run verify:mcp && npm run smoke"
+    "verify": "npm run typecheck && npm run verify:persistence && npm run verify:model && npm run verify:mcp && npm run smoke"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -32,6 +40,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^43.2.0",
+    "electron-builder": "26.15.7",
     "electron-vite": "^5.0.0",
     "typescript": "^7.0.2",
     "vite": "^7.3.6"

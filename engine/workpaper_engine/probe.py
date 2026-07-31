@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import re
+from hashlib import sha256
+from pathlib import Path
 
 import pikepdf
 from pikepdf import Name
@@ -17,6 +19,29 @@ from .images import is_image, probe_image
 
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def fingerprint_file(path: str) -> dict:
+    """Content identity for a session source.
+
+    A page id is meaningful only while it still points at the bytes originally
+    reviewed. Size/mtime make ordinary reopen checks cheap to explain; SHA-256
+    is the authority and catches a same-path replacement before export.
+    """
+    source = Path(path)
+    before = source.stat()
+    digest = sha256()
+    with source.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    after = source.stat()
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        raise OSError(f"source changed while it was being read: {source}")
+    return {
+        "sha256": digest.hexdigest(),
+        "size": after.st_size,
+        "mtime_ns": after.st_mtime_ns,
+    }
 
 
 def sanitize_text(value: str) -> str:
@@ -89,7 +114,9 @@ def probe_pdf(path: str) -> dict:
     # import, the MCP server, the verification harness — gets one probe API and
     # never has to care which kind of file it pointed at.
     if is_image(path):
-        return probe_image(path)
+        result = probe_image(path)
+        result["fingerprint"] = fingerprint_file(path)
+        return result
 
     with pikepdf.open(path) as pdf:
         page_map = _page_index_map(pdf)
@@ -112,4 +139,10 @@ def probe_pdf(path: str) -> dict:
             )
         with pdf.open_outline() as outline:
             outline_dicts = _outline_to_dicts(outline.root, page_map)
-        return {"path": path, "n_pages": len(pages), "pages": pages, "outline": outline_dicts}
+        return {
+            "path": path,
+            "n_pages": len(pages),
+            "pages": pages,
+            "outline": outline_dicts,
+            "fingerprint": fingerprint_file(path),
+        }

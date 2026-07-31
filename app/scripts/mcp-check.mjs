@@ -61,7 +61,11 @@ if (!existsSync(SERVER)) {
 rmSync(OUT_PDF, { force: true })
 rmSync(OUT_SESSION, { force: true })
 
-const transport = new StdioClientTransport({ command: process.execPath, args: [SERVER] })
+const transport = new StdioClientTransport({
+  command: process.execPath,
+  args: [SERVER],
+  env: { ...process.env, WPT_MCP_ROOTS: path.join(REPO, 'spike') }
+})
 const client = new Client({ name: 'wpt-mcp-check', version: '1.0.0' })
 await client.connect(transport)
 
@@ -271,8 +275,14 @@ check(
 )
 check(
   'a non-PDF, non-image file is refused with a useful message',
-  (await call('binder_add_pdfs', { paths: [path.join(REPO, 'ROADMAP.md')] })).text.includes(
+  (await call('binder_add_pdfs', { paths: [path.join(REPO, 'spike', 'README.md')] })).text.includes(
     'not a PDF or supported image'
+  )
+)
+check(
+  'MCP refuses file access outside its configured engagement root',
+  (await call('probe_pdf', { path: path.join(REPO, 'PROJECT.md') })).text.includes(
+    'outside WPT_MCP_ROOTS'
   )
 )
 
@@ -280,6 +290,26 @@ await call('binder_new')
 check('exporting an empty binder is refused', (await call('binder_export', { output: OUT_PDF })).isError)
 
 await client.close()
+
+// No root means no filesystem capability at all. This is the default when a
+// user merely registers the server without deliberately scoping engagements.
+const lockedTransport = new StdioClientTransport({
+  command: process.execPath,
+  args: [SERVER],
+  env: Object.fromEntries(
+    Object.entries(process.env).filter(([key, value]) => key !== 'WPT_MCP_ROOTS' && value !== undefined)
+  )
+})
+const lockedClient = new Client({ name: 'wpt-mcp-locked-check', version: '1.0.0' })
+await lockedClient.connect(lockedTransport)
+const locked = await lockedClient.callTool({ name: 'probe_pdf', arguments: { path: a } })
+const lockedText = (locked.content ?? []).map((part) => part.text ?? '').join('\n')
+check(
+  'MCP filesystem access is disabled by default',
+  !!locked.isError && lockedText.includes('WPT_MCP_ROOTS'),
+  lockedText
+)
+await lockedClient.close()
 
 console.log('\n=== MCP server check ===')
 let fails = 0

@@ -21,4 +21,5 @@ spike/fixtures/
 app/src/renderer/public/pdfjs/
 app/out/
 app/dist/
+app/release/
 *.tsbuildinfo

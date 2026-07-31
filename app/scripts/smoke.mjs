@@ -87,7 +87,11 @@ const app = await run('npm', ['run', 'dev'], {
     WPT_DEV_EXIT: '1'
   }
 })
-check('app ran and exited cleanly', app.code === 0, `exit=${app.code}`)
+check(
+  'app ran and exited cleanly',
+  app.code === 0,
+  `exit=${app.code}${app.err.trim() ? ` stderr=${app.err.trim()}` : ''}${app.out.trim() ? ` stdout=${app.out.trim()}` : ''}`
+)
 check('window snapshot captured', existsSync(SHOT), SHOT)
 check('binder exported', existsSync(OUT_PDF), OUT_PDF)
 
