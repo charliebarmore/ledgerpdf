@@ -1,0 +1,94 @@
+name: Windows x64
+
+# Manual only. Nothing runs — and nothing is billed — until you ask for it.
+# Add `push:` triggers later if this becomes routine.
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Also build the packaged app and installer (slower)'
+        type: boolean
+        default: true
+
+jobs:
+  verify:
+    name: Build and verify on Windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The engine runs from a venv on every platform, so CI builds the same
+      # shape a developer has rather than a special CI-only arrangement.
+      - name: Create the engine venv
+        run: |
+          python -m venv engine\.venv
+          engine\.venv\Scripts\python -m pip install --upgrade pip
+          engine\.venv\Scripts\pip install -r engine\requirements.txt
+          engine\.venv\Scripts\pip install -r engine\requirements-build.txt
+
+      # Fixtures are deliberately gitignored — synthetic, never committed — so
+      # they are regenerated here.
+      - name: Generate fixtures
+        run: engine\.venv\Scripts\python spike\make_fixtures.py
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      # The whole suite: typecheck, durable persistence, the binder model
+      # against the real engine, the MCP server, and the Electron GUI smoke.
+      # This is the first time the win32 branches in path resolution, the
+      # sidecar name and the engine spawn have ever executed.
+      - name: Verify
+        working-directory: app
+        run: npm run verify
+
+      - name: Viewer conformance (pdfium)
+        run: engine\.venv\Scripts\python spike\verify_viewers.py
+        continue-on-error: true # poppler is not installed on the runner
+
+      - name: Build the frozen engine and package the app
+        if: inputs.package
+        working-directory: app
+        run: npm run package:dir
+
+      - name: Verify the packaged app
+        if: inputs.package
+        working-directory: app
+        run: npm run verify:package
+
+      # The point of the whole job for someone with no Windows machine: a
+      # screenshot of the packaged app actually running on Windows, and an
+      # artifact a design partner could install.
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-evidence
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            app/build/package-smoke.png
+            spike/out/*.png
+            spike/out/*.pdf
+
+      - name: Upload the unpacked app
+        if: inputs.package
+        uses: actions/upload-artifact@v4
+        with:
+          name: workpaper-binder-win-unpacked
+          if-no-files-found: warn
+          retention-days: 14
+          path: app/release/win-unpacked
