@@ -85,6 +85,59 @@ export interface UserBookmark {
 export type MarkKind = 'tick' | 'cross' | 'text'
 
 /**
+ * Mark glyphs and colours. These mirror engine appearance.MARK_COLORS: they are
+ * annotation CONTENT — they must look the same on screen and in the exported
+ * PDF — not UI theme, which is why they live in the model beside the shape
+ * colours rather than in a component.
+ */
+export const MARK_GLYPH: Record<MarkKind, string> = {
+  tick: '✓',
+  cross: '✕',
+  text: ''
+}
+
+export const MARK_COLOR: Record<MarkKind, string> = {
+  tick: 'rgb(33,140,33)',
+  cross: 'rgb(184,38,38)',
+  text: 'rgb(26,84,153)'
+}
+
+const XML_ESCAPE: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&apos;'
+}
+
+/**
+ * A CSS cursor drawn as the mark itself, so an armed stamp is visible at the
+ * point of aim rather than only in the toolbar.
+ *
+ * Point-placed marks only. A rectangle or an ellipse is DRAGGED OUT, so its
+ * cursor should be a crosshair showing the corner you are starting from — a
+ * glyph there would sit where nothing is about to appear.
+ *
+ * The hotspot is the image centre because a mark is centred on the click.
+ * 32×32 is deliberate: macOS silently ignores larger cursors.
+ */
+export function markCursor(kind: MarkKind, text = ''): string {
+  const glyph = (kind === 'text' ? text : MARK_GLYPH[kind]) || '?'
+  const safe = glyph.replace(/[&<>"']/g, (c) => XML_ESCAPE[c])
+  // Shrink lettered stamps so longer ones ("A/R", initials) still fit the box.
+  const size = kind === 'text' ? Math.max(9, Math.min(20, 34 / Math.max(1, glyph.length))) : 23
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">` +
+    `<text x="16" y="16" text-anchor="middle" dominant-baseline="central" ` +
+    `font-family="-apple-system,Segoe UI,sans-serif" font-weight="700" font-size="${size}" ` +
+    // A white halo keeps the glyph readable over dark scans as well as white
+    // paper; paint-order draws the stroke behind the fill.
+    `paint-order="stroke" stroke="#ffffff" stroke-width="3" fill="${MARK_COLOR[kind]}">` +
+    `${safe}</text></svg>`
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 16 16, crosshair`
+}
+
+/**
  * Drawn annotations — dragged, not stamped. A mark is placed at a point and has
  * a fixed size; these take their geometry from two corners.
  */

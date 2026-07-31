@@ -1,5 +1,7 @@
 import { useCallback, useRef } from 'react'
-import type { Mark, MarkKind, ToolKind } from '../session'
+import { MARK_COLOR, MARK_GLYPH, markCursor, type Mark, type ToolKind } from '../session'
+
+export { MARK_COLOR, MARK_GLYPH }
 
 /**
  * Interactive overlay sitting exactly on top of the rendered page canvas.
@@ -9,19 +11,6 @@ import type { Mark, MarkKind, ToolKind } from '../session'
  * so what you place is what gets written, on rotated and CropBox-cropped pages
  * alike, with no conversion in between.
  */
-
-export const MARK_GLYPH: Record<MarkKind, string> = {
-  tick: '✓',
-  cross: '✕',
-  text: ''
-}
-
-/** Must match engine MARK_COLORS — these are content, not theme. */
-export const MARK_COLOR: Record<MarkKind, string> = {
-  tick: 'rgb(33,140,33)',
-  cross: 'rgb(184,38,38)',
-  text: 'rgb(26,84,153)'
-}
 
 export function MarkLayer({
   marks,
@@ -80,7 +69,15 @@ export function MarkLayer({
     <div
       ref={box}
       className={`marklayer${armed ? ' is-armed' : ''}`}
-      style={{ width, height }}
+      style={{
+        width,
+        height,
+        // A stamp shows as its own glyph; drag tools keep the crosshair.
+        cursor:
+          armed && (armed.kind === 'tick' || armed.kind === 'cross' || armed.kind === 'text')
+            ? markCursor(armed.kind, armed.text)
+            : undefined
+      }}
       onPointerDown={(e) => {
         if (!armed) return onSelect(null)
         const { nx, ny } = toNorm(e.clientX, e.clientY)

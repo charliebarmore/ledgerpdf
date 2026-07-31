@@ -34,6 +34,7 @@ import {
   parseSession,
   popTapeEntry,
   pushTapeEntry,
+  markCursor,
   marksByPage,
   marksOnPage,
   removeBookmark,
@@ -1136,6 +1137,42 @@ async function main(): Promise<number> {
   } else {
     check('a drawn rectangle exports centred where it was dragged', false, String(rectExport.error))
   }
+
+  // --- the armed-tool cursor: the mark drawn at the point of aim
+  check(
+    'a stamp tool gives a cursor of its own glyph, centred on the click',
+    (() => {
+      const c = markCursor('tick')
+      return (
+        c.startsWith('url("data:image/svg+xml,') &&
+        // 16 16 is the hotspot: a mark is centred on the point clicked.
+        c.endsWith('") 16 16, crosshair') &&
+        decodeURIComponent(c).includes('✓')
+      )
+    })(),
+    markCursor('tick').slice(0, 48)
+  )
+  check(
+    'a lettered stamp uses its letters, XML-escaped so odd ones cannot break the SVG',
+    (() => {
+      const c = decodeURIComponent(markCursor('text', 'A&R'))
+      return c.includes('A&amp;R') && !c.includes('A&R')
+    })(),
+    decodeURIComponent(markCursor('text', 'A&R')).slice(-90)
+  )
+  check(
+    'longer stamps shrink to fit the 32px cursor macOS will actually draw',
+    (() => {
+      const one = decodeURIComponent(markCursor('text', 'F'))
+      const four = decodeURIComponent(markCursor('text', 'ABCD'))
+      const sz = (x: string): number => Number(/font-size="([\d.]+)"/.exec(x)?.[1] ?? 0)
+      return sz(four) < sz(one) && sz(four) >= 9
+    })()
+  )
+  check(
+    'the cursor falls back to a crosshair, so a tool is never invisible',
+    markCursor('cross').includes(', crosshair')
+  )
 
   // --- page status: one state per page, drawn three ways
   let stat: Session = { ...s, reviewer: 'CJB' }

@@ -235,6 +235,19 @@ author and note for editing after the fact — a review record has to be
 correctable without deleting and re-placing the mark. The timestamp is the one
 field that is *not* editable: a record you can backdate is not a record.
 
+**An armed stamp becomes the cursor.** Arm the tick and the pointer is a tick,
+drawn at the point of aim rather than only shown in the toolbar — including
+your custom stamps, which use their own letters. Point-placed marks only: a
+rectangle or ellipse is *dragged out*, so its cursor stays a crosshair marking
+the corner you are starting from. A glyph there would sit where nothing is
+about to appear.
+
+The cursor is a 32×32 SVG data URI with a white halo so it reads over dark
+scans as well as white paper, hotspot at the centre because a mark is centred
+on the click. 32px is deliberate — macOS silently ignores larger cursors — and
+lettered stamps shrink to fit. Every cursor falls back to `crosshair`, so a
+tool is never invisible.
+
 **Coordinates are the whole ballgame.** Marks are stored normalized against the
 page *as displayed* (CropBox-relative, rotation applied) — exactly what a click
 on the rendered canvas produces and exactly what the engine's geometry module
