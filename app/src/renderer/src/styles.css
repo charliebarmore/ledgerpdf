@@ -101,11 +101,15 @@ button {
   cursor: default;
 }
 
-button:hover:not(:disabled) {
+/* `:not(.primary)` is load-bearing, not tidiness. `button:hover:not(:disabled)`
+   outranks `button.primary`, so without it the hover background overrode the
+   primary button's fill while its white text stayed — a blank-looking button.
+   Excluding .primary means no future property can collide the same way. */
+button:hover:not(:disabled):not(.primary) {
   background: #f1efe9;
 }
 
-button:active:not(:disabled) {
+button:active:not(:disabled):not(.primary) {
   background: #e8e5dd;
 }
 
@@ -121,7 +125,13 @@ button.primary {
 }
 
 button.primary:hover:not(:disabled) {
+  background: var(--primary);
   filter: brightness(1.08);
+}
+
+button.primary:active:not(:disabled) {
+  background: var(--primary);
+  filter: brightness(0.94);
 }
 
 button.link {
