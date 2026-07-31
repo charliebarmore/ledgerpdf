@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
@@ -17,6 +18,14 @@ import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 
 const isDev = !app.isPackaged
 
+/**
+ * Identity. Without this Electron calls itself "Electron" in the menu bar,
+ * ⌘-Tab and the Dock — confusing when what you are actually running is a
+ * binder full of client workpapers. Set before `ready` so the name is in place
+ * by the time the app menu is built.
+ */
+app.setName('Workpaper Binder')
+
 /** Repo root. Dev: out/main -> out -> app -> repo. Packaged: resources/. */
 function repoRoot(): string {
   return isDev ? path.resolve(__dirname, '../../..') : process.resourcesPath
@@ -24,6 +33,15 @@ function repoRoot(): string {
 
 function engineDir(): string {
   return path.join(repoRoot(), 'engine')
+}
+
+/** The Dock icon. Optional — a missing file must never stop the app starting. */
+function appIconPath(): string | null {
+  const candidates = [
+    path.join(repoRoot(), 'app', 'resources', 'icon.png'),
+    path.join(process.resourcesPath ?? '', 'icon.png')
+  ]
+  return candidates.find((p) => p && existsSync(p)) ?? null
 }
 
 function pythonExe(): string {
@@ -277,6 +295,12 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // Dock icon, macOS only. In dev this is the difference between a generic
+  // Electron diamond and something recognisable in ⌘-Tab.
+  if (process.platform === 'darwin' && app.dock) {
+    const icon = appIconPath()
+    if (icon) app.dock.setIcon(icon)
+  }
   registerIpc()
   createWindow()
   app.on('activate', () => {
