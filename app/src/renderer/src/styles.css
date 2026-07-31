@@ -680,13 +680,24 @@ button.link {
 
 /* the palette carries a lot of tools now — keep each one tight */
 .palette button {
-  padding: 4px 7px;
+  padding: 3px 6px;
 }
 
+.palette .stamp-arm,
+.palette .stamp-drop {
+  padding: 2px 5px;
+}
+
+.swatch {
+  width: 13px;
+  height: 13px;
+}
+
+/* The one tool no glyph communicates. ✓ ✕ ▭ ◯ ➔ speak for themselves; a
+   calculator tape does not, and it had to be asked about twice. */
 .glyph-tape {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: -0.5px;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 /* custom stamps — the firm's own tick-mark legend, in the mark palette */

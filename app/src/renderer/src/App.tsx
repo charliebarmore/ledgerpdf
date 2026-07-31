@@ -929,7 +929,7 @@ export default function App(): React.JSX.Element {
             onClick={() => setArmed({ kind: 'tape' })}
             title="Calculator tape — click the page, then key numbers like a 10-key  (C)"
           >
-            <span className="glyph-tape">123</span>
+            <span className="glyph-tape">Tape</span>
           </button>
           {/* The firm's own legend sits with the fixed palette — they are the
               same gesture: arm a stamp, click the page. */}
