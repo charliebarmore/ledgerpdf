@@ -264,9 +264,15 @@ Rectangle, ellipse, line, arrow, highlighter and text note — drag to draw. Hol
 `V`/`Esc` back to select. A selected shape drags to move, `⌫` deletes it, and
 the side inspector edits color, stroke weight and note after the fact.
 
-**Selecting and editing.** With no tool armed (`V`/`Esc`), click a shape to
-select it, drag to move, drag a corner handle to resize — endpoints for a line
-or arrow, four corners for everything else. `⌫` deletes.
+**A shape tool disarms after one shape**, unlike the mark tools. A tick is
+placed dozens of times in a row; a rectangle is drawn once and then adjusted.
+Staying armed meant every click meant to *grab* a shape drew another one on top
+of it. The new shape is left selected with its handles showing, so it can be
+moved or resized straight away; press the tool's key again to draw another.
+
+**Selecting and editing.** Drag a shape to move it, drag a corner handle to
+resize — endpoints for a line or arrow, four corners for everything else. `⌫`
+deletes. `V`/`Esc` returns to the select arrow if a tool is armed.
 
 Every shape carries an **invisible fat hit area** underneath it. SVG
 hit-testing follows what is painted, so a `fill="none"` outline is only

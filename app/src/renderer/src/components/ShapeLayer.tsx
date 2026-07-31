@@ -345,10 +345,10 @@ export function ShapeLayer({
             <rect
               key={hd.key}
               className="shape-handle"
-              x={hd.x - 4}
-              y={hd.y - 4}
-              width={8}
-              height={8}
+              x={hd.x - 5}
+              y={hd.y - 5}
+              width={10}
+              height={10}
               onPointerDown={(e) => startResize(e, selectedShape, hd.key)}
             />
           ))}

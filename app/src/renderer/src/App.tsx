@@ -479,11 +479,22 @@ export default function App(): React.JSX.Element {
         width: SHAPE_WIDTH_DEFAULT,
         ...(armed.kind === 'textbox' ? { text: '' } : {})
       })
-      apply(next, `${armed.kind} drawn.`)
+      const kind = armed.kind
+      const KEY: Record<string, string> = {
+        rect: 'R',
+        ellipse: 'O',
+        line: 'L',
+        arrow: 'A',
+        highlight: 'H',
+        textbox: 'N'
+      }
+      apply(next, `${kind} drawn — drag it to move, corners to resize. ${KEY[kind]} to draw another.`)
       setSelectedShapeId(id)
       setSelectedMarkId(null)
-      // A text box is useless empty, so drop straight into typing it.
-      if (armed.kind === 'textbox') setArmed(null)
+      // Disarm after ONE shape, unlike the mark tools. A shape is drawn and
+      // then adjusted; staying armed meant every click meant to grab it drew
+      // another one on top instead.
+      setArmed(null)
     },
     [current, armed, session, shapeColor, apply]
   )
