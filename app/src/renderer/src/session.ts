@@ -824,6 +824,64 @@ export function removeTapeEntry(session: Session, id: string, index: number): Se
   return updateTape(session, id, { entries: tape.entries.filter((_, i) => i !== index) })
 }
 
+/**
+ * One keystroke of the 10-key, as a pure transition. The UI and the on-screen
+ * keypad both route through this shape, and it is what lets "5 × 5 =" be
+ * verified without a DOM.
+ *
+ *   + and -  are POSTFIX (adding-machine): commit this figure with that sign.
+ *   × and ÷  are INFIX (calculator): set the operator for the NEXT figure,
+ *            committing anything already keyed as an addend first.
+ *   = / Enter closes the calculation with the pending operator.
+ */
+export interface TapeKeyState {
+  entries: TapeEntry[]
+  buffer: string
+  op: TapeOp
+}
+
+export function tapeKeyPress(state: TapeKeyState, key: string): TapeKeyState {
+  const { entries, buffer, op } = state
+  const commit = (withOp: TapeOp, nextOp: TapeOp): TapeKeyState => {
+    const value = parseAmount(buffer)
+    if (value === null) return { entries, buffer: '', op: nextOp }
+    if (withOp === '÷' && value === 0) return state // refuse; never poison a total
+    const flip = value < 0 && (withOp === '+' || withOp === '-')
+    return {
+      entries: [
+        ...entries,
+        {
+          value: flip ? Math.abs(value) : value,
+          op: flip ? (withOp === '+' ? '-' : '+') : withOp
+        }
+      ],
+      buffer: '',
+      op: nextOp
+    }
+  }
+
+  if (/^[0-9]$/.test(key)) return { ...state, buffer: buffer === '0' ? key : buffer + key }
+  if (key === '00' || key === '000') return { ...state, buffer: buffer ? buffer + key : buffer }
+  if (key === '.' || key === ',') {
+    return { ...state, buffer: buffer.includes('.') ? buffer : (buffer || '0') + '.' }
+  }
+  if (key === '±') {
+    return { ...state, buffer: buffer.startsWith('-') ? buffer.slice(1) : `-${buffer}` }
+  }
+  if (key === '+') return commit('+', op)
+  if (key === '-') return commit('-', op)
+  if (key === '*' || key === '×') return buffer ? commit('+', '×') : { ...state, op: '×' }
+  if (key === '/' || key === '÷') return buffer ? commit('+', '÷') : { ...state, op: '÷' }
+  if (key === 'Enter' || key === '=') return commit(op, '+')
+  if (key === 'C') return { entries, buffer: '', op: '+' }
+  if (key === 'CE') return { ...state, buffer: '' }
+  if (key === 'Backspace' || key === 'Delete') {
+    if (buffer) return { ...state, buffer: buffer.slice(0, -1) }
+    return { ...state, entries: entries.slice(0, -1) }
+  }
+  return state
+}
+
 export function removeTapes(session: Session, ids: string[]): Session {
   const set = new Set(ids)
   return { ...session, tapes: (session.tapes ?? []).filter((t) => !set.has(t.id)) }

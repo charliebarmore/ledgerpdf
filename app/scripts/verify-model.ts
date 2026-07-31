@@ -50,6 +50,8 @@ import {
   sanitizeTitle,
   setBookmarkTitle,
   tapeLines,
+  tapeKeyPress,
+  type TapeKeyState,
   tapeRunning,
   tapeTotal,
   toTapeEntry,
@@ -627,6 +629,59 @@ async function main(): Promise<number> {
     JSON.stringify(
       tapeLines({ id: 't', page: 'p', nx: 0, ny: 0, section: 1, entries: chain })
     )
+  )
+
+  // --- keying, as a pure transition. "5 x 5 =" is the case that was broken:
+  //     x used to commit the figure just typed instead of arming the operator
+  //     for the next one.
+  const keys = (seq: string[]): TapeKeyState =>
+    seq.reduce<TapeKeyState>((st, k) => tapeKeyPress(st, k), {
+      entries: [],
+      buffer: '',
+      op: '+'
+    })
+  check(
+    '5 x 5 = gives 25',
+    tapeTotal(keys(['5', '*', '5', '=']).entries) === 25,
+    JSON.stringify(keys(['5', '*', '5', '=']).entries)
+  )
+  check(
+    'a running subtotal times a rate: 1200 + 340 + then x 0.35 = gives 539.00',
+    tapeTotal(keys(['1', '2', '0', '0', '+', '3', '4', '0', '+', '*', '.', '3', '5', '=']).entries) === 539,
+    String(
+      tapeTotal(keys(['1', '2', '0', '0', '+', '3', '4', '0', '+', '*', '.', '3', '5', '=']).entries)
+    )
+  )
+  check(
+    '+ and - stay postfix: 1200 + 340 + 50 - totals 1490',
+    tapeTotal(keys(['1', '2', '0', '0', '+', '3', '4', '0', '+', '5', '0', '-']).entries) === 1490,
+    String(tapeTotal(keys(['1', '2', '0', '0', '+', '3', '4', '0', '+', '5', '0', '-']).entries))
+  )
+  check(
+    'x stays armed until = closes it, and shows in the pending operator',
+    keys(['5', '*']).op === '×' && keys(['5', '*', '5', '=']).op === '+'
+  )
+  check(
+    'numeric keys, the decimal point and 00 all reach the buffer',
+    keys(['1', '2', '.', '5']).buffer === '12.5' &&
+      keys(['5', '00']).buffer === '500' &&
+      keys(['.', '7']).buffer === '0.7'
+  )
+  check(
+    'C clears everything keyed, CE only the current figure',
+    keys(['5', '+', '9', 'C']).entries.length === 1 &&
+      keys(['5', '+', '9', 'C']).buffer === '' &&
+      keys(['5', '+', '9', 'CE']).entries.length === 1
+  )
+  check(
+    'dividing by zero is refused at the key, leaving the tape untouched',
+    (() => {
+      const before = keys(['5', '0', '0', '+'])
+      const after = tapeKeyPress(tapeKeyPress(before, '0'), '=')
+      // 0 with a pending '+' is a legitimate zero line; the refusal is on ÷.
+      const div = tapeKeyPress(tapeKeyPress({ ...before, op: '÷' }, '0'), '=')
+      return after.entries.length === 2 && div.entries.length === 1
+    })()
   )
 
   check(

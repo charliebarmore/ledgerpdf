@@ -1269,10 +1269,13 @@ button.link {
 }
 
 .kp-display {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: var(--sm);
   font-family: var(--mono);
   font-size: 22px;
   font-variant-numeric: tabular-nums;
-  text-align: right;
   padding: 6px var(--sm);
   background: #f4f6f4;
   border-bottom: 1px solid var(--border);
@@ -1299,8 +1302,16 @@ button.link {
   font-weight: 700;
 }
 
+.kp-pending {
+  font-size: 16px;
+  color: var(--primary);
+  font-weight: 700;
+  min-width: 12px;
+}
+
 .kp-enter {
   grid-column: span 4;
+  font-size: 18px;
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;

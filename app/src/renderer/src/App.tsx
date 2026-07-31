@@ -25,8 +25,8 @@ import {
   nudgeBookmarkDepth,
   parseSession,
   parseAmount,
-  popTapeEntry,
-  pushTapeEntry,
+  tapeKeyPress,
+  toTapeEntry,
   removeTapeEntry,
   updateTapeEntry,
   removeBookmark,
@@ -377,59 +377,50 @@ export default function App(): React.JSX.Element {
   /**
    * One key router for the tape, used by BOTH the keyboard and the on-screen
    * keypad — so a button and a keystroke can never drift apart.
+   *
+   * The transition itself lives in the model (`tapeKeyPress`) so it is verified
+   * headlessly; this only owns what needs React: the buffer, the undo entry,
+   * and the status line.
    */
   const tapeKey = useCallback(
     (key: string) => {
       const id = activeTapeId
       if (!id) return
-      const commit = (op: TapeOp): void => {
-        const value = parseAmount(tapeBuffer)
-        if (value === null) return
-        if (op === '÷' && value === 0) {
-          setStatus('Cannot divide by zero.')
-          return
-        }
-        const flipped = value < 0 && (op === '+' || op === '-')
-        const next = pushTapeEntry(session, id, {
-          value: flipped ? Math.abs(value) : value,
-          op: flipped ? (op === '+' ? '-' : '+') : op
-        })
-        const tape = next.tapes?.find((t) => t.id === id)
-        apply(next, `${op} ${formatAmount(Math.abs(value))} — total ${formatAmount(tapeTotal(tape?.entries ?? []))}`)
-        setTapeBuffer('')
-        setTapeOp('+')
-      }
+      const tape = (session.tapes ?? []).find((t) => t.id === id)
+      if (!tape) return
 
-      if (/^[0-9]$/.test(key)) return setTapeBuffer((b) => (b === '0' ? key : b + key))
-      if (key === '00' || key === '000') return setTapeBuffer((b) => (b ? b + key : b))
-      if (key === '.') return setTapeBuffer((b) => (b.includes('.') ? b : (b || '0') + '.'))
-      if (key === '±') return setTapeBuffer((b) => (b.startsWith('-') ? b.slice(1) : `-${b}`))
-      if (key === '+') return commit('+')
-      if (key === '-') return commit('-')
-      if (key === '*' || key === '×') return commit('×')
-      if (key === '/' || key === '÷') return commit('÷')
-      if (key === 'Enter' || key === '=') return commit(tapeOp)
-      if (key === 'C') {
-        setTapeBuffer('')
-        return setTapeOp('+')
-      }
-      if (key === 'CE') return setTapeBuffer('')
-      if (key === 'Backspace' || key === 'Delete') {
-        // Take back the keystroke first; only then the last committed line.
-        if (tapeBuffer) return setTapeBuffer((b) => b.slice(0, -1))
-        const next = popTapeEntry(session, id)
-        if (next === session) return
-        const tape = next.tapes?.find((t) => t.id === id)
-        return apply(next, `Line removed — total ${formatAmount(tapeTotal(tape?.entries ?? []))}`)
-      }
       if (key === 'Escape') {
-        const tape = session.tapes?.find((t) => t.id === id)
         // An untouched tape shouldn't linger as an empty card on the workpaper.
-        if (tape && tape.entries.length === 0 && !tapeBuffer && !tape.title) {
+        if (tape.entries.length === 0 && !tapeBuffer && !tape.title) {
           apply(removeTapes(session, [id]), 'Tape discarded.')
         }
         setTapeBuffer('')
+        setTapeOp('+')
         setActiveTapeId(null)
+        return
+      }
+
+      const before = { entries: tape.entries, buffer: tapeBuffer, op: tapeOp }
+      const after = tapeKeyPress(before, key)
+      if (after === before) {
+        // The one refusal worth explaining rather than ignoring.
+        if ((key === '=' || key === 'Enter') && tapeOp === '÷' && parseAmount(tapeBuffer) === 0) {
+          setStatus('Cannot divide by zero.')
+        }
+        return
+      }
+
+      setTapeBuffer(after.buffer)
+      setTapeOp(after.op)
+      if (after.entries !== before.entries) {
+        const total = formatAmount(tapeTotal(after.entries))
+        const note =
+          after.entries.length < before.entries.length
+            ? `Line removed — total ${total}`
+            : `${after.entries[after.entries.length - 1].op} ${formatAmount(
+                after.entries[after.entries.length - 1].value
+              )} — total ${total}`
+        apply(updateTape(session, id, { entries: after.entries }), note)
       }
     },
     [activeTapeId, tapeBuffer, tapeOp, session, apply]
@@ -753,16 +744,16 @@ export default function App(): React.JSX.Element {
           size: 24,
           text: 'TB'
         }).session
-        // A tape, keyed the way the 10-key does it: place, then push entries.
+        // A tape with lines already on it, so the smoke test exercises the
+        // grid and the export rather than an empty card.
         const tape = addTape(imported, {
           page: imported.pages[0].id,
           nx: 0.68,
           ny: 0.55,
-          entries: [],
+          entries: [1200, 340, -50].map(toTapeEntry),
           title: 'Repairs'
         })
         imported = tape.session
-        for (const v of [1200, 340, -50]) imported = pushTapeEntry(imported, tape.id, v)
         setSession(imported)
         // Leave the lettered mark selected so the window snapshot captures the
         // inspector rather than an empty side panel.
@@ -814,6 +805,15 @@ export default function App(): React.JSX.Element {
         void exportBinder()
         return
       }
+      // A live tape owns the keyboard — digits, operators, Enter, ⌫, Esc —
+      // routed here at the WINDOW rather than on the tape card, because the
+      // moment you touch a keypad button focus leaves the card and typing
+      // would otherwise go dead. That is exactly the bug this fixes.
+      if (activeTapeId && !mod) {
+        e.preventDefault()
+        return tapeKey(e.key)
+      }
+
       // Mark tools. Plain keys, so they stay out of the way of the browser's
       // and OS's modifier shortcuts.
       if (!mod && !e.repeat) {
@@ -875,6 +875,8 @@ export default function App(): React.JSX.Element {
     addBookmarkHere,
     resizeMark,
     deleteMark,
+    activeTapeId,
+    tapeKey,
     deleteShape,
     selectedMarkId,
     selectedShapeId
@@ -1242,6 +1244,7 @@ export default function App(): React.JSX.Element {
         <Keypad
           tape={activeTape}
           buffer={tapeBuffer}
+          pendingOp={tapeOp}
           onKey={tapeKey}
           onEditEntry={editTapeEntry}
           onRemoveEntry={removeTapeLine}

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { TAPE_OPS, formatAmount, tapeRunning, tapeTotal, type Tape, type TapeEntry } from '../session'
+import { TAPE_OPS, formatAmount, tapeRunning, tapeTotal, type Tape, type TapeEntry, type TapeOp } from '../session'
 
 /**
  * The 10-key panel: a keypad, the current figure, and the tape's lines as an
@@ -17,6 +17,7 @@ import { TAPE_OPS, formatAmount, tapeRunning, tapeTotal, type Tape, type TapeEnt
 export function Keypad({
   tape,
   buffer,
+  pendingOp,
   onKey,
   onEditEntry,
   onRemoveEntry,
@@ -25,6 +26,7 @@ export function Keypad({
 }: {
   tape: Tape
   buffer: string
+  pendingOp: TapeOp
   onKey: (key: string) => void
   onEditEntry: (index: number, patch: Partial<TapeEntry>) => void
   onRemoveEntry: (index: number) => void
@@ -123,35 +125,45 @@ export function Keypad({
         </div>
       </div>
 
-      <div className="kp-display">{buffer || '0'}</div>
+      <div className="kp-display">
+        <span className="kp-pending" title="Operator waiting for the next figure">
+          {pendingOp === '+' ? '' : pendingOp}
+        </span>
+        <span>{buffer || '0'}</span>
+      </div>
 
       <div className="kp-grid">
-        {key('C', 'C', 'kp-wide')}
+        {key('C', 'C')}
         {key('CE', 'CE')}
         {key('⌫', 'Backspace')}
+        {key('÷', '/', 'kp-op-key')}
 
         {key('7', '7')}
         {key('8', '8')}
         {key('9', '9')}
-        {key('÷', '/', 'kp-op-key')}
+        {key('×', '*', 'kp-op-key')}
 
         {key('4', '4')}
         {key('5', '5')}
         {key('6', '6')}
-        {key('×', '*', 'kp-op-key')}
+        {key('−', '-', 'kp-op-key')}
 
         {key('1', '1')}
         {key('2', '2')}
         {key('3', '3')}
-        {key('−', '-', 'kp-op-key')}
+        {key('+', '+', 'kp-op-key')}
 
         {key('0', '0')}
         {key('00', '00')}
         {key('.', '.')}
-        {key('+', '+', 'kp-op-key')}
-        {key('±', '±', 'kp-wide')}
-        <button className="kp-key kp-enter" onClick={() => onKey('Enter')} title="Add line (Enter)">
-          Add line
+        {key('±', '±')}
+
+        <button
+          className="kp-key kp-enter"
+          onClick={() => onKey('=')}
+          title="Finish the calculation and add the line (Enter or =)"
+        >
+          =
         </button>
       </div>
 

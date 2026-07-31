@@ -324,17 +324,29 @@ optional note and its operator.
 
 | Keys | Action |
 |---|---|
-| `0`–`9` `.` `00` | key into the current line |
-| `+` or `Enter` | commit the line as an addition |
-| `-` | commit it as a subtraction |
-| `*` `/` | commit it as a multiplication / division of the running total |
+| `0`–`9` `.` `00` | key into the current figure |
+| `+` `-` | **postfix**, adding-machine style: add / subtract *this* figure, committed immediately |
+| `*` `/` | **infix**, calculator style: arm × or ÷ for the *next* figure |
+| `=` or `Enter` | close the calculation with the armed operator |
 | `±` | flip the sign of what is being keyed |
 | `⌫` | take back the keystroke — or, once empty, the last committed line |
 | `C` / `CE` | clear everything / clear the current figure |
 | `Esc` | put the tape down (an untouched tape deletes itself) |
 
-**Every button routes through the same key handler as the keyboard**
-(`tapeKey` in `App.tsx`), so the panel and typing cannot drift apart. The
+The two conventions coexist because both are muscle memory and neither alone is
+enough: `1200 + 340 + 50 -` foots a column, while `5 × 5 =` gives 25 and
+`…subtotal… × 0.35 =` applies a rate. Pressing `×` with a figure already keyed
+commits it as an addend first, which is what makes all three work. The armed
+operator is shown to the left of the display, so `×` is never silently pending.
+
+**The numeric keypad works, and so does typing anywhere in the window.** Keys
+are routed at the window level rather than from the tape card, because the
+moment you touch a keypad button focus leaves the card and card-level handling
+goes dead — which it did.
+
+**Every button routes through the same key handler as the keyboard**, and the
+transition itself is a pure function in the model (`tapeKeyPress`), so the
+panel, the keyboard and the tests all exercise one implementation. The
 panel is a second way in, not the primary one — typing is faster than clicking
 digits.
 
