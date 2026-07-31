@@ -106,7 +106,7 @@ Dev builds only (ignored when packaged), used by `npm run smoke`:
 
 Arm a tool in the toolbar palette, then click the page. Marks are dragged to
 move, `+`/`−` to resize, `⌫` to delete, and every change is undoable. Your
-initials (Review panel) are stamped as the mark's author along with an ISO
+initials (toolbar) are stamped as the mark's author along with an ISO
 timestamp — part of the review record, carried into the PDF as private metadata
 alongside a standard `/Stamp` annotation.
 
@@ -116,10 +116,12 @@ stream in `engine/workpaper_engine/appearance.py` plus a palette entry; adding
 another *letter* needs no code at all (see custom stamps below).
 
 **Custom stamps.** Every firm has its own tick-mark legend, so the fixed palette
-can't be the whole story. Type a stamp in the Review panel (`TB`, `PY`, `A/R`, up
-to 8 characters) and it is saved on the session and armed immediately. Saved
-stamps live in the binder, so the legend travels with it. Removing a stamp from
-the palette never touches marks already placed with it.
+can't be the whole story. Hit `+` at the end of the mark palette, type a stamp
+(`TB`, `PY`, `A/R`, up to 8 characters), and it is saved on the session and armed
+immediately — saved stamps sit in the palette alongside the fixed tools, because
+it's the same gesture: arm it, click the page. The legend lives in the binder, so
+it travels with it. Removing a stamp (`×`) never touches marks already placed
+with it.
 
 **Mark inspector.** Select a mark and the side panel exposes its letters, size,
 author and note for editing after the fact — a review record has to be
@@ -205,7 +207,7 @@ pdfium alongside the marks.
 
 ## Flatten on export
 
-The **Flatten marks** toggle (Binder panel) paints marks into the page content
+The **Flatten** toggle beside Export binder paints marks into the page content
 stream instead of attaching them as `/Stamp` annotations. For a binder that
 leaves the building: nothing a recipient can select, drag, or delete, and nothing
 for a viewer to silently reposition (see the Preview finding in `spike/README.md`).
@@ -278,6 +280,19 @@ they reach the transport.
 Note this does not change the *product's* local-only claim: the app still has no
 telemetry and reaches no network. What leaves the machine is whatever the agent
 you point at it chooses to send to its own model.
+
+## Window layout
+
+Three columns: **bookmarks** on the left (where a reader looks for a contents
+pane), the **page** in the middle, the **thumbnail rail** on the right. Drag the
+divider to widen the bookmark pane — real workpaper titles are long.
+
+The side pane holds only navigation and the selected mark's inspector.
+Everything that is a *control* lives in the toolbar: the mark palette (including
+your custom stamps), reviewer initials, and `Flatten` beside Export binder,
+where an export option belongs. Everything that is a *readout* — pages, sources,
+selected, marks, tapes — lives in the status bar. The toolbar wraps rather than
+clipping on a narrow window.
 
 ## Bookmark behavior
 

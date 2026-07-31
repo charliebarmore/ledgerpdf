@@ -56,6 +56,8 @@ body {
 .toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: var(--xs);
   gap: var(--sm);
   padding: var(--sm) var(--md);
   background: var(--surface);
@@ -448,24 +450,25 @@ button.link {
   border-radius: 2px;
 }
 
-/* reviewer initials */
+/* reviewer initials — in the toolbar, beside the palette that uses them */
 
-.reviewer {
-  display: flex;
+.rev {
+  display: inline-flex;
   align-items: center;
-  gap: var(--sm);
-  padding: 0 var(--md) var(--sm);
+  gap: var(--xs);
+  flex: none;
 }
 
-.reviewer label {
+.rev-label {
   color: var(--muted);
+  font-size: 12px;
 }
 
 .rev-input {
   font: inherit;
   font-family: var(--mono);
   text-transform: uppercase;
-  width: 62px;
+  width: 58px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -579,20 +582,7 @@ button.link {
   border-color: var(--error);
 }
 
-/* custom stamps — the firm's own tick-mark legend */
-
-.stamps {
-  padding: 0 var(--md) var(--sm);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.stamp-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--xs);
-}
+/* custom stamps — the firm's own tick-mark legend, in the mark palette */
 
 .stamp {
   display: inline-flex;
@@ -637,16 +627,16 @@ button.link {
   background: #f1efe9;
 }
 
-.stamp-new {
-  display: flex;
-  gap: var(--xs);
+.stamp-new-btn {
+  padding: 3px 8px;
+  color: var(--muted);
 }
 
 .stamp-input {
   font: inherit;
   font-family: var(--mono);
-  flex: 1;
-  min-width: 0;
+  width: 62px;
+  flex: none;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -911,6 +901,31 @@ button.link {
 
 .toggle input {
   margin: 0;
+}
+
+.toggle.flatten {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* counts in the status bar */
+.counts {
+  color: var(--muted);
+  white-space: nowrap;
+  flex: none;
+}
+
+.counts b {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.statusbar > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stats {

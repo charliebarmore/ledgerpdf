@@ -56,6 +56,7 @@ export default function App(): React.JSX.Element {
   const [activeTapeId, setActiveTapeId] = useState<string | null>(null)
   const [markSize] = useState(MARK_SIZE_DEFAULT)
   const [stampDraft, setStampDraft] = useState('')
+  const [addingStamp, setAddingStamp] = useState(false)
   const reviewerInitials = session.reviewer ?? ''
   const stamps = session.stamps ?? []
   const past = useRef<Session[]>([])
@@ -720,7 +721,75 @@ export default function App(): React.JSX.Element {
           >
             🖩
           </button>
+          {/* The firm's own legend sits with the fixed palette — they are the
+              same gesture: arm a stamp, click the page. */}
+          {stamps.map((s) => (
+            <span
+              key={s}
+              className={`stamp${armed?.kind === 'text' && armed.text === s ? ' on' : ''}`}
+            >
+              <button
+                className="stamp-arm"
+                onClick={() => setArmed({ kind: 'text', text: s })}
+                title={`Place "${s}"`}
+              >
+                {s}
+              </button>
+              <button
+                className="stamp-drop"
+                onClick={() => dropStamp(s)}
+                title={`Remove "${s}" from the palette (marks already placed stay)`}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {addingStamp ? (
+            <input
+              className="stamp-input"
+              autoFocus
+              value={stampDraft}
+              maxLength={STAMP_MAX_LEN}
+              placeholder="TB"
+              onChange={(e) => setStampDraft(e.target.value)}
+              onBlur={() => {
+                saveStamp()
+                setAddingStamp(false)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  saveStamp()
+                  setAddingStamp(false)
+                }
+                if (e.key === 'Escape') {
+                  setStampDraft('')
+                  setAddingStamp(false)
+                }
+              }}
+            />
+          ) : (
+            <button
+              className="stamp-new-btn"
+              onClick={() => setAddingStamp(true)}
+              title="Add your own stamp — TB, PY, A/R…"
+            >
+              +
+            </button>
+          )}
         </span>
+        <span className="sep" />
+        <label className="rev" title="Stamped as the author of every mark you place">
+          <span className="rev-label">Initials</span>
+          <input
+            className="rev-input"
+            value={reviewerInitials}
+            maxLength={4}
+            placeholder="CJB"
+            onChange={(e) =>
+              setSession((prev) => ({ ...prev, reviewer: e.target.value.toUpperCase().slice(0, 4) }))
+            }
+          />
+        </label>
         <span className="sep" />
         <button onClick={undo} title={`Undo  ${MOD}Z`}>
           Undo
@@ -735,6 +804,14 @@ export default function App(): React.JSX.Element {
         <button onClick={() => saveSession(false)} disabled={!pages.length} title={`Save session  ${MOD}S`}>
           Save
         </button>
+        {/* An export option belongs beside the export button, not in a panel. */}
+        <label
+          className="toggle flatten"
+          title="Burn marks and tapes into the page for a binder that leaves the building — nothing a viewer can drag or delete. One-way: a flattened PDF can't be re-edited, so keep the session file as your master."
+        >
+          <input type="checkbox" checked={flatten} onChange={(e) => setFlatten(e.target.checked)} />
+          Flatten
+        </label>
         <button className="primary" onClick={() => void exportBinder()} disabled={busy || !pages.length}>
           Export binder
         </button>
@@ -780,103 +857,6 @@ export default function App(): React.JSX.Element {
               {selectedMark && (
                 <MarkInspector mark={selectedMark} onChange={editMark} onDelete={deleteMark} />
               )}
-              <div className="panel">
-                <div className="panel-head">
-                  <span className="panel-title">Review</span>
-                </div>
-                <div className="reviewer">
-                  <label htmlFor="rev">Initials</label>
-                  <input
-                    id="rev"
-                    className="rev-input"
-                    value={reviewerInitials}
-                    maxLength={4}
-                    placeholder="CJB"
-                    title="Stamped as the author of every mark you place"
-                    onChange={(e) =>
-                      setSession((prev) => ({
-                        ...prev,
-                        reviewer: e.target.value.toUpperCase().slice(0, 4)
-                      }))
-                    }
-                  />
-                </div>
-                {/* Every firm has its own tick-mark legend. Saved stamps live
-                    on the session, so the legend travels with the binder. */}
-                <div className="stamps">
-                  {stamps.length > 0 && (
-                    <div className="stamp-list">
-                      {stamps.map((s) => (
-                        <span
-                          key={s}
-                          className={`stamp${
-                            armed?.kind === 'text' && armed.text === s ? ' on' : ''
-                          }`}
-                        >
-                          <button
-                            className="stamp-arm"
-                            onClick={() => setArmed({ kind: 'text', text: s })}
-                            title={`Place "${s}" — click a tool, then click the page`}
-                          >
-                            {s}
-                          </button>
-                          <button
-                            className="stamp-drop"
-                            onClick={() => dropStamp(s)}
-                            title={`Remove "${s}" from the palette (marks already placed stay)`}
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <div className="stamp-new">
-                    <input
-                      className="stamp-input"
-                      value={stampDraft}
-                      maxLength={STAMP_MAX_LEN}
-                      placeholder="Add a stamp — TB, PY, A/R…"
-                      onChange={(e) => setStampDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') saveStamp()
-                        if (e.key === 'Escape') setStampDraft('')
-                      }}
-                    />
-                    <button onClick={saveStamp} disabled={!stampDraft.trim()} title="Save + arm">
-                      +
-                    </button>
-                  </div>
-                </div>
-                <dl className="stats">
-                  <dt>Marks</dt>
-                  <dd>{session.marks?.length ?? 0}</dd>
-                </dl>
-              </div>
-              <div className="panel">
-                <div className="panel-head">
-                  <span className="panel-title">Binder</span>
-                  <label
-                    className="toggle"
-                    title="Burn marks into the page for a binder that leaves the building — nothing a viewer can drag or delete. One-way: a flattened PDF can't be re-edited, so keep the session file as your master."
-                  >
-                    <input
-                      type="checkbox"
-                      checked={flatten}
-                      onChange={(e) => setFlatten(e.target.checked)}
-                    />
-                    Flatten marks
-                  </label>
-                </div>
-                <dl className="stats">
-                  <dt>Pages</dt>
-                  <dd>{pages.length}</dd>
-                  <dt>Sources</dt>
-                  <dd>{session.sources.length}</dd>
-                  <dt>Selected</dt>
-                  <dd>{selected.size}</dd>
-                </dl>
-              </div>
             </aside>
             <div
               className="splitter"
@@ -916,6 +896,23 @@ export default function App(): React.JSX.Element {
 
       <footer className="statusbar">
         <span className={busy ? 'working' : ''}>{busy ? 'Working…' : status}</span>
+        {/* Counts are readouts, not controls — the status bar is where a reader
+            looks for them, and it keeps the side pane to bookmarks. */}
+        <span className="counts">
+          <b>{pages.length}</b> page{pages.length === 1 ? '' : 's'} ·{' '}
+          <b>{session.sources.length}</b> source{session.sources.length === 1 ? '' : 's'} ·{' '}
+          <b>{selected.size}</b> selected
+          {session.marks?.length ? (
+            <>
+              {' '}· <b>{session.marks.length}</b> mark{session.marks.length === 1 ? '' : 's'}
+            </>
+          ) : null}
+          {session.tapes?.length ? (
+            <>
+              {' '}· <b>{session.tapes.length}</b> tape{session.tapes.length === 1 ? '' : 's'}
+            </>
+          ) : null}
+        </span>
         <span className="muted">
           {sessionPath ? baseName(sessionPath) : 'unsaved session'} · drag to reorder · [ ] rotate ·
           ⌫ delete · {MOD}Z undo
