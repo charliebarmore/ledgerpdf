@@ -3,7 +3,6 @@ import {
   SHAPE_COLORS,
   SHAPE_COLOR_NAMES,
   type ShapeColor,
-  type Session,
   type StatusDef,
   type StatusParts
 } from '../session'
@@ -21,7 +20,6 @@ import {
  * 18 not set" is the answer to the only question that matters mid-review.
  */
 export function StatusMenu({
-  session,
   defs,
   counts,
   parts,
@@ -32,9 +30,10 @@ export function StatusMenu({
   onAddDef,
   onEditDef,
   onRemoveDef,
-  onParts
+  onParts,
+  reviewer,
+  onReviewer
 }: {
-  session: Session
   defs: StatusDef[]
   counts: { byId: Record<string, number>; unset: number }
   parts: StatusParts
@@ -48,6 +47,8 @@ export function StatusMenu({
   onEditDef: (id: string, patch: Partial<StatusDef>) => void
   onRemoveDef: (id: string) => void
   onParts: (patch: Partial<StatusParts>) => void
+  reviewer: string
+  onReviewer: (initials: string) => void
 }): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
@@ -209,6 +210,17 @@ export function StatusMenu({
 
       {showParts && (
         <div className="st-parts">
+          <label className="mi-row">
+            <span>Initials</span>
+            <input
+              className="rev-input"
+              value={reviewer}
+              maxLength={4}
+              placeholder="—"
+              onChange={(e) => onReviewer(e.target.value.toUpperCase().slice(0, 4))}
+              onKeyDown={(e) => e.stopPropagation()}
+            />
+          </label>
           <label className="toggle">
             <input
               type="checkbox"
@@ -264,8 +276,8 @@ export function StatusMenu({
             </span>
           </label>
           <p className="st-note">
-            The stamp carries your initials ({session.reviewer || 'set them in the toolbar'}) and
-            the time you applied it.
+            The stamp carries your initials and the time you applied it. The same initials
+            author every mark, tape and shape you place.
           </p>
           </div>
         )}

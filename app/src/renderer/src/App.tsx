@@ -1064,7 +1064,6 @@ export default function App(): React.JSX.Element {
           Delete
         </button>
         <StatusMenu
-          session={session}
           defs={defs}
           counts={counts}
           parts={parts}
@@ -1076,6 +1075,8 @@ export default function App(): React.JSX.Element {
           onEditDef={editStatusDef}
           onRemoveDef={removeStatusDef}
           onParts={setParts}
+          reviewer={reviewerInitials}
+          onReviewer={(v) => setSession((prev) => ({ ...prev, reviewer: v }))}
         />
         <span className="sep" />
         <button onClick={undo} title={`Undo  ${MOD}Z`}>
@@ -1148,7 +1149,11 @@ export default function App(): React.JSX.Element {
             style={{ color: MARK_COLOR.text }}
             onClick={() => setArmed({ kind: 'text', text: reviewerInitials })}
             disabled={!reviewerInitials}
-            title={reviewerInitials ? `Stamp your initials (${reviewerInitials})` : 'Stamp your initials — type them in the Initials box first'}
+            title={
+              reviewerInitials
+                ? `Stamp your initials (${reviewerInitials})`
+                : 'Stamp your initials — set them in Status ▸ Options first'
+            }
           >
             {reviewerInitials || '—'}
           </button>
@@ -1257,19 +1262,6 @@ export default function App(): React.JSX.Element {
             </button>
           )}
         </span>
-        <span className="sep" />
-        <label className="rev" title="Stamped as the author of every mark you place">
-          <span className="rev-label">Initials</span>
-          <input
-            className="rev-input"
-            value={reviewerInitials}
-            maxLength={4}
-            placeholder="—"
-            onChange={(e) =>
-              setSession((prev) => ({ ...prev, reviewer: e.target.value.toUpperCase().slice(0, 4) }))
-            }
-          />
-        </label>
         </div>
       </header>
 

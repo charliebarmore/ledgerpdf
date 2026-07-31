@@ -191,9 +191,11 @@ Dev builds only (ignored when packaged), used by `npm run smoke`:
 
 Arm a tool in the toolbar palette, then click the page. Marks are dragged to
 move, `+`/`−` to resize, `⌫` to delete, and every change is undoable. Your
-initials (toolbar) are stamped as the mark's author along with an ISO
+initials (Status ▸ Options) are stamped as the mark's author along with an ISO
 timestamp — part of the review record, carried into the PDF as private metadata
-alongside a standard `/Stamp` annotation.
+alongside a standard `/Stamp` annotation. Initials are set in **Status ▸
+Options**, next to the stamp that displays them most visibly; the same initials
+author every mark, tape and shape.
 
 Kinds: `tick` (agreed), `cross` (does not agree), and `text` (a short lettered
 stamp — `F` for footed, or your initials). Adding another *kind* is an appearance
