@@ -161,7 +161,7 @@ native close/open guard prevents accidental loss until the user chooses Save.
 | `+` `−` | resize the selected mark |
 | `⌫` | delete the selected mark or shape (else the selected pages) |
 | `⌘/Ctrl B` | add a bookmark on the current page |
-| `⌘/Ctrl I` · `E` · `S` · `O` | add files · export · save session · open session |
+| `⌘/Ctrl I` · `E` · `S` · `O` | add files · export PDF · save session · open session |
 
 Click selects, `⌘/Ctrl`-click toggles, `⇧`-click selects a range. Drag thumbnails
 to reorder; drop PDFs or images onto the window to import.
@@ -402,6 +402,23 @@ add handle mapping in `src/mcp/server.ts` before those strings reach transport.
 Note this does not change the *product's* local-only claim: the app still has no
 telemetry and reaches no network. What leaves the machine is whatever the agent
 you point at it chooses to send to its own model.
+
+## Save session vs Export PDF
+
+Two different outputs, and the distinction is the whole design:
+
+- **Save session** writes a `.wptsession.json` — page order, bookmarks, marks,
+  tapes and shapes, **pointing at your source files without touching them**.
+  It is the editable working record: reopen it and every tick is still a tick
+  with its author and timestamp, not pixels.
+- **Export PDF** writes the binder itself: pages assembled, bookmarks
+  retargeted, annotations applied.
+
+The buttons used to read "Save" and "Export", which was ambiguous at exactly
+the moment it mattered — "Save" is what anyone reaches for when they want their
+document, and they got a `.json`. They now say what they produce. The session
+file is named after the binder for the same reason a folder of files all called
+`binder.wptsession.json` helps nobody.
 
 ## Window layout
 

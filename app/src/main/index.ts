@@ -216,13 +216,18 @@ function registerIpc(): void {
     return runEngine({ cmd: 'export', binder: { ...s, output } })
   })
 
-  ipcMain.handle('session:save', async (_e, session: unknown, existing: unknown) => {
+  ipcMain.handle('session:save', async (_e, session: unknown, existing: unknown, suggested: unknown) => {
     assertTrustedIpc(_e)
     let target = typeof existing === 'string' ? assertAllowed(allowedSessions, existing, 'session path') : null
     if (!target) {
       const res = await dialog.showSaveDialog({
         title: 'Save binder session',
-        defaultPath: 'binder.wptsession.json',
+        // Name it after the binder, like the PDF export does — a folder of
+        // files all called binder.wptsession.json helps nobody.
+        defaultPath:
+          typeof suggested === 'string' && suggested.trim()
+            ? suggested
+            : 'binder.wptsession.json',
         filters: [{ name: 'Workpaper session', extensions: ['json'] }]
       })
       if (res.canceled || !res.filePath) return null

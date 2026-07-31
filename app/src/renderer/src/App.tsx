@@ -95,6 +95,13 @@ export default function App(): React.JSX.Element {
     [pages, currentId]
   )
 
+  /** The binder's own name, so sessions and exports sit together in a folder. */
+  const binderStem = useMemo(
+    () => (session.sources[0]?.name ?? 'binder').replace(/\.[^.]+$/, ''),
+    [session.sources]
+  )
+
+
   // The main process owns the native close prompt. Keep it informed without
   // exposing any session contents beyond the renderer/main boundary.
   useEffect(() => {
@@ -460,11 +467,16 @@ export default function App(): React.JSX.Element {
   // --------------------------------------------------------------- persistence
 
   const persistSession = useCallback(
-    async (value: Session, existingPath: string | null, mode: 'manual' | 'auto') => {
+    async (
+      value: Session,
+      existingPath: string | null,
+      mode: 'manual' | 'auto',
+      suggested?: string
+    ) => {
       if (saving.current) return null
       saving.current = true
       try {
-        const target = await window.wpt.saveSession(value, existingPath)
+        const target = await window.wpt.saveSession(value, existingPath, suggested)
         if (!target) return null
         lastSaved.current = JSON.stringify(value)
         setSessionPath(target)
@@ -520,17 +532,23 @@ export default function App(): React.JSX.Element {
 
   const exportBinder = useCallback(async () => {
     if (!pages.length) return setStatus('Nothing to export.')
-    const stem = (session.sources[0]?.name ?? 'binder').replace(/\.pdf$/i, '')
-    const suggested = flatten ? `${stem}-binder-flat.pdf` : `${stem}-binder.pdf`
+    const suggested = flatten
+      ? `${binderStem}-binder-flat.pdf`
+      : `${binderStem}-binder.pdf`
     const out = await window.wpt.chooseBinderOutput(suggested)
     if (out) await exportSession(session, out)
-  }, [session, pages, exportSession, flatten])
+  }, [session, pages, exportSession, flatten, binderStem])
 
   const saveSession = useCallback(
     async (forceDialog = false) => {
-      await persistSession(session, forceDialog ? null : sessionPath, 'manual')
+      await persistSession(
+        session,
+        forceDialog ? null : sessionPath,
+        'manual',
+        `${binderStem}.wptsession.json`
+      )
     },
-    [session, sessionPath, persistSession]
+    [session, sessionPath, persistSession, binderStem]
   )
 
   const openSession = useCallback(async () => {
@@ -835,8 +853,8 @@ export default function App(): React.JSX.Element {
       onDrop={onDrop}
     >
       <header className="toolbar">
-        <button onClick={addViaDialog} disabled={busy}>
-          Add files
+        <button onClick={addViaDialog} disabled={busy} title={`Add PDFs or images  ${MOD}I`}>
+          Add
         </button>
         <span className="sep" />
         <button onClick={() => rotate(-90)} disabled={!count} title="Rotate left  [">
@@ -1032,11 +1050,15 @@ export default function App(): React.JSX.Element {
           ↷
         </button>
         <span className="spacer" />
-        <button onClick={openSession} title={`Open session  ${MOD}O`}>
+        <button onClick={openSession} title={`Open a saved .wptsession.json  ${MOD}O`}>
           Open
         </button>
-        <button onClick={() => saveSession(false)} disabled={!pages.length} title={`Save session  ${MOD}S`}>
-          Save
+        <button
+          onClick={() => saveSession(false)}
+          disabled={!pages.length}
+          title={`Save the editable session (.wptsession.json) — your work in progress, sources untouched  ${MOD}S`}
+        >
+          Save session
         </button>
         {/* An export option belongs beside the export button, not in a panel. */}
         <label
@@ -1047,7 +1069,7 @@ export default function App(): React.JSX.Element {
           Flatten
         </label>
         <button className="primary" onClick={() => void exportBinder()} disabled={busy || !pages.length}>
-          Export
+          Export PDF
         </button>
       </header>
 

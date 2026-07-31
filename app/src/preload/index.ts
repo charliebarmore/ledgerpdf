@@ -32,8 +32,12 @@ const api = {
   exportBinder: (spec: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }> =>
     ipcRenderer.invoke('engine:export', spec),
 
-  saveSession: (session: unknown, existingPath: string | null): Promise<string | null> =>
-    ipcRenderer.invoke('session:save', session, existingPath),
+  saveSession: (
+    session: unknown,
+    existingPath: string | null,
+    suggested?: string
+  ): Promise<string | null> =>
+    ipcRenderer.invoke('session:save', session, existingPath, suggested),
 
   openSession: (): Promise<{
     path: string
