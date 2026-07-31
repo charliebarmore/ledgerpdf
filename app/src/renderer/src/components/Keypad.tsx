@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { formatAmount, tapeTotal, type Tape, type TapeEntry } from '../session'
+import { TAPE_OPS, formatAmount, tapeRunning, tapeTotal, type Tape, type TapeEntry } from '../session'
 
 /**
  * The 10-key panel: a keypad, the current figure, and the tape's lines as an
@@ -9,11 +9,10 @@ import { formatAmount, tapeTotal, type Tape, type TapeEntry } from '../session'
  * clicking digits, and every button here routes through the same key handler
  * the keyboard does, so the two can't diverge.
  *
- * × and ÷ are deliberately absent. Every line is an addition or a subtraction,
- * which is what lets the total be summed in exact cents and always foot to what
- * is printed. Multiply and divide would need a rounding rule — round each line,
- * or carry precision and round only the total — and a tape that doesn't foot to
- * the penny is a defect in a workpaper, not a rounding curiosity.
+ * Chain semantics: every operator applies to the running total, like a physical
+ * 10-key. The Result column shows that running value after each line, rounded
+ * to cents at every step, so the printed figures always foot to the printed
+ * total.
  */
 export function Keypad({
   tape,
@@ -55,6 +54,7 @@ export function Keypad({
   }
 
   const section = tape.section ?? 1
+  const running = tapeRunning(tape.entries)
   const key = (label: string, send: string, cls = ''): React.JSX.Element => (
     <button className={`kp-key ${cls}`} onClick={() => onKey(send)} title={label}>
       {label}
@@ -83,6 +83,7 @@ export function Keypad({
           <span>Note</span>
           <span>Amount</span>
           <span>Op</span>
+          <span className="kp-res">Result</span>
         </div>
         {tape.entries.map((e, i) => (
           <div className="kp-row" key={i}>
@@ -98,11 +99,16 @@ export function Keypad({
             <span className="kp-amt">{formatAmount(e.value)}</span>
             <button
               className="kp-op"
-              title="Flip this line between add and subtract"
-              onClick={() => onEditEntry(i, { op: e.op === '+' ? '-' : '+' })}
+              title="Cycle this line's operator: + − × ÷"
+              onClick={() =>
+                onEditEntry(i, {
+                  op: TAPE_OPS[(TAPE_OPS.indexOf(e.op) + 1) % TAPE_OPS.length]
+                })
+              }
             >
               {e.op}
             </button>
+            <span className="kp-res">{formatAmount(running[i])}</span>
             <button className="kp-del" title="Delete this line" onClick={() => onRemoveEntry(i)}>
               ×
             </button>
@@ -111,8 +117,9 @@ export function Keypad({
         <div className="kp-row kp-total">
           <span className="kp-label">{section} - T</span>
           <span className="kp-note-static">Total</span>
-          <span className="kp-amt">{formatAmount(tapeTotal(tape.entries))}</span>
+          <span className="kp-amt" />
           <span className="kp-op-static">*</span>
+          <span className="kp-res kp-res-total">{formatAmount(tapeTotal(tape.entries))}</span>
         </div>
       </div>
 
@@ -126,21 +133,23 @@ export function Keypad({
         {key('7', '7')}
         {key('8', '8')}
         {key('9', '9')}
-        {key('−', '-', 'kp-op-key')}
+        {key('÷', '/', 'kp-op-key')}
 
         {key('4', '4')}
         {key('5', '5')}
         {key('6', '6')}
-        {key('+', '+', 'kp-op-key')}
+        {key('×', '*', 'kp-op-key')}
 
         {key('1', '1')}
         {key('2', '2')}
         {key('3', '3')}
-        {key('±', '±')}
+        {key('−', '-', 'kp-op-key')}
 
-        {key('0', '0', 'kp-wide')}
+        {key('0', '0')}
         {key('00', '00')}
         {key('.', '.')}
+        {key('+', '+', 'kp-op-key')}
+        {key('±', '±', 'kp-wide')}
         <button className="kp-key kp-enter" onClick={() => onKey('Enter')} title="Add line (Enter)">
           Add line
         </button>
@@ -150,8 +159,8 @@ export function Keypad({
         <button onClick={onNewTape} title="Place another tape on this page">
           New tape
         </button>
-        <span className="kp-hint" title="Every line is an addition or a subtraction, so the total always foots to the cent.">
-          add / subtract only
+        <span className="kp-hint" title="Each operator applies to the running total, rounded to cents at every step — so the printed lines always foot to the printed total.">
+          chain · rounds each step
         </span>
       </div>
     </div>

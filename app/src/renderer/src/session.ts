@@ -170,7 +170,9 @@ export const STAMP_MAX_LEN = 8
  * /WPT_Data, which is the seam a future tie-out layer reads.
  */
 /** What an adding machine actually records per line: a figure and the key. */
-export type TapeOp = '+' | '-'
+export type TapeOp = '+' | '-' | '×' | '÷'
+
+export const TAPE_OPS: readonly TapeOp[] = ['+', '-', '×', '÷']
 
 export interface TapeEntry {
   value: number
@@ -612,13 +614,44 @@ export const TAPE_CHAR_W = TAPE_FONT_SIZE * 0.6 // Courier advance = 0.6 em
  * Money summed as floats gives 1490.0000000001, and a workpaper total that
  * doesn't foot to the cent is a defect, not a rounding curiosity.
  */
+/**
+ * The running total after each line — 10-key chain semantics: every operator
+ * applies to the total so far, not to a column of independent addends.
+ *
+ * Arithmetic is carried in INTEGER CENTS and rounded at every step, which is
+ * what a physical adding machine does and what makes the tape auditable: each
+ * printed line is exact, so the figures shown always foot to the total shown.
+ * Carrying full precision and rounding only at the end produces tapes whose
+ * printed lines do not add up to their printed total — indefensible in a
+ * workpaper.
+ */
+export function tapeRunning(entries: TapeEntry[]): number[] {
+  let cents = 0
+  return entries.map((e, i) => {
+    const v = e.value
+    if (i === 0) {
+      // The first line seeds the total. Starting a tape with × or ÷ against an
+      // implicit zero would silently zero the whole thing.
+      cents = Math.round((e.op === '-' ? -v : v) * 100)
+    } else if (e.op === '+') {
+      cents = cents + Math.round(v * 100)
+    } else if (e.op === '-') {
+      cents = cents - Math.round(v * 100)
+    } else if (e.op === '×') {
+      cents = Math.round(cents * v)
+    } else if (e.op === '÷') {
+      // Division by zero leaves the total untouched rather than producing
+      // Infinity. The UI refuses to commit such a line; a hand-edited or
+      // agent-written session must not be able to poison a total.
+      if (v !== 0) cents = Math.round(cents / v)
+    }
+    return cents / 100
+  })
+}
+
 export function tapeTotal(entries: TapeEntry[]): number {
-  return (
-    entries.reduce(
-      (cents, e) => cents + (e.op === '-' ? -1 : 1) * Math.round(e.value * 100),
-      0
-    ) / 100
-  )
+  const running = tapeRunning(entries)
+  return running.length ? running[running.length - 1] : 0
 }
 
 /** Accept a bare number as a "+" line — the old shape, and a convenient input. */
@@ -626,7 +659,8 @@ export function toTapeEntry(v: TapeEntry | number): TapeEntry {
   if (typeof v === 'number') {
     return v < 0 ? { value: -v, op: '-' } : { value: v, op: '+' }
   }
-  return { value: v.value, op: v.op === '-' ? '-' : '+', ...(v.note ? { note: v.note } : {}) }
+  const op = (TAPE_OPS as readonly string[]).includes(v.op) ? v.op : '+'
+  return { value: v.value, op, ...(v.note ? { note: v.note } : {}) }
 }
 
 /** "1,200.00" / "-50.00" — adding-machine convention, minus sign not parens. */
@@ -652,22 +686,35 @@ export function parseAmount(raw: string): number | null {
 /**
  * The tape exactly as it will be drawn — the columnar adding-machine grid:
  *
- *     1 - 0 |          |            |
- *     1 - 1 | Jan fee  |   1,200.00 | +
- *     1 - 2 |          |     340.00 | +
- *     1 - T | Total    |   1,490.00 | *
+ *     1 - 0 |          |            |   |
+ *     1 - 1 | Fees     |   1,200.00 | + |  1,200.00
+ *     1 - 2 | Fees     |     340.00 | + |  1,540.00
+ *     1 - 3 | x 35%    |       0.35 | × |    539.00
+ *     1 - T | Total    |            | * |    539.00
  *
  * Section-and-line labels make every figure addressable, which is what turns a
- * column of numbers into something a reviewer can point at. The engine draws
- * these strings verbatim in Courier, so padding with spaces IS the alignment.
+ * column of numbers into something a reviewer can point at.
+ *
+ * The RESULT column is what makes × and ÷ verifiable: an operand alone
+ * ("0.35") says nothing without the running value it acted on. The column is
+ * omitted entirely on a tape that only adds and subtracts, where the amounts
+ * already foot by eye and a second number column is just noise.
+ *
+ * The engine draws these strings verbatim in Courier, so padding with spaces IS
+ * the alignment.
  */
 export function tapeLines(tape: Tape): string[] {
   const section = tape.section ?? 1
+  const running = tapeRunning(tape.entries)
+  // A chain operator is what makes the running value worth showing.
+  const showResult = tape.entries.some((e) => e.op === '×' || e.op === '÷')
+
   const rows = tape.entries.map((e, i) => ({
     label: `${section} - ${i + 1}`,
     note: e.note?.trim() ?? '',
     amount: formatAmount(e.value),
-    op: e.op
+    op: e.op,
+    result: formatAmount(running[i])
   }))
   const total = formatAmount(tapeTotal(tape.entries))
   const headLabel = `${section} - 0`
@@ -676,19 +723,25 @@ export function tapeLines(tape: Tape): string[] {
   const labelW = Math.max(headLabel.length, totalLabel.length, ...rows.map((r) => r.label.length))
   const noteW = Math.max(8, ...rows.map((r) => r.note.length), 'Total'.length)
   const amtW = Math.max(total.length, ...rows.map((r) => r.amount.length), 8)
+  const resW = Math.max(total.length, ...rows.map((r) => r.result.length), 8)
 
   // The op column is one character wide even when empty, or the header row
   // comes out a character short and the card's right edge looks ragged.
-  const line = (label: string, note: string, amount: string, op: string): string =>
-    `${label.padEnd(labelW)} | ${note.padEnd(noteW)} | ${amount.padStart(amtW)} | ${op.padEnd(1)}`
+  const line = (label: string, note: string, amount: string, op: string, result: string): string =>
+    `${label.padEnd(labelW)} | ${note.padEnd(noteW)} | ${amount.padStart(amtW)} | ${op.padEnd(1)}` +
+    (showResult ? ` | ${result.padStart(resW)}` : '')
 
-  const gridW = line(headLabel, '', '', '').length
+  const gridW = line(headLabel, '', '', '', '').length
   const title = tape.title?.trim() ?? ''
   return [
     ...(title ? [title.padEnd(gridW)] : []),
-    line(headLabel, '', '', ''),
-    ...rows.map((r) => line(r.label, r.note, r.amount, r.op)),
-    line(totalLabel, 'Total', total, '*')
+    line(headLabel, '', '', '', ''),
+    ...rows.map((r) => line(r.label, r.note, r.amount, r.op, r.result)),
+    // On a chain tape the total belongs in the Result column, under the running
+    // values it continues — not in the operand column.
+    showResult
+      ? line(totalLabel, 'Total', '', '*', total)
+      : line(totalLabel, 'Total', total, '*', '')
   ]
 }
 

@@ -385,9 +385,17 @@ export default function App(): React.JSX.Element {
       const commit = (op: TapeOp): void => {
         const value = parseAmount(tapeBuffer)
         if (value === null) return
-        const next = pushTapeEntry(session, id, { value: Math.abs(value), op: value < 0 ? (op === '+' ? '-' : '+') : op })
+        if (op === '÷' && value === 0) {
+          setStatus('Cannot divide by zero.')
+          return
+        }
+        const flipped = value < 0 && (op === '+' || op === '-')
+        const next = pushTapeEntry(session, id, {
+          value: flipped ? Math.abs(value) : value,
+          op: flipped ? (op === '+' ? '-' : '+') : op
+        })
         const tape = next.tapes?.find((t) => t.id === id)
-        apply(next, `${op}${formatAmount(Math.abs(value))} — total ${formatAmount(tapeTotal(tape?.entries ?? []))}`)
+        apply(next, `${op} ${formatAmount(Math.abs(value))} — total ${formatAmount(tapeTotal(tape?.entries ?? []))}`)
         setTapeBuffer('')
         setTapeOp('+')
       }
@@ -398,6 +406,8 @@ export default function App(): React.JSX.Element {
       if (key === '±') return setTapeBuffer((b) => (b.startsWith('-') ? b.slice(1) : `-${b}`))
       if (key === '+') return commit('+')
       if (key === '-') return commit('-')
+      if (key === '*' || key === '×') return commit('×')
+      if (key === '/' || key === '÷') return commit('÷')
       if (key === 'Enter' || key === '=') return commit(tapeOp)
       if (key === 'C') {
         setTapeBuffer('')

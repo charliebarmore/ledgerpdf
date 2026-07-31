@@ -327,6 +327,7 @@ optional note and its operator.
 | `0`–`9` `.` `00` | key into the current line |
 | `+` or `Enter` | commit the line as an addition |
 | `-` | commit it as a subtraction |
+| `*` `/` | commit it as a multiplication / division of the running total |
 | `±` | flip the sign of what is being keyed |
 | `⌫` | take back the keystroke — or, once empty, the last committed line |
 | `C` / `CE` | clear everything / clear the current figure |
@@ -340,12 +341,24 @@ digits.
 In the panel each line's note is editable, its operator toggles, and it can be
 deleted individually: a mis-key in the middle shouldn't mean retyping the tape.
 
-**× and ÷ are deliberately absent.** Every line is an addition or a
-subtraction, which is what lets the total be summed in **exact cents** and
-always foot to what is printed. Multiply and divide would need a rounding rule
-— round each line, or carry precision and round only the total — and a tape
-that doesn't foot to the penny is a defect in a workpaper, not a rounding
-curiosity. Adding them is a decision, not a keystroke.
+**Chain semantics.** Every operator applies to the **running total**, exactly
+like a physical 10-key — `1,200 + 340` then `× 0.35` gives `539.00`, because
+the `×` acts on `1,540.00`, not on a column of independent addends. The first
+line seeds the total, so a tape that opens with `×` isn't silently zero.
+
+**Arithmetic is carried in integer cents and rounded at every step.** That is
+what makes the tape auditable: each printed line is exact, so the figures shown
+always foot to the total shown. The visible consequence is that
+`100 ÷ 3 × 3` prints `99.99`, not `100.00` — the tape shows what it actually
+did. Carrying full precision and rounding only at the end would print lines
+that don't add up to their own total, which is indefensible in a workpaper.
+Dividing by zero is refused at the keypad, and leaves the total untouched if
+one ever reaches the model from a hand-edited or agent-written session.
+
+The **Result** column appears only on tapes that use `×` or `÷`. An operand
+alone (`0.35`) says nothing without the running value it acted on; on an
+add-only tape the amounts already foot by eye and a second number column is
+just noise.
 
 **Entries are stored structurally, not as the rendered text.** A total on a
 workpaper with no addends is an assertion; a total with its addends is

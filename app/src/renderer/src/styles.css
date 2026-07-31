@@ -1138,7 +1138,7 @@ button.link {
   position: fixed;
   right: var(--lg);
   bottom: 44px;
-  width: 300px;
+  width: 340px;
   z-index: 50;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1182,7 +1182,7 @@ button.link {
 
 .kp-row {
   display: grid;
-  grid-template-columns: 44px 1fr 76px 18px 18px;
+  grid-template-columns: 40px 1fr 68px 16px 68px 16px;
   align-items: center;
   gap: 2px;
   padding: 1px var(--sm);
@@ -1207,9 +1207,20 @@ button.link {
   color: var(--muted);
 }
 
-.kp-amt {
+.kp-amt,
+.kp-res {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* the running value after each line — what makes × and ÷ verifiable */
+.kp-res {
+  color: var(--muted);
+}
+
+.kp-res-total {
+  color: var(--text);
+  font-weight: 700;
 }
 
 .kp-note {

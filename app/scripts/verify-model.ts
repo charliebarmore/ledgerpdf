@@ -50,6 +50,7 @@ import {
   sanitizeTitle,
   setBookmarkTitle,
   tapeLines,
+  tapeRunning,
   tapeTotal,
   toTapeEntry,
   tapesOnPage,
@@ -552,6 +553,82 @@ async function main(): Promise<number> {
       tapeTotal([]) === 0,
     `${tapeTotal([0.1, 0.2].map(toTapeEntry))} ${tapeTotal([1.005, 2.005].map(toTapeEntry))}`
   )
+  // --- chain arithmetic: every operator applies to the RUNNING TOTAL, and each
+  //     step rounds to cents so the printed lines always foot to the printed
+  //     total. A tape that doesn't foot is a defect, not a rounding curiosity.
+  const chain = [
+    { value: 1200, op: '+' as const },
+    { value: 340, op: '+' as const },
+    { value: 0.35, op: '×' as const }
+  ]
+  check(
+    'x and / act on the running total, 10-key style',
+    tapeRunning(chain).join(',') === '1200,1540,539' && tapeTotal(chain) === 539,
+    tapeRunning(chain).join(',')
+  )
+  check(
+    'every step rounds to cents, so the printed lines foot to the printed total',
+    (() => {
+      // 100.00 / 3 = 33.333... -> 33.33 printed, and x 3 must give 99.99,
+      // not 100.00 — the tape shows what it actually did.
+      const r = tapeRunning([
+        { value: 100, op: '+' },
+        { value: 3, op: '÷' },
+        { value: 3, op: '×' }
+      ])
+      return r.join(',') === '100,33.33,99.99'
+    })(),
+    tapeRunning([
+      { value: 100, op: '+' },
+      { value: 3, op: '÷' },
+      { value: 3, op: '×' }
+    ]).join(',')
+  )
+  check(
+    'the first line seeds the total, so a tape starting with x is not silently zero',
+    tapeTotal([{ value: 250, op: '×' }]) === 250 &&
+      tapeTotal([{ value: 250, op: '-' }]) === -250
+  )
+  check(
+    'dividing by zero leaves the total untouched rather than producing Infinity',
+    (() => {
+      const t = tapeTotal([
+        { value: 500, op: '+' },
+        { value: 0, op: '÷' }
+      ])
+      return t === 500 && Number.isFinite(t)
+    })()
+  )
+  check(
+    'a chain tape shows a Result column; an add-only tape does not',
+    (() => {
+      const withChain = tapeLines({
+        id: 't',
+        page: 'p',
+        nx: 0,
+        ny: 0,
+        section: 1,
+        entries: chain
+      })
+      const addOnly = tapeLines({
+        id: 't',
+        page: 'p',
+        nx: 0,
+        ny: 0,
+        section: 1,
+        entries: [{ value: 5, op: '+' }]
+      })
+      return (
+        /\| × \| +539\.00$/.test(withChain[3]) &&
+        withChain[withChain.length - 1].trim().endsWith('539.00') &&
+        !addOnly.some((l) => l.split('|').length > 4)
+      )
+    })(),
+    JSON.stringify(
+      tapeLines({ id: 't', page: 'p', nx: 0, ny: 0, section: 1, entries: chain })
+    )
+  )
+
   check(
     'amounts format with grouping and a leading minus',
     formatAmount(1490) === '1,490.00' &&
