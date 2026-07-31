@@ -33,6 +33,7 @@ SHAPE_COLORS: dict[str, tuple[float, float, float]] = {
     "blue": (0.10, 0.33, 0.60),
     "black": (0.12, 0.12, 0.14),
     "orange": (0.85, 0.45, 0.10),
+    "grey": (0.48, 0.47, 0.45),
 }
 DEFAULT_COLOR = "red"
 

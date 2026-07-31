@@ -32,7 +32,7 @@ from uuid import uuid4
 import pikepdf
 from pikepdf import Array, Name, OutlineItem
 
-from . import appearance, images, shapes
+from . import appearance, images, shapes, status
 from .geometry import PageGeom
 from .probe import fingerprint_file, sanitize_text
 
@@ -194,6 +194,10 @@ def export_binder(spec: dict) -> dict:
                     annot = appearance.make_mark(out, geom, a, nm)
                 elif a["kind"] in ("rect", "ellipse", "line", "arrow", "highlight", "textbox"):
                     annot = shapes.make_shape(out, geom, a, nm)
+                elif a["kind"] == "statusstamp":
+                    annot = status.make_status_stamp(out, geom, a, nm)
+                elif a["kind"] == "pageborder":
+                    annot = status.make_page_border(out, geom, a, nm)
                 elif a["kind"] == "tape":
                     annot = appearance.make_tape(
                         out, geom, a["nx"], a["ny"], a["lines"], a.get("tape", {}),
@@ -229,6 +233,9 @@ def export_binder(spec: dict) -> dict:
             with out.open_outline() as outline:
                 for item in _build_outline_items(out, spec.get("bookmarks", []), final_index):
                     outline.root.append(item)
+            # Colour/bold has to wait until the outline exists — pikepdf's
+            # OutlineItem has no object until it is written.
+            status.style_outline(out, spec.get("bookmarks", []))
 
             out.save(temp_output)
 

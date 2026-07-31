@@ -3,6 +3,7 @@ import { BookmarkPanel } from './components/BookmarkPanel'
 import { MarkInspector } from './components/MarkInspector'
 import { ShapeInspector } from './components/ShapeInspector'
 import { Keypad } from './components/Keypad'
+import { StatusPanel } from './components/StatusPanel'
 import { PageView } from './components/PageView'
 import { ThumbnailRail } from './components/ThumbnailRail'
 import { MARK_COLOR } from './components/MarkLayer'
@@ -31,6 +32,7 @@ import {
   updateTapeEntry,
   removeBookmark,
   removeMarks,
+  clearPageStatus,
   isShapeKind,
   moveShape,
   removeShapes,
@@ -38,6 +40,11 @@ import {
   removeTapes,
   rotatePages,
   setBookmarkTitle,
+  setPageStatus,
+  statusCounts,
+  statusDefs,
+  statusOf,
+  statusParts,
   toExportSpec,
   updateMark,
   updateShape,
@@ -50,6 +57,8 @@ import {
   type ProbeWire,
   type Shape,
   type ShapeColor,
+  type StatusDef,
+  type StatusParts,
   type TapeEntry,
   type TapeOp,
   type Session,
@@ -529,6 +538,79 @@ export default function App(): React.JSX.Element {
     apply(removeShapes(session, [selectedShapeId]), `Shape deleted. ${MOD}Z to undo.`)
     setSelectedShapeId(null)
   }, [selectedShapeId, session, apply])
+
+  // -------------------------------------------------------------- page status
+
+  const defs = useMemo(() => statusDefs(session), [session.statusDefs])
+  const parts = useMemo(() => statusParts(session), [session.statusParts])
+  const counts = useMemo(() => statusCounts(session), [session.statuses, session.pages, session.statusDefs])
+  const currentStatus = current ? statusOf(session, current.id) : null
+
+  const applyStatus = useCallback(
+    (statusId: string) => {
+      const ids = targetIds()
+      if (!ids.length) return
+      const def = defs.find((d) => d.id === statusId)
+      apply(
+        setPageStatus(session, ids, statusId, session.reviewer ?? ''),
+        `${ids.length} page(s) marked "${def?.label ?? statusId}".`
+      )
+    },
+    [targetIds, session, apply, defs]
+  )
+
+  const clearStatus = useCallback(() => {
+    const ids = targetIds()
+    if (!ids.length) return
+    apply(clearPageStatus(session, ids), `Status cleared on ${ids.length} page(s).`)
+  }, [targetIds, session, apply])
+
+  const addStatusDef = useCallback(
+    (label: string) => {
+      const id = `st_${session.seq + 1}`
+      const used = new Set(defs.map((d) => d.color))
+      const color =
+        (SHAPE_COLOR_NAMES.find((c) => !used.has(c)) as StatusDef['color']) ?? 'blue'
+      apply(
+        { ...session, seq: session.seq + 1, statusDefs: [...defs, { id, label, color }] },
+        `Status "${label}" added to the legend.`
+      )
+    },
+    [session, defs, apply]
+  )
+
+  const editStatusDef = useCallback(
+    (id: string, patch: Partial<StatusDef>) => {
+      apply(
+        { ...session, statusDefs: defs.map((d) => (d.id === id ? { ...d, ...patch } : d)) },
+        'Legend updated.'
+      )
+    },
+    [session, defs, apply]
+  )
+
+  const removeStatusDef = useCallback(
+    (id: string) => {
+      // Pages holding a status that no longer exists would render nothing and
+      // silently lose their marking, so clear them with it.
+      const held = Object.entries(session.statuses ?? {})
+        .filter(([, v]) => v.status === id)
+        .map(([k]) => k)
+      const next = clearPageStatus(
+        { ...session, statusDefs: defs.filter((d) => d.id !== id) },
+        held
+      )
+      apply(next, held.length ? `Status removed — cleared from ${held.length} page(s).` : 'Status removed.')
+    },
+    [session, defs, apply]
+  )
+
+  const setParts = useCallback(
+    (patch: Partial<StatusParts>) => {
+      apply({ ...session, statusParts: { ...parts, ...patch } }, 'Status options updated.')
+    },
+    [session, parts, apply]
+  )
 
   // ----------------------------------------------------------- custom stamps
 
@@ -1206,6 +1288,20 @@ export default function App(): React.JSX.Element {
                   setCurrentId(id)
                   setSelected(new Set([id]))
                 }}
+              />
+              <StatusPanel
+                session={session}
+                defs={defs}
+                counts={counts}
+                parts={parts}
+                currentStatusId={currentStatus?.id ?? null}
+                targetCount={selected.size || (current ? 1 : 0)}
+                onApply={applyStatus}
+                onClear={clearStatus}
+                onAddDef={addStatusDef}
+                onEditDef={editStatusDef}
+                onRemoveDef={removeStatusDef}
+                onParts={setParts}
               />
               {selectedMark && (
                 <MarkInspector mark={selectedMark} onChange={editMark} onDelete={deleteMark} />

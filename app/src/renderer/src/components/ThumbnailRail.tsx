@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  SHAPE_COLORS,
   marksByPage,
+  statusOf,
   pageProvenance,
   sourceOf,
   type BinderPage,
@@ -99,6 +101,9 @@ export function ThumbnailRail({
     >
       {session.pages.map((page, i) => {
         const pageMarks = marks.get(page.id) ?? []
+        // The rail is where review coverage is read at a glance, so a status
+        // shows as the frame colour rather than another badge to hunt for.
+        const status = statusOf(session, page.id)
         return (
         <div
           key={page.id}
@@ -114,7 +119,7 @@ export function ThumbnailRail({
             .join(' ')}
           title={`${pageProvenance(session, page)}${page.rotate ? ` · rotated ${page.rotate}°` : ''}${
             pageMarks.length ? ` · ${pageMarks.length} mark${pageMarks.length === 1 ? '' : 's'}` : ''
-          }`}
+          }${status ? ` · ${status.label}` : ''}`}
           draggable
           onDragStart={(e) => {
             e.dataTransfer.effectAllowed = 'move'
@@ -137,12 +142,26 @@ export function ThumbnailRail({
             onSelect(page.id, e.shiftKey ? 'range' : e.metaKey || e.ctrlKey ? 'toggle' : 'single')
           }
         >
-          <div className="thumb-frame">
+          <div
+            className="thumb-frame"
+            style={
+              status
+                ? { borderColor: SHAPE_COLORS[status.color], borderWidth: 2, padding: 0 }
+                : undefined
+            }
+          >
             <Thumb session={session} page={page} />
             {pageMarks.length > 0 && <MarkDots marks={pageMarks} />}
           </div>
           <div className="thumb-meta">
             <span className="thumb-num">{i + 1}</span>
+            {status && (
+              <span
+                className="thumb-status"
+                style={{ background: SHAPE_COLORS[status.color] }}
+                title={status.label}
+              />
+            )}
             {pageMarks.length > 0 && (
               <span className="thumb-marks-count">✓{pageMarks.length}</span>
             )}

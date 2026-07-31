@@ -80,9 +80,10 @@ export const SHAPE_COLORS: Record<string, string> = {
   green: 'rgb(33,140,33)',
   blue: 'rgb(26,84,153)',
   black: 'rgb(31,31,36)',
-  orange: 'rgb(217,115,26)'
+  orange: 'rgb(217,115,26)',
+  grey: 'rgb(122,121,116)'
 }
-export const SHAPE_COLOR_NAMES = ['red', 'green', 'blue', 'black', 'orange'] as const
+export const SHAPE_COLOR_NAMES = ['red', 'green', 'blue', 'black', 'orange', 'grey'] as const
 export type ShapeColor = (typeof SHAPE_COLOR_NAMES)[number]
 
 export const SHAPE_WIDTH_DEFAULT = 1.5
@@ -110,6 +111,53 @@ export interface Shape {
   note?: string
   created?: string
 }
+
+/**
+ * A page status: "Reviewed", "Open item", "N/A" — a small legend the firm
+ * defines, applied a page at a time.
+ *
+ * Applying one does three things at once, each independently switchable:
+ * stamps the page with initials and a timestamp, draws a colored page border,
+ * and colors that page's bookmark. Together they turn a 62-page binder into a
+ * coverage map you can read from the rail and the bookmark tree.
+ */
+export interface StatusDef {
+  id: string
+  label: string
+  color: ShapeColor
+}
+
+export interface PageStatus {
+  /** StatusDef id. */
+  status: string
+  /** Who set it, and when — the same review record marks and tapes carry. */
+  by?: string
+  at?: string
+}
+
+/** Which parts of a status get drawn. Mirrors PDFlyer's Set Status dialog. */
+export interface StatusParts {
+  stamp: boolean
+  border: boolean
+  bookmark: boolean
+  /** Which corner the stamp sits in, so it can dodge page content. */
+  corner: 'tl' | 'tr' | 'bl' | 'br'
+  borderWidth: number
+}
+
+export const DEFAULT_STATUS_PARTS: StatusParts = {
+  stamp: true,
+  border: true,
+  bookmark: true,
+  corner: 'tr',
+  borderWidth: 4
+}
+
+export const DEFAULT_STATUS_DEFS: StatusDef[] = [
+  { id: 'reviewed', label: 'Reviewed', color: 'green' },
+  { id: 'open', label: 'Open item', color: 'red' },
+  { id: 'na', label: 'N/A', color: 'grey' }
+]
 
 /** What the toolbar can arm: a mark to stamp, a tape, or a shape to drag out. */
 export type ToolKind = MarkKind | 'tape' | ShapeKind
@@ -225,9 +273,18 @@ export interface Session {
   tapes?: Tape[]
   /** Drawn annotations — rectangles, ellipses, lines, arrows, highlights, notes. */
   shapes?: Shape[]
+  /** The firm's status legend. Absent = the built-in three. */
+  statusDefs?: StatusDef[]
+  /** Page id -> status. */
+  statuses?: Record<string, PageStatus>
+  /** Which parts of a status are drawn. */
+  statusParts?: StatusParts
 }
 
 export interface BookmarkNode {
+  /** Set when the target page carries a status and bookmark styling is on. */
+  color?: ShapeColor
+  bold?: boolean
   /**
    * Stable identity for user renames. Derived from where the bookmark comes
    * from, NOT from its position in the binder:
@@ -375,6 +432,13 @@ export function deletePages(session: Session, ids: string[]): Session {
     ...(session.marks ? { marks: session.marks.filter((m) => !idSet.has(m.page)) } : {}),
     ...(session.tapes ? { tapes: session.tapes.filter((t) => !idSet.has(t.page)) } : {}),
     ...(session.shapes ? { shapes: session.shapes.filter((x) => !idSet.has(x.page)) } : {}),
+    ...(session.statuses
+      ? {
+          statuses: Object.fromEntries(
+            Object.entries(session.statuses).filter(([pid]) => !idSet.has(pid))
+          )
+        }
+      : {}),
     ...(session.bookmarks
       ? { bookmarks: session.bookmarks.filter((b) => !idSet.has(b.page)) }
       : {})
@@ -439,6 +503,69 @@ export function marksByPage(session: Session): Map<string, Mark[]> {
     else out.set(m.page, [m])
   }
   return out
+}
+
+// -------------------------------------------------------------- page status
+
+export function statusDefs(session: Session): StatusDef[] {
+  return session.statusDefs ?? DEFAULT_STATUS_DEFS
+}
+
+export function statusParts(session: Session): StatusParts {
+  return { ...DEFAULT_STATUS_PARTS, ...(session.statusParts ?? {}) }
+}
+
+export function pageStatus(session: Session, pageId: string): PageStatus | null {
+  return session.statuses?.[pageId] ?? null
+}
+
+export function statusOf(session: Session, pageId: string): StatusDef | null {
+  const st = pageStatus(session, pageId)
+  if (!st) return null
+  return statusDefs(session).find((d) => d.id === st.status) ?? null
+}
+
+/** Apply a status to pages. Applying a second one REPLACES the first — a page
+ *  is in one state, not several. */
+export function setPageStatus(
+  session: Session,
+  pageIds: string[],
+  statusId: string,
+  by = ''
+): Session {
+  const at = new Date().toISOString()
+  const statuses = { ...(session.statuses ?? {}) }
+  for (const id of pageIds) statuses[id] = { status: statusId, ...(by ? { by } : {}), at }
+  return { ...session, statuses }
+}
+
+export function clearPageStatus(session: Session, pageIds: string[]): Session {
+  const statuses = { ...(session.statuses ?? {}) }
+  for (const id of pageIds) delete statuses[id]
+  return { ...session, statuses }
+}
+
+/** How many pages sit in each status, plus how many have none. */
+export function statusCounts(session: Session): { byId: Record<string, number>; unset: number } {
+  const byId: Record<string, number> = {}
+  for (const d of statusDefs(session)) byId[d.id] = 0
+  let unset = 0
+  for (const p of session.pages) {
+    const st = session.statuses?.[p.id]
+    if (st && byId[st.status] !== undefined) byId[st.status]++
+    else unset++
+  }
+  return { byId, unset }
+}
+
+/** The stamp's centre for a corner, in normalized display coordinates. */
+export function statusStampAnchor(corner: StatusParts['corner']): { nx: number; ny: number } {
+  const near = 0.14
+  const far = 0.07
+  return {
+    nx: corner === 'tl' || corner === 'bl' ? near : 1 - near,
+    ny: corner === 'tl' || corner === 'tr' ? far : 1 - far
+  }
 }
 
 // --------------------------------------------------------------------- shapes
@@ -1141,6 +1268,21 @@ export function buildBookmarks(session: Session, opts: BookmarkOptions = {}): Bo
   const indexOf = new Map(session.pages.map((p, i) => [p.id, i]))
   tree = mergeUserBookmarks(tree, session, indexOf)
 
+  // A status colours the bookmark of the page it is on, so the outline reads
+  // as a coverage map in any viewer's bookmark panel — not just in this app.
+  if (statusParts(session).bookmark && session.statuses) {
+    const paint = (ns: BookmarkNode[]): BookmarkNode[] =>
+      ns.map((n) => {
+        const def = statusOf(session, n.page)
+        return {
+          ...n,
+          ...(def ? { color: def.color, bold: true } : {}),
+          children: paint(n.children)
+        }
+      })
+    tree = paint(tree)
+  }
+
   if (!pageCounts) return tree
   return applyPageCounts(tree, indexOf, session.pages.length)
 }
@@ -1272,6 +1414,42 @@ export function toExportSpec(
           ...(x.note ? { note: x.note } : {}),
           ...(x.created ? { created: x.created } : {})
         })),
+      // Page statuses become a stamp and a border. They are generated at
+      // export from the status, not stored as shapes, so changing the legend
+      // or the parts re-draws every page rather than leaving stale artwork.
+      ...(() => {
+        const parts = statusParts(session)
+        const anchor = statusStampAnchor(parts.corner)
+        return session.pages.flatMap((p) => {
+          const st = session.statuses?.[p.id]
+          const def = st ? statusDefs(session).find((d) => d.id === st.status) : null
+          if (!st || !def) return []
+          const out: Array<Record<string, unknown>> = []
+          if (parts.stamp) {
+            out.push({
+              kind: 'statusstamp',
+              page: p.id,
+              nx: anchor.nx,
+              ny: anchor.ny,
+              color: def.color,
+              text: st.by || session.reviewer || def.label,
+              label: def.label,
+              ...(st.at ? { at: st.at } : {}),
+              ...(st.by ? { author: st.by } : {})
+            })
+          }
+          if (parts.border) {
+            out.push({
+              kind: 'pageborder',
+              page: p.id,
+              color: def.color,
+              width: parts.borderWidth,
+              note: def.label
+            })
+          }
+          return out
+        })
+      })(),
       // Tapes carry BOTH the drawn lines and the structured entries: the lines
       // are what a viewer shows, the entries are what a tie-out layer reads.
       ...(session.tapes ?? [])
@@ -1328,6 +1506,17 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
         : {}),
       ...(Array.isArray(s.marks)
         ? { marks: s.marks.filter((m) => pageIds.has(m.page)) }
+        : {}),
+      ...(Array.isArray(s.statusDefs) ? { statusDefs: s.statusDefs } : {}),
+      ...(s.statuses && typeof s.statuses === 'object'
+        ? {
+            statuses: Object.fromEntries(
+              Object.entries(s.statuses).filter(([pid]) => pageIds.has(pid))
+            )
+          }
+        : {}),
+      ...(s.statusParts && typeof s.statusParts === 'object'
+        ? { statusParts: { ...DEFAULT_STATUS_PARTS, ...s.statusParts } }
         : {}),
       ...(Array.isArray(s.shapes)
         ? {

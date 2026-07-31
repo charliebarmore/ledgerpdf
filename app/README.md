@@ -257,6 +257,35 @@ in `images.py`. If those ever disagree, a tick placed over a receipt exports
 somewhere else, silently. `verify:model` compares the two implementations
 directly rather than trusting them to agree; keep it that way.
 
+## Page status
+
+A small legend the firm defines — Reviewed, Open item, N/A out of the box — is
+applied a page at a time from the Status panel. It works on the selection, so a
+range of pages can be marked at once, and applying a second status **replaces**
+the first: a page is in one state, not several.
+
+One status draws three things, each independently switchable under *Options*:
+
+- a **stamp** carrying your initials and the time you applied it, in one of the
+  four page corners so it can dodge content
+- a **colored page border**, width adjustable
+- a **colored, bold bookmark** for that page
+
+That last one is real PDF, not a UI trick — outline entries carry a color and
+bold/italic flags, so the coverage map shows up in Acrobat's bookmark panel
+too, not just here. The thumbnail rail frames each page in its status color, so
+a 62-page binder reads as done / not done at a glance, and the panel counts
+double as a progress readout.
+
+**Statuses are generated at export, never stored as shapes.** Change the
+legend, recolor it, or switch a part off and the next export simply draws it
+differently. Storing them as ordinary annotations would leave stale artwork on
+pages whose status had moved on — the one failure mode that would make the
+whole feature untrustworthy.
+
+Removing a status from the legend clears it from every page holding it, rather
+than leaving those pages pointing at something that no longer exists.
+
 ## Drawn annotations
 
 Rectangle, ellipse, line, arrow, highlighter and text note — drag to draw. Hold

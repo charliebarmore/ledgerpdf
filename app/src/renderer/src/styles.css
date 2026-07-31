@@ -1338,3 +1338,126 @@ button.link {
   font-size: 10px;
   color: var(--muted);
 }
+
+
+/* ------------------------------------------------------------ page status */
+
+.st-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--md);
+}
+
+.st-row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto 16px;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.st-row.is-current {
+  background: #f1efe9;
+  border-radius: var(--r-sm);
+}
+
+.st-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgb(0 0 0 / 0.25);
+  padding: 0;
+}
+
+.st-swatch-none {
+  background: repeating-linear-gradient(45deg, #fff, #fff 3px, #e4e1d9 3px, #e4e1d9 6px);
+}
+
+.st-label {
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 2px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st-label:hover:not(:disabled) {
+  color: var(--primary);
+  background: none;
+  text-decoration: underline;
+}
+
+.st-count {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.st-drop {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.st-drop:hover {
+  color: var(--error);
+  background: none;
+}
+
+.st-unset .st-label {
+  color: var(--muted);
+}
+
+.st-new {
+  display: flex;
+  gap: var(--xs);
+  padding: var(--sm) var(--md) 0;
+}
+
+.st-label-input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+}
+
+.st-label-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.st-parts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--sm) var(--md) 0;
+  border-top: 1px solid var(--border);
+  margin-top: var(--sm);
+}
+
+.st-parts select {
+  font: inherit;
+  flex: 1;
+}
+
+.st-note {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 2px 0 0;
+}
+
+/* status colour on the thumbnail */
+.thumb-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}

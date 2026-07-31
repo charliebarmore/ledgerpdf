@@ -48,7 +48,13 @@ import {
   updateShape,
   rotatePages,
   sanitizeTitle,
+  clearPageStatus,
   setBookmarkTitle,
+  setPageStatus,
+  statusCounts,
+  statusDefs,
+  statusOf,
+  statusParts,
   tapeLines,
   tapeKeyPress,
   type TapeKeyState,
@@ -1130,6 +1136,95 @@ async function main(): Promise<number> {
   } else {
     check('a drawn rectangle exports centred where it was dragged', false, String(rectExport.error))
   }
+
+  // --- page status: one state per page, drawn three ways
+  let stat: Session = { ...s, reviewer: 'CJB' }
+  const p0 = stat.pages[0].id
+  const p1 = stat.pages[1].id
+  stat = setPageStatus(stat, [p0, p1], 'reviewed', 'CJB')
+  check(
+    'a status records who set it and when',
+    stat.statuses![p0].status === 'reviewed' &&
+      stat.statuses![p0].by === 'CJB' &&
+      typeof stat.statuses![p0].at === 'string'
+  )
+  check(
+    'applying a second status REPLACES the first — a page is in one state',
+    (() => {
+      const again = setPageStatus(stat, [p0], 'open', 'CJB')
+      return again.statuses![p0].status === 'open' && again.statuses![p1].status === 'reviewed'
+    })()
+  )
+  check(
+    'counts add up to the page count',
+    (() => {
+      const c = statusCounts(stat)
+      return c.byId.reviewed === 2 && c.unset === stat.pages.length - 2
+    })(),
+    JSON.stringify(statusCounts(stat))
+  )
+  check('clearing a status leaves the page unset', !clearPageStatus(stat, [p0]).statuses![p0])
+  check(
+    'deleting a page takes its status with it',
+    deletePages(stat, [p0]).statuses?.[p0] === undefined
+  )
+  check(
+    'statuses survive save/reopen, and one on a deleted page is dropped',
+    (() => {
+      const rt = parseSession(JSON.parse(JSON.stringify(stat)))
+      if (!('session' in rt)) return false
+      const junk = parseSession({ ...stat, statuses: { ...stat.statuses, pg_nope: { status: 'reviewed' } } })
+      return (
+        rt.session.statuses![p0].status === 'reviewed' &&
+        'session' in junk &&
+        junk.session.statuses!.pg_nope === undefined
+      )
+    })()
+  )
+  check(
+    'a status colours the bookmark of its page, and only that one',
+    (() => {
+      const tree = buildBookmarks(stat)
+      const def = statusOf(stat, tree[0].page)
+      return def ? tree[0].color === def.color && tree[0].bold === true : tree[0].color === undefined
+    })(),
+    JSON.stringify(buildBookmarks(stat).map((b) => [b.title, b.color ?? null]))
+  )
+  check(
+    'turning the bookmark part off leaves the outline unstyled',
+    buildBookmarks({ ...stat, statusParts: { ...statusParts(stat), bookmark: false } }).every(
+      (b) => b.color === undefined
+    )
+  )
+  const statSpec = toExportSpec(stat, path.join(REPO, 'spike', 'out', 'app_status.pdf'))
+  check(
+    'a status exports as a stamp AND a page border',
+    statSpec.annotations.filter((a) => a.kind === 'statusstamp').length === 2 &&
+      statSpec.annotations.filter((a) => a.kind === 'pageborder').length === 2,
+    JSON.stringify(statSpec.annotations.map((a) => a.kind))
+  )
+  check(
+    'switching a part off stops it being drawn, without touching the status',
+    (() => {
+      const noBorder = toExportSpec(
+        { ...stat, statusParts: { ...statusParts(stat), border: false } },
+        'x.pdf'
+      )
+      return (
+        noBorder.annotations.filter((a) => a.kind === 'pageborder').length === 0 &&
+        noBorder.annotations.filter((a) => a.kind === 'statusstamp').length === 2
+      )
+    })()
+  )
+  const statExport = await runEngine({
+    cmd: 'export',
+    binder: toExportSpec(stat, path.join(REPO, 'spike', 'out', 'app_status.pdf'))
+  })
+  check(
+    'the engine exports statuses cleanly',
+    statExport.ok === true && statExport.result.check_problems.length === 0,
+    JSON.stringify(statExport.error ?? statExport.result?.check_problems)
+  )
 
   // --- the real thing: export through the engine and re-probe.
   //     A tape rides along, low on the page so it can't overlap the marks the
