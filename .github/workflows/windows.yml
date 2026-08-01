@@ -59,10 +59,22 @@ jobs:
         run: engine\.venv\Scripts\python spike\verify_viewers.py
         continue-on-error: true # poppler is not installed on the runner
 
-      - name: Build the frozen engine and package the app
+      # `npm run dist` deliberately refuses to build without signing
+      # credentials, which is the right default. This is explicitly a TEST
+      # build: electron-builder is invoked directly so an unsigned installer
+      # can be produced for SmartScreen and install-experience testing on real
+      # hardware, without weakening that guard.
+      - name: Build the frozen engine and the app
         if: inputs.package
         working-directory: app
-        run: npm run package:dir
+        run: |
+          npm run build:engine
+          npm run build
+
+      - name: Package (unpacked + unsigned NSIS installer, for TESTING)
+        if: inputs.package
+        working-directory: app
+        run: npx electron-builder --win nsis --config electron-builder.config.cjs
 
       - name: Verify the packaged app
         if: inputs.package
@@ -84,7 +96,10 @@ jobs:
             spike/out/*.png
             spike/out/*.pdf
 
-      - name: Upload the unpacked app
+      # Two artifacts on purpose. The unpacked folder runs with no install and
+      # no SmartScreen prompt — use it to test the APP. The installer is the
+      # only way to see what a design partner meets, warning and all.
+      - name: Upload the unpacked app (run it directly, no install)
         if: inputs.package
         uses: actions/upload-artifact@v4
         with:
@@ -92,3 +107,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
           path: app/release/win-unpacked
+
+      - name: Upload the UNSIGNED installer (testing only, do not distribute)
+        if: inputs.package
+        uses: actions/upload-artifact@v4
+        with:
+          name: workpaper-binder-win-installer-UNSIGNED
+          if-no-files-found: warn
+          retention-days: 14
+          path: app/release/*.exe
