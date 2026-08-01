@@ -256,7 +256,9 @@ def export_binder(spec: dict) -> dict:
             if actual["sha256"] != expected.get("sha256"):
                 raise ValueError(f"source changed during export: {spec['sources'][key]}")
 
-        with temp_output.open("rb") as handle:
+        # Windows requires a writable handle to fsync: _commit() on a
+        # read-only fd raises EBADF, where POSIX is happy to flush one.
+        with temp_output.open("rb+") as handle:
             os.fsync(handle.fileno())
         os.replace(temp_output, output)
         try:
