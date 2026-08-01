@@ -12,8 +12,17 @@ npm run dev        # copies pdfjs assets, then launches
 ```
 
 The engine venv must exist (`../engine/.venv`) — created by the Phase 0 spike:
-`engine/.venv/bin/python spike/run_spike.py`. Packaging also needs the pinned
-build requirement in `../engine/requirements-build.txt`.
+`engine/.venv/bin/python spike/run_spike.py` (`engine\.venv\Scripts\python` on
+Windows). Packaging also needs the pinned build requirement in
+`../engine/requirements-build.txt`.
+
+**`npm install`, not a bare `npm ci` with scripts disabled.** Electron 43 ships
+no `postinstall` of its own — the binary download moved to an explicit
+`install-electron` bin — so `package.json` calls it as our own `postinstall`.
+Without it `node_modules/electron` installs with no `dist/`, and everything that
+touches Electron fails with `Error: Electron uninstall`, naming nothing useful.
+A `node_modules` predating the 43.x bump keeps working and hides this, which is
+exactly how it went unnoticed until a clean Windows checkout hit it.
 
 ## Verify it
 
@@ -28,7 +37,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `verify:model` | 106 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
 | `verify:mcp` | 34 checks driving the **MCP server** as a real MCP client through a whole binder build, including default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs and a receipt photo → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
-| `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, then renders a synthetic PDF under `file://` and captures the native window |
+| `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, then renders a synthetic PDF under `file://` and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source**, because a failed import still paints a window, still screenshots, and still exits 0 |
 
 All suites use synthetic fixtures only — **never client documents**.
 
@@ -39,7 +48,7 @@ the destination machine needs neither Python nor this repository. Build on each
 target OS because native Python dependencies are deliberately not cross-compiled.
 
 ```bash
-# Once per build environment:
+# Once per build environment (Windows: ..\engine\.venv\Scripts\python):
 ../engine/.venv/bin/python -m pip install \
   -r ../engine/requirements.txt -r ../engine/requirements-build.txt
 

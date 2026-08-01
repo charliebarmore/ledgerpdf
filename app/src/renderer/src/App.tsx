@@ -881,7 +881,12 @@ export default function App(): React.JSX.Element {
         setSelectedMarkId(lettered.id)
       }
       if (exportTo && imported) await devRefs.current.exportSession(imported, exportTo, false)
-      window.wpt.devRendered()
+      // Report what loaded, not merely that we got here — an import that threw
+      // lands on this line too, with `imported` still undefined.
+      window.wpt.devRendered({
+        pages: imported?.pages.length ?? 0,
+        sources: imported?.sources.length ?? 0
+      })
     })
   }, [])
 

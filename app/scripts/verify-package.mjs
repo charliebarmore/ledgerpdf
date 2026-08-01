@@ -84,9 +84,23 @@ const ui = await runPackaged(['--wpt-package-ui-smoke'], {
 if (ui.code !== 0) {
   throw new Error(`Packaged UI smoke failed (${ui.code})\n${ui.stdout}\n${ui.stderr}`)
 }
+// Exit code and a screenshot cannot tell a loaded binder from an empty window:
+// a wrong fixture path renders a clear FileNotFoundError in the status bar and
+// still exits 0. fixture_a.pdf is three pages from one source, so assert that.
+const loaded = ui.stdout.match(/\[package-smoke\] loaded (\d+) pages from (\d+) sources/)
+if (!loaded) {
+  throw new Error(`Packaged UI never reported what it loaded\n${ui.stdout}\n${ui.stderr}`)
+}
+if (Number(loaded[1]) !== 3 || Number(loaded[2]) !== 1) {
+  throw new Error(
+    `Packaged UI loaded ${loaded[1]} pages from ${loaded[2]} sources; expected 3 from 1 (${fixture})\n${ui.stdout}`
+  )
+}
 const png = await readFile(screenshot)
 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 if (png.length < 20_000 || !png.subarray(0, 8).equals(pngSignature)) {
   throw new Error(`Packaged UI did not produce a valid screenshot: ${screenshot}`)
 }
-console.log(`Packaged renderer assets, frozen engine, and PDF UI: OK (${screenshot})`)
+console.log(
+  `Packaged renderer assets, frozen engine, and a ${loaded[1]}-page binder in the UI: OK (${screenshot})`
+)

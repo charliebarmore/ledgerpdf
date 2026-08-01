@@ -316,8 +316,16 @@ function registerIpc(): void {
    * WPT_DEV_EXIT is set). Lets the GUI be verified without a human clicking, and
    * without OS screen-recording permission. Dev builds only.
    */
-  ipcMain.on('dev:rendered', async (e) => {
+  ipcMain.on('dev:rendered', async (e, loaded: unknown) => {
     assertTrustedIpc(e)
+    // A screenshot only proves the window painted. Report the binder the
+    // renderer actually holds, so the packaged check can fail on an empty one.
+    if (packageUiSmoke) {
+      const shape = (loaded ?? {}) as { pages?: unknown; sources?: unknown }
+      const pages = typeof shape.pages === 'number' ? shape.pages : 0
+      const sources = typeof shape.sources === 'number' ? shape.sources : 0
+      console.log(`[package-smoke] loaded ${pages} pages from ${sources} sources`)
+    }
     const shot = isDev
       ? process.env.WPT_DEV_SHOT
       : packageUiSmoke

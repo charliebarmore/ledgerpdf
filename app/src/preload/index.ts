@@ -64,8 +64,13 @@ const api = {
     ipcRenderer.on('dev:open', (_e, arg) => cb(arg))
   },
 
-  /** Dev seam — tell main the binder finished loading (triggers WPT_DEV_SHOT). */
-  devRendered: (): void => ipcRenderer.send('dev:rendered')
+  /**
+   * Dev seam — tell main the binder finished loading (triggers WPT_DEV_SHOT).
+   * Carries what actually loaded so the packaged smoke can tell a working
+   * binder from an empty window; a failed import still reaches this line.
+   */
+  devRendered: (loaded: { pages: number; sources: number }): void =>
+    ipcRenderer.send('dev:rendered', loaded)
 }
 
 contextBridge.exposeInMainWorld('wpt', api)
