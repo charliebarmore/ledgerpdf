@@ -714,6 +714,7 @@ export default function App(): React.JSX.Element {
       } else {
         setStatus(`Export failed — ${res.error}`)
       }
+      return res
     } finally {
       setBusy(false)
     }
@@ -880,12 +881,20 @@ export default function App(): React.JSX.Element {
         // inspector rather than an empty side panel.
         setSelectedMarkId(lettered.id)
       }
-      if (exportTo && imported) await devRefs.current.exportSession(imported, exportTo, false)
+      // An export that fails sets a status and returns; it never throws. Carry
+      // the reason out rather than leaving the smoke to infer it from a
+      // missing file.
+      let exported: string | undefined
+      if (exportTo && imported) {
+        const res = await devRefs.current.exportSession(imported, exportTo, false)
+        exported = res?.ok ? 'ok' : `failed: ${res?.error ?? 'no result'}`
+      }
       // Report what loaded, not merely that we got here — an import that threw
       // lands on this line too, with `imported` still undefined.
       window.wpt.devRendered({
         pages: imported?.pages.length ?? 0,
-        sources: imported?.sources.length ?? 0
+        sources: imported?.sources.length ?? 0,
+        exported
       })
     })
   }, [])

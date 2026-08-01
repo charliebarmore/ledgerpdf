@@ -37,7 +37,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `verify:model` | 106 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
 | `verify:mcp` | 34 checks driving the **MCP server** as a real MCP client through a whole binder build, including default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs and a receipt photo → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
-| `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, then renders a synthetic PDF under `file://` and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source**, because a failed import still paints a window, still screenshots, and still exits 0 |
+| `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, renders a synthetic PDF under `file://`, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
 
 All suites use synthetic fixtures only — **never client documents**.
 
@@ -215,6 +215,23 @@ Dev builds only (ignored when packaged), used by `npm run smoke`:
 | `WPT_DEV_EXPORT` | export to this path (pre-authorized, no dialog) |
 | `WPT_DEV_SHOT` | capture the window to this PNG once loaded |
 | `WPT_DEV_EXIT` | quit after capturing |
+
+The packaged app ignores all of the above. It has its own set, honoured **only**
+when launched with the `--wpt-package-ui-smoke` argv flag — one no shipped app
+is ever started with — and used by `npm run verify:package`:
+
+| Env var | Effect |
+|---|---|
+| `WPT_PACKAGE_SMOKE_OPEN` | `path`-delimited sources to import at startup |
+| `WPT_PACKAGE_SMOKE_EXPORT` | export to this path (pre-authorized, no dialog) |
+| `WPT_PACKAGE_SMOKE_SHOT` | capture the window to this PNG, then quit |
+
+Both sets still go through `allowedInputs`/`allowedOutputs`, so the seam widens
+what a *test* can reach without widening what the renderer may ask for.
+`WPT_PACKAGE_SMOKE_EXPORT` exists because it is the only automated path that
+exercises the **frozen** sidecar writing a binder — the rest of the suite goes
+through the venv Python, which is how a Windows-only export bug survived every
+check the project had.
 
 ## Review marks (Phase 2)
 

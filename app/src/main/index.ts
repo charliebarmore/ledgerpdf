@@ -321,10 +321,13 @@ function registerIpc(): void {
     // A screenshot only proves the window painted. Report the binder the
     // renderer actually holds, so the packaged check can fail on an empty one.
     if (packageUiSmoke) {
-      const shape = (loaded ?? {}) as { pages?: unknown; sources?: unknown }
+      const shape = (loaded ?? {}) as { pages?: unknown; sources?: unknown; exported?: unknown }
       const pages = typeof shape.pages === 'number' ? shape.pages : 0
       const sources = typeof shape.sources === 'number' ? shape.sources : 0
       console.log(`[package-smoke] loaded ${pages} pages from ${sources} sources`)
+      if (typeof shape.exported === 'string') {
+        console.log(`[package-smoke] export ${shape.exported}`)
+      }
     }
     const shot = isDev
       ? process.env.WPT_DEV_SHOT
@@ -391,11 +394,19 @@ function createWindow(): void {
         .map((p) => path.resolve(p.trim()))
         .filter(isSourcePath)
       for (const p of paths) allowedInputs.add(p)
-      // Optional: WPT_DEV_EXPORT lets the smoke test drive a real export
-      // through IPC + the engine without a save dialog.
-      const exportTo = isDev && process.env.WPT_DEV_EXPORT
-        ? path.resolve(process.env.WPT_DEV_EXPORT)
-        : undefined
+      // Optional: lets the smoke test drive a real export through IPC + the
+      // engine without a save dialog. The packaged variant matters more than
+      // the dev one — until it existed, no export had ever run through the
+      // *frozen* sidecar on Windows, which is precisely where the read-only
+      // fsync bug that broke every Windows export was hiding. Same gate as
+      // the preopen above: an explicit argv flag no shipped app is launched
+      // with, plus an env var, and the path still goes through allowedOutputs.
+      const exportEnv = isDev
+        ? process.env.WPT_DEV_EXPORT
+        : packageUiSmoke
+          ? process.env.WPT_PACKAGE_SMOKE_EXPORT
+          : undefined
+      const exportTo = exportEnv ? path.resolve(exportEnv) : undefined
       if (exportTo) allowedOutputs.add(exportTo)
       win.webContents.send('dev:open', {
         paths,

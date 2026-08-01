@@ -1,4 +1,4 @@
-import { access, readFile } from 'node:fs/promises'
+import { access, readFile, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -21,6 +21,7 @@ const resources =
     : path.join(packagedRoot, 'resources')
 const fixture = path.resolve(appDir, '..', 'spike', 'fixtures', 'fixture_a.pdf')
 const screenshot = path.join(appDir, 'build', 'package-smoke.png')
+const exported = path.join(appDir, 'build', 'package-smoke-binder.pdf')
 
 await access(executable, constants.X_OK)
 const asarPath = path.join(resources, 'app.asar')
@@ -77,9 +78,11 @@ if (result.code !== 0 || !result.stdout.includes('[package-smoke] engine')) {
 console.log(result.stdout.trim())
 
 await access(fixture)
+await rm(exported, { force: true })
 const ui = await runPackaged(['--wpt-package-ui-smoke'], {
   WPT_PACKAGE_SMOKE_OPEN: fixture,
-  WPT_PACKAGE_SMOKE_SHOT: screenshot
+  WPT_PACKAGE_SMOKE_SHOT: screenshot,
+  WPT_PACKAGE_SMOKE_EXPORT: exported
 })
 if (ui.code !== 0) {
   throw new Error(`Packaged UI smoke failed (${ui.code})\n${ui.stdout}\n${ui.stderr}`)
@@ -96,11 +99,24 @@ if (Number(loaded[1]) !== 3 || Number(loaded[2]) !== 1) {
     `Packaged UI loaded ${loaded[1]} pages from ${loaded[2]} sources; expected 3 from 1 (${fixture})\n${ui.stdout}`
   )
 }
+// The frozen sidecar writing a binder — not the venv Python the rest of the
+// suite uses. This is the path that was broken on Windows for every user
+// (fsync on a read-only handle) and that no automated check covered, because
+// packaged builds used to ignore the export seam entirely.
+if (!ui.stdout.includes('[package-smoke] export ok')) {
+  throw new Error(`Packaged export did not succeed\n${ui.stdout}\n${ui.stderr}`)
+}
+const binder = await readFile(exported)
+if (binder.length < 1_000 || !binder.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
+  throw new Error(`Packaged export did not write a PDF: ${exported} (${binder.length} bytes)`)
+}
+
 const png = await readFile(screenshot)
 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 if (png.length < 20_000 || !png.subarray(0, 8).equals(pngSignature)) {
   throw new Error(`Packaged UI did not produce a valid screenshot: ${screenshot}`)
 }
 console.log(
-  `Packaged renderer assets, frozen engine, and a ${loaded[1]}-page binder in the UI: OK (${screenshot})`
+  `Packaged renderer assets, frozen engine, a ${loaded[1]}-page binder in the UI, ` +
+    `and a real export through the frozen sidecar: OK (${screenshot})`
 )

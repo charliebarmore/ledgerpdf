@@ -69,7 +69,7 @@ const api = {
    * Carries what actually loaded so the packaged smoke can tell a working
    * binder from an empty window; a failed import still reaches this line.
    */
-  devRendered: (loaded: { pages: number; sources: number }): void =>
+  devRendered: (loaded: { pages: number; sources: number; exported?: string }): void =>
     ipcRenderer.send('dev:rendered', loaded)
 }
 
