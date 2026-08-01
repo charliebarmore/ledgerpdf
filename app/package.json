@@ -6,6 +6,7 @@
   "description": "Tax workpaper binder \u2014 organize, mark up, and export PDF binders locally",
   "main": "out/main/index.js",
   "scripts": {
+    "postinstall": "install-electron",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
