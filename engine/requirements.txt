@@ -4,4 +4,7 @@ pillow>=10            # HPND — image sources: dimensions, EXIF orientation, de
                       #   (promoted from test-only when images became binder pages)
 # Spike / test harness only (not shipped in the sidecar)
 pypdfium2>=4          # pdfium == Chrome/Edge PDF engine; render verification
+numpy>=1.26           # BSD — pixel comparison of rendered pages. Was always
+                      #   imported by the render checks and never declared; a
+                      #   Mac with Anaconda supplied it, a clean venv does not.
 # LICENSE GUARD: never add MuPDF/mutool/PyMuPDF (AGPL) — see references/source-materials.md
