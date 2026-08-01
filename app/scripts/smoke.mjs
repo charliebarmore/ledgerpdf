@@ -78,6 +78,10 @@ rmSync(SHOT, { force: true })
 console.log('launching app…')
 const app = await run('npm', ['run', 'dev'], {
   cwd: APP,
+  // On Windows `npm` is npm.cmd, and since the CVE-2024-27980 hardening Node
+  // refuses to spawn a .cmd without a shell. Scoped to this call on purpose:
+  // the PY runs below pass arguments a shell would mangle.
+  shell: process.platform === 'win32',
   env: {
     ...process.env,
     WPT_DEV_OPEN: [a, b, img].join(path.delimiter),
