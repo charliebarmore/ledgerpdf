@@ -24,7 +24,9 @@ const screenshot = path.join(appDir, 'build', 'package-smoke.png')
 
 await access(executable, constants.X_OK)
 const asarPath = path.join(resources, 'app.asar')
-const entries = new Set(listPackage(asarPath))
+// asar builds its listing with path.join, so on Windows the entries come back
+// backslash-separated even though the archive's own separator is always '/'.
+const entries = new Set(listPackage(asarPath).map((entry) => entry.split(path.sep).join('/')))
 for (const required of [
   '/out/main/index.js',
   '/out/preload/index.js',
