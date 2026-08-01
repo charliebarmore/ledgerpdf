@@ -27,7 +27,7 @@
     "mcp": "npm run build:mcp && node out/mcp-server.cjs",
     "verify:mcp": "npm run build:mcp && node scripts/mcp-check.mjs",
     "verify": "npm run typecheck && npm run verify:persistence && npm run verify:model && npm run verify:mcp && npm run smoke",
-    "verify:viewers": "../engine/.venv/bin/python ../spike/verify_viewers.py"
+    "verify:viewers": "node scripts/verify-viewers.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
