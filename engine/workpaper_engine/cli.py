@@ -18,9 +18,21 @@ import json
 import sys
 import traceback
 
-from . import __version__
+import pikepdf
+
+from . import __version__, session_store
 from .binder import export_binder
 from .probe import probe_pdf
+
+
+def _open_binder(path: str) -> dict:
+    """Read a saved binder: recover the session and report page integrity.
+
+    A PDF with no embedded session is not an error — it is an ordinary file
+    someone is importing, which is the normal case. The caller decides.
+    """
+    with pikepdf.open(path) as pdf:
+        return session_store.read_session(pdf)
 
 
 def handle(command: dict) -> dict:
@@ -31,6 +43,13 @@ def handle(command: dict) -> dict:
         return {"ok": True, "probe": probe_pdf(command["path"])}
     if cmd == "export":
         return {"ok": True, "result": export_binder(command["binder"])}
+    if cmd == "open_binder":
+        return {"ok": True, "binder": _open_binder(command["path"])}
+    if cmd == "clean_copy":
+        return {
+            "ok": True,
+            "result": session_store.clean_copy(command["path"], command["output"]),
+        }
     return {"ok": False, "error": f"unknown cmd: {cmd!r}"}
 
 
