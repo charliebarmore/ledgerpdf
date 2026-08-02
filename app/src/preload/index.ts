@@ -32,21 +32,44 @@ const api = {
   exportBinder: (spec: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }> =>
     ipcRenderer.invoke('engine:export', spec),
 
-  saveSession: (
-    session: unknown,
-    existingPath: string | null,
-    suggested?: string
-  ): Promise<string | null> =>
-    ipcRenderer.invoke('session:save', session, existingPath, suggested),
+  /**
+   * Open a saved binder, or an older `.wptsession.json` so it can be converted.
+   * `kind` says which arrived:
+   *   binder — a saved binder, with its recovered session and working copy
+   *   plain  — an ordinary PDF with no session inside; import it instead
+   *   legacy — the older two-file format
+   *   error  — the engine could not read it
+   */
+  openBinder: (): Promise<
+    | {
+        kind: 'binder'
+        path: string
+        workingPath: string
+        session: unknown
+        payloadIntact: boolean
+        geometryMatches: boolean
+        pendingAutosave?: { savedAt?: string; session?: unknown }
+      }
+    | { kind: 'plain'; path: string; reason?: string }
+    | {
+        kind: 'legacy'
+        path: string
+        session?: unknown
+        recoverySession?: unknown
+        recoveredFrom?: string
+        error?: string
+      }
+    | { kind: 'error'; path: string; error: string }
+    | null
+  > => ipcRenderer.invoke('binder:open'),
 
-  openSession: (): Promise<{
-    path: string
-    session?: unknown
-    recoverySession?: unknown
-    recoveredFrom?: string
-    error?: string
-  } | null> =>
-    ipcRenderer.invoke('session:open'),
+  /** Autosave to the invisible sibling. Never rewrites the binder itself. */
+  autosaveBinder: (binderPath: string, session: unknown): Promise<string> =>
+    ipcRenderer.invoke('binder:autosave', binderPath, session),
+
+  /** Drop the working copy and autosave sibling for a binder being closed. */
+  releaseBinder: (binderPath: string): Promise<void> =>
+    ipcRenderer.invoke('binder:release', binderPath),
 
   confirmDiscard: (): Promise<boolean> => ipcRenderer.invoke('session:confirmDiscard'),
 

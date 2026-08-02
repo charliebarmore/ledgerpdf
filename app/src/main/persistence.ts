@@ -17,6 +17,38 @@ export function recoveryPathFor(target: string): string {
     : `${target}.recovery.json`
 }
 
+/**
+ * The de-marked copy of a binder that the app renders from while it is open.
+ *
+ * A saved binder carries our marks as real PDF annotations so that any viewer
+ * shows them. The app draws its own interactive layer on top, so it needs the
+ * pages *without* them or every tick would appear twice.
+ *
+ * It is a sibling of the binder, not a file in the OS temp directory. A working
+ * copy of a binder is client data, and an engagement folder is somewhere a firm
+ * has already decided is appropriate for that; the temp directory is not, and
+ * "a decrypted copy of client workpapers is written to C:\Users\...\Temp" is not
+ * a sentence anyone wants in a WISP. Same reasoning as the recovery sibling
+ * above, and one fewer location to explain.
+ */
+export function workingCopyPathFor(binder: string): string {
+  const dir = path.dirname(path.resolve(binder))
+  return path.join(dir, `.${path.basename(binder, path.extname(binder))}.wpt-working.pdf`)
+}
+
+/**
+ * Autosave sibling for an open binder.
+ *
+ * Saving re-writes the whole binder PDF, which is far too expensive to do after
+ * every keystroke. So edits are autosaved to this small JSON file and the binder
+ * is written when the user saves. It is the invisible scratch file issue #3
+ * described — never something the user opens or names.
+ */
+export function binderRecoveryPathFor(binder: string): string {
+  const dir = path.dirname(path.resolve(binder))
+  return path.join(dir, `.${path.basename(binder, path.extname(binder))}.wpt-recovery.json`)
+}
+
 async function syncDirectory(dir: string): Promise<void> {
   // Directory fsync makes the rename durable on POSIX. Windows does not allow
   // directories to be opened this way, so the file fsync + atomic rename is

@@ -2,21 +2,21 @@ import { useEffect, useRef, useState } from 'react'
 import { formatPageNumber, type Numbering } from '../session'
 
 /**
- * What the export produces, beyond the pages themselves.
+ * What the saved binder carries, beyond the pages themselves.
  *
- * Flatten and page numbering both belong here rather than as loose toolbar
- * controls: they are decisions about the OUTPUT, made at the moment you export,
- * and neither changes the binder itself.
+ * Page numbering belongs here rather than as a loose toolbar control: it is a
+ * decision about the OUTPUT, applied when the binder is written.
+ *
+ * Flattening used to live here as a checkbox. It moved out to its own action
+ * ("Save a copy to send out") when the binder became the document: flattening
+ * is permanent and produces a file that can never be reopened for editing, so
+ * it is a different destination rather than a setting on this one.
  */
 export function ExportMenu({
-  flatten,
-  onFlatten,
   numbering,
   onNumbering,
   pageCount
 }: {
-  flatten: boolean
-  onFlatten: (v: boolean) => void
   numbering: Numbering
   onNumbering: (patch: Partial<Numbering>) => void
   pageCount: number
@@ -52,27 +52,14 @@ export function ExportMenu({
       <button
         className={open ? 'on' : ''}
         onClick={() => setOpen((v) => !v)}
-        title="What the exported PDF includes"
+        title="What the saved binder includes"
       >
-        Options{flatten || numbering.enabled ? ' •' : ''}
+        Options{numbering.enabled ? ' •' : ''}
       </button>
 
       {open && (
         <div className="ex-menu">
           <label className="toggle">
-            <input
-              type="checkbox"
-              checked={flatten}
-              onChange={(e) => onFlatten(e.target.checked)}
-            />
-            Flatten marks
-          </label>
-          <p className="st-note">
-            Burns marks, tapes and shapes into the page — nothing a recipient can drag or
-            delete. One-way: keep the session file as your master.
-          </p>
-
-          <label className="toggle ex-top">
             <input
               type="checkbox"
               checked={numbering.enabled}

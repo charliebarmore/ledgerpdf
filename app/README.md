@@ -512,7 +512,7 @@ pixel-checks the tape's position in pdfium.
 
 ## Page numbering
 
-**Options** beside Export PDF turns on binder page numbers, in three styles:
+**Options** in the toolbar turns on binder page numbers, in three styles:
 plain (`1, 2, 3…`), `Page 14 of 62`, or **Bates** with a prefix and zero-padding
 (`WP-000014`). Start number, corner and size are all settable, and the menu
 shows what the first and last pages will actually print so the settings can be
@@ -645,22 +645,65 @@ the fixture, renders the streams, and its Comments panel enumerates exactly the
 annotations in the file. A page-by-page visual check is still a human job; see
 `spike/ACROBAT-CHECKLIST.md`.
 
-## Save session vs Export PDF
+## Save, and Save a copy to send out
 
-Two different outputs, and the distinction is the whole design:
+**The binder PDF is the document.** One Save. Double-click to reopen. This is
+Acrobat's model, and the tool is sold as an alternative to Acrobat, so every
+departure from it is something a preparer has to be taught.
 
-- **Save session** writes a `.wptsession.json` — page order, bookmarks, marks,
-  tapes and shapes, **pointing at your source files without touching them**.
-  It is the editable working record: reopen it and every tick is still a tick
-  with its author and timestamp, not pixels.
-- **Export PDF** writes the binder itself: pages assembled, bookmarks
-  retargeted, annotations applied.
+- **Save** writes the binder: pages assembled, bookmarks retargeted, marks and
+  tapes applied as real PDF annotations so any viewer displays them — *and* the
+  editable session stored inside the file. Reopen it and every tick is still a
+  tick with its author and timestamp, not pixels.
+- **Save a copy to send out** writes the copy that leaves the firm: marks
+  flattened into the page content, nothing a recipient can drag or delete, and
+  **no session inside**. It is a different destination, never the working
+  binder, and it cannot be reopened for editing. That is the point of it.
 
-The buttons used to read "Save" and "Export", which was ambiguous at exactly
-the moment it mattered — "Save" is what anyone reaches for when they want their
-document, and they got a `.json`. They now say what they produce. The session
-file is named after the binder for the same reason a folder of files all called
-`binder.wptsession.json` helps nobody.
+This replaced a two-file model — a `.wptsession.json` master plus an exported
+binder. The buttons had already been renamed once, from "Save"/"Export" to
+"Save session"/"Export PDF", because "Save" is what anyone reaches for when
+they want their document and they got a `.json`. The rename fixed the labels; it
+did not fix the model, and the model was what confused. Charlie tripped on it
+himself the first time he used a packaged build, having designed it (issue #3).
+
+**Where the session lives inside the PDF is not arbitrary.**
+`spike/CARRIER-SPIKE.md` measured six candidate locations against seven
+rewriters and found that every single-anchor location has a rewriter that
+destroys it. So it is written twice — as a document-level attachment *and* as a
+page-level associated file. A document-level one is lost when an editor rebuilds
+the file from its pages; a page-level one is lost when the user deletes that
+page. Neither failure takes out both.
+
+**Surviving is not the same as being right.** A binder also records a
+fingerprint of its own page geometry — page count, order, box sizes, rotation.
+If another program rewrites the file and moves the pages, the session still
+loads perfectly and every mark on a moved page is now in the wrong place, which
+is worse than losing it because the binder reopens looking fine. Opening one
+that fails this check says so, in those words.
+
+### While a binder is open
+
+Two siblings appear beside it, both hidden and both deleted on a clean close:
+
+- `.<name>.wpt-working.pdf` — the binder with our marks stripped out. The app
+  renders from this and draws its own interactive layer on top; without it every
+  tick would appear twice, once from the PDF and once from the app. Annotations
+  that arrived on the client's original PDF are **not** stripped and still show.
+- `.<name>.wpt-recovery.json` — the autosave. Rewriting a several-hundred-page
+  PDF after every edit is not something to do on a timer, so edits land here and
+  are folded into the binder when you save. Finding one at open time means the
+  app did not close cleanly.
+
+Both sit **beside the binder, not in the OS temp directory**. A working copy of
+a binder is client data, and an engagement folder is somewhere a firm has already
+decided is appropriate for it. "A de-marked copy of client workpapers is written
+to the user's Temp folder" is not a sentence anyone wants in a WISP.
+
+### Older `.wptsession.json` files
+
+Still open, once. Saving converts them to a binder; the old file is left where it
+is and never written to again.
 
 ## Window layout
 

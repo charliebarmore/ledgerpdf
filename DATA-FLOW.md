@@ -21,13 +21,28 @@ Optional MCP client ─local stdio─ MCP server ─same session model/engine─
 - Source PDFs and images stay at the paths the user selected and are opened
   read-only. Their SHA-256 fingerprints are stored in the session and checked
   on reopen and before and after export.
-- A `.wptsession.json` stores source paths and fingerprints, page order,
-  bookmarks, reviewer names/initials, mark positions and notes, and calculator
-  tape entries. It does not embed page images or extracted page text.
-- After the first manual save, the session autosaves to that same location. A
-  sibling `*.recovery.wptsession.json` retains one previous complete generation.
-  Both are owner-only (`0600`) on POSIX; Windows permissions inherit from the
-  chosen folder.
+- **The binder PDF is the document.** Saving writes the assembled pages plus the
+  editable session — page order, bookmarks, reviewer names/initials, mark
+  positions and notes, and calculator tape entries — stored inside the PDF at two
+  anchors (`spike/CARRIER-SPIKE.md`). The session records where each page came
+  from as provenance; it does not embed page images or extracted page text, and
+  the binder does not need those originals present in order to open.
+- While a binder is open, two hidden siblings sit beside it and are deleted on a
+  clean close: `.<name>.wpt-working.pdf`, the binder with our own marks stripped
+  so the app can draw its interactive layer without doubling them, and
+  `.<name>.wpt-recovery.json`, the autosave that avoids rewriting a large PDF on
+  a timer. They are siblings rather than files in the OS temp directory
+  deliberately: a working copy of a binder is client data and belongs in the
+  engagement folder the firm already governs. Both are owner-only (`0600`) on
+  POSIX; Windows permissions inherit from the chosen folder. A crash can strand
+  a working copy, so opening a binder overwrites any already beside it.
+- **"Save a copy to send out"** produces the distribution copy: marks flattened
+  into the page content and **no session inside**. An inherited session from the
+  binder it was built from is stripped before writing, so the firm's editable
+  working record never travels to a recipient.
+- The older two-file `.wptsession.json` format still opens, once, so nothing made
+  before this change is stranded. Saving converts it to a binder; the app never
+  writes that format again. The MCP server still uses it as its handoff.
 - Export writes a temporary file beside the chosen output, validates it, then
   atomically replaces the destination. A source file can never be the export
   target. The app does not maintain a cloud copy, recent-file database, or
@@ -73,9 +88,12 @@ app cannot promise forensic secure erase on SSDs or synced storage.
   engine. A successful exploit in a native PDF dependency would run with the
   signed-in user's OS permissions. Keep pikepdf/qpdf and Pillow patched and
   treat parser sandboxing as a security-hardening item before broad deployment.
-- The app does not yet detect a previously exported binder modified by another
-  program. The session/source fingerprints protect inputs, not distributed
-  output copies.
+- A binder records a fingerprint of its own page geometry (page count, order, box
+  sizes, rotation) and reports on open when another program has moved the pages
+  underneath the marks. It deliberately excludes content-stream bytes, so a
+  lossless rewrite does not raise a false alarm — and equally, it does not detect
+  a rewrite that changed page *content* without moving anything. It says the
+  marks may no longer line up; it does not repair them.
 - There is no role-based access control, engagement lock, reviewer sign-off,
   immutable audit log, or centralized administration. The session is an
   editable local workpaper, not yet a complete firm document-management system.

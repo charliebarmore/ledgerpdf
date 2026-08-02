@@ -437,6 +437,8 @@ export interface BookmarkNode {
 
 export interface ExportSpec {
   sources: Record<string, string>
+  /** The editable session, stored inside the binder. Absent on a flattened copy. */
+  session?: Session
   source_fingerprints?: Record<string, SourceFingerprint>
   pages: Array<{ id: string; source: string; index: number; rotate: number }>
   bookmarks: BookmarkNode[]
@@ -534,6 +536,76 @@ export function addSource(session: Session, probe: ProbeWire): Session {
     sources: [...session.sources, source],
     pages: [...session.pages, ...newPages]
   }
+}
+
+/** The single source id a reopened binder uses. */
+export const BINDER_SOURCE_ID = 'binder'
+
+/**
+ * Re-point a session recovered from a binder at the binder's own pages.
+ *
+ * This is what makes the file self-contained. The session that was embedded
+ * still lists the original PDFs it was assembled from, but those are now
+ * *provenance* — a record of where each page came from — not something the app
+ * needs on disk to open the file. Moving a binder to another machine, or
+ * archiving the originals, must not stop it opening.
+ *
+ * The mapping is direct because export wrote the pages in binder order: binder
+ * page N is `session.pages[N]`. Page ids are preserved, so every mark, tape,
+ * shape and status stays attached to the page it was placed on.
+ *
+ * Rotation resets to zero: the user's rotation was applied to the page when the
+ * binder was written, so the page in the file is already the right way up.
+ * Carrying the old delta forward would rotate it a second time.
+ *
+ * Bookmarks come from the binder's own outline (`probe.outline`), which export
+ * wrote with the final titles already in place. The rename and re-target
+ * overrides are therefore dropped: they are keyed to source documents that this
+ * session no longer has, and re-applying them would rename things twice.
+ */
+export function rebindToBinder(
+  session: Session,
+  probe: ProbeWire,
+  workingPath: string,
+  binderName: string
+): { session: Session; error?: string } {
+  if (probe.n_pages !== session.pages.length) {
+    return {
+      session,
+      error:
+        `this binder has ${probe.n_pages} pages but its saved session describes ` +
+        `${session.pages.length} — it was changed by another program`
+    }
+  }
+
+  const source: SourceDoc = {
+    id: BINDER_SOURCE_ID,
+    path: workingPath,
+    name: binderName,
+    nPages: probe.n_pages,
+    kind: 'pdf',
+    ...(probe.fingerprint ? { fingerprint: probe.fingerprint } : {}),
+    outline: normalizeOutline(probe.outline)
+  }
+
+  const pages: BinderPage[] = session.pages.map((page, index) => {
+    const geometry = probe.pages[index]
+    const box = geometry.cropbox ?? geometry.mediabox
+    const cw = Math.abs(box[2] - box[0])
+    const ch = Math.abs(box[3] - box[1])
+    const quarter = (((geometry.rotate % 360) + 360) % 360) % 180 !== 0
+    return {
+      id: page.id,
+      source: BINDER_SOURCE_ID,
+      index,
+      rotate: 0,
+      w: quarter ? ch : cw,
+      h: quarter ? cw : ch
+    }
+  })
+
+  const { titles: _titles, bookmarkPages: _pages, bookmarks: _bookmarks, ...rest } = session
+  return { session: { ...rest, sources: [source], pages } }
 }
 
 // ------------------------------------------------------------------ mutations
@@ -1547,6 +1619,16 @@ function mergeUserBookmarks(
 export interface ExportOptions extends BookmarkOptions {
   /** Burn marks into page content rather than writing them as annotations. */
   flatten?: boolean
+  /**
+   * Store the editable session inside the binder (issue #3), making the PDF the
+   * document rather than a companion to a `.wptsession.json`.
+   *
+   * Deliberately NOT set for the copy that leaves the firm. That copy is
+   * flattened, and the engine refuses to embed a session into a flattened
+   * binder — flattened marks are painted into the page and cannot be lifted
+   * back out, so an embedded session would promise an edit that cannot happen.
+   */
+  embedSession?: boolean
 }
 
 export function toExportSpec(
@@ -1554,7 +1636,7 @@ export function toExportSpec(
   output: string,
   opts: ExportOptions = {}
 ): ExportSpec {
-  const { flatten = false, ...bookmarkOpts } = opts
+  const { flatten = false, embedSession = false, ...bookmarkOpts } = opts
   const used = new Set(session.pages.map((p) => p.source))
   const sources: Record<string, string> = {}
   const sourceFingerprints: Record<string, SourceFingerprint> = {}
@@ -1678,6 +1760,7 @@ export function toExportSpec(
         }))
     ],
     ...(flatten ? { flatten: true } : {}),
+    ...(embedSession && !flatten ? { session } : {}),
     output
   }
 }
