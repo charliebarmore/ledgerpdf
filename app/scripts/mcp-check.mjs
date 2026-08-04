@@ -279,10 +279,12 @@ check(
   imgExport.text
 )
 check(
-  'a non-PDF, non-image file is refused with a useful message',
-  (await call('binder_add_pdfs', { paths: [path.join(REPO, 'spike', 'README.md')] })).text.includes(
-    'not a PDF or supported image'
-  )
+  'a file type the binder cannot hold is refused with a useful message',
+  // A .py, not a .md: markdown is a supported source now, and this check
+  // caught that the moment it changed.
+  (
+    await call('binder_add_pdfs', { paths: [path.join(REPO, 'spike', 'make_fixtures.py')] })
+  ).text.includes('not a supported source')
 )
 check(
   'MCP refuses file access outside its configured engagement root',

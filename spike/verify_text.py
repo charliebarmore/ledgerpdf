@@ -290,6 +290,43 @@ else:
         f"{len(both['pages'])} page(s)",
     )
 
+# ---------------------------------------------------------------- documents
+# Prose an agent writes is most of what an engagement produces. It is TYPESET,
+# not dumped: raw markdown in a workpaper puts "## Heading" on the page.
+memo = FIXTURES / "review_memo.md"
+if not memo.exists():
+    check("review_memo.md present", False, "run spike/make_fixtures.py")
+else:
+    doc = extract_text({"path": str(memo), "pages": [0]})["pages"][0]
+    check(
+        "a memo reads as exact text, not as a picture",
+        doc["source"] == "pdf" and doc["has_text"],
+        f"source={doc['source']}",
+    )
+    # The failure mode is silent — an unhandled construct vanishes rather than
+    # erroring — so every block type is asserted present.
+    for label, needle in [
+        ("heading", "Q2 2026 Review Memo"),
+        ("body text", "agree to the general"),
+        ("bullet", "Reconciled the card"),
+        ("table cell", "Software Subscriptions"),
+        ("table figure", "1,203.26"),
+        ("blockquote", "no subscription exceeds twelve months"),
+        ("numbered item", "No adjusting entries"),
+    ]:
+        check(f"the memo keeps its {label}", needle in doc["text"], needle)
+    check(
+        "markdown syntax is rendered away, never printed",
+        "##" not in doc["text"] and "**" not in doc["text"] and "| ---" not in doc["text"],
+        [ln for ln in doc["text"].split(chr(10)) if "#" in ln or "**" in ln][:2],
+    )
+    figure = next((w for w in doc["words"] if w["t"] == "1,203.26"), None)
+    check(
+        "a figure quoted in a memo is addressable like any other",
+        figure is not None and 0 < figure["nx"] < 1 and 0 < figure["ny"] < 1,
+        f"nx={figure['nx']} ny={figure['ny']}" if figure else "missing",
+    )
+
 # --------------------------------------------------------------- scanned pages
 # An image-only page has no text layer. Reporting that plainly is the whole
 # point: it tells an agent OCR is missing rather than that the page is blank.

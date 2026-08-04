@@ -35,7 +35,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
 | `verify:model` | 194 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
-| `verify:text` | 36 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
+| `verify:text` | 46 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
 | `verify:mcp` | 55 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
@@ -131,6 +131,34 @@ This app holds client tax documents, so the boundaries are deliberate:
 - Packaged builds run that engine as a frozen, platform-native executable from
   the app's sealed resources; they never discover or invoke a workstation's
   ambient Python installation.
+
+## Memos as pages (Markdown and Word)
+
+Most of what an agent produces for an engagement is prose — a memo, a summary
+of positions taken, a list of what was reconciled. `.md`, `.markdown` and
+`.docx` import like any other source.
+
+**They are typeset, not dumped.** Dropping the raw file in would put
+`## Heading` and `**bold**` on the page as literal characters, and a workpaper
+that looks like source code is not support for anything. Headings read as
+headings, lists as lists, tables as tables, with real word wrap.
+
+- **reportlab, not our own text drawing.** Prose needs real font metrics to
+  wrap; the sheet renderer dodges that with monospace, which is right for a
+  column of figures and wrong for a paragraph. Standard-14 faces, so nothing is
+  embedded.
+- **Times-Roman body, 1-inch margins** — the firm's own document standard, so a
+  rendered memo sits beside a Word deliverable without looking foreign.
+- **No header or footer.** The binder numbers its own pages and the bookmark
+  names the document; repeating either would fight it.
+- The file name is a fallback title only — a memo that opens with its own `#`
+  heading does not get the file name stamped above it.
+
+Because the text is really drawn, extraction reads it exactly, so **a figure
+quoted in a memo is addressable and tickable like any other**. Every block type
+carries a check: the failure mode is silent — an unhandled construct does not
+error, it vanishes from the page — and a workpaper quietly missing a paragraph
+is worse than one that fails to import.
 
 ## Spreadsheets as pages
 

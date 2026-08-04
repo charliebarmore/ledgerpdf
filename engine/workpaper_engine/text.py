@@ -29,7 +29,7 @@ import pypdfium2 as pdfium
 import io
 
 from . import ocr as ocr_backend
-from . import sheets
+from . import documents, sheets
 from .geometry import page_geom, user_to_visual
 from .probe import sanitize_text
 
@@ -168,9 +168,10 @@ def extract_text(spec: dict) -> dict:
     # extraction finds them with exact positions — a figure off a trial balance
     # is addressable and tickable with no OCR anywhere in the path.
     source: object = path
-    if sheets.is_sheet(path):
+    if sheets.is_sheet(path) or documents.is_doc(path):
         buffer = io.BytesIO()
-        with sheets.sheet_to_pdf(path) as made:
+        maker = documents.doc_to_pdf if documents.is_doc(path) else sheets.sheet_to_pdf
+        with maker(path) as made:
             made.save(buffer)
         source = buffer.getvalue()
 

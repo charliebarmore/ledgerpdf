@@ -14,12 +14,14 @@ from __future__ import annotations
 import base64
 import io
 
-from . import images, sheets
+from . import documents, images, sheets
 
 
 def materialize_source(path: str) -> str:
     """Base64 PDF bytes for a source that is not already a PDF."""
-    if sheets.is_sheet(path):
+    if documents.is_doc(path):
+        made = documents.doc_to_pdf(path)
+    elif sheets.is_sheet(path):
         made = sheets.sheet_to_pdf(path)
     elif images.is_image(path):
         made = images.image_to_pdf(path)

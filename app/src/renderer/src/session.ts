@@ -32,7 +32,7 @@ export interface OutlineNode {
  * the engine's images.py owns that — but it renders differently in the app, so
  * the distinction has to survive save/reopen.
  */
-export type SourceKind = 'pdf' | 'image' | 'sheet'
+export type SourceKind = 'pdf' | 'image' | 'sheet' | 'document'
 
 export interface SourceFingerprint {
   sha256: string
@@ -572,7 +572,14 @@ export function addSource(session: Session, probe: ProbeWire): Session {
     path: probe.path,
     name: baseName(probe.path),
     nPages: probe.n_pages,
-    kind: probe.kind === 'image' ? 'image' : probe.kind === 'sheet' ? 'sheet' : 'pdf',
+    kind:
+      probe.kind === 'image'
+        ? 'image'
+        : probe.kind === 'sheet'
+          ? 'sheet'
+          : probe.kind === 'document'
+            ? 'document'
+            : 'pdf',
     ...(probe.fingerprint ? { fingerprint: probe.fingerprint } : {}),
     outline: normalizeOutline(probe.outline)
   }
@@ -1562,7 +1569,7 @@ function stripSourceExt(name: string): string {
   // Keep in step with main/index.ts SOURCE_EXTS. A workbook that kept its
   // ".xlsx" read as the odd one out in a bookmark list where every PDF and
   // image had already lost its extension.
-  return name.replace(/\.(pdf|xlsx|xlsm|csv|png|jpe?g|jpe|gif|bmp|tiff?|webp)$/i, '')
+  return name.replace(/\.(pdf|xlsx|xlsm|csv|md|markdown|docx|png|jpe?g|jpe|gif|bmp|tiff?|webp)$/i, '')
 }
 
 /**
@@ -2003,7 +2010,14 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
       // Sessions written before image support have no `kind`; they were all PDFs.
       sources: s.sources.map((x) => ({
         ...x,
-        kind: x.kind === 'image' ? 'image' : x.kind === 'sheet' ? 'sheet' : 'pdf'
+        kind:
+          x.kind === 'image'
+            ? 'image'
+            : x.kind === 'sheet'
+              ? 'sheet'
+              : x.kind === 'document'
+                ? 'document'
+                : 'pdf'
       })),
       pages: s.pages.map((p) => ({ ...p, rotate: p.rotate ?? 0 })),
       seq,

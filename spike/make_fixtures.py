@@ -288,6 +288,52 @@ def make_workbook_fixtures(book: Path, register: Path) -> None:
     wb2.save(register)
 
 
+def make_memo_fixture(path: Path) -> None:
+    """A memo of the shape an agent actually writes for an engagement.
+
+    Exercises every block the renderer handles, because the failure mode is
+    silent: an unhandled construct does not error, it just vanishes from the
+    page, and a workpaper quietly missing a paragraph is worse than one that
+    fails to import.
+    """
+    path.write_text(
+        """# Q2 2026 Review Memo
+
+Prepared to support the quarterly close. All figures agree to the general
+ledger unless noted.
+
+## Scope
+
+- Reviewed **all** transactions over $500
+- Reconciled the card and operating accounts through 6/30
+
+## Findings
+
+| Account | Description | Amount |
+| --- | --- | --- |
+| 7300 | Software Subscriptions | 1,203.26 |
+| 7260 | Small Equipment | 2,808.76 |
+
+### Software subscriptions
+
+The balance is materially *higher* than Q1 because of the annual `ANTHROPIC`
+renewal, which was expensed rather than prepaid.
+
+> Management represents that no subscription exceeds twelve months.
+
+## Conclusion
+
+1. The trial balance foots and agrees to the detail.
+2. No adjusting entries are proposed.
+
+---
+
+Prepared by CJB
+""",
+        encoding="utf-8",
+    )
+
+
 def main() -> dict[str, str]:
     FIXTURES.mkdir(parents=True, exist_ok=True)
     a = FIXTURES / "fixture_a.pdf"
@@ -303,6 +349,8 @@ def main() -> dict[str, str]:
     book = FIXTURES / "trial_balance.xlsx"
     register = FIXTURES / "long_register.xlsx"
     make_workbook_fixtures(book, register)
+    memo = FIXTURES / "review_memo.md"
+    make_memo_fixture(memo)
     return {
         "A": str(a),
         "B": str(b),
@@ -312,6 +360,7 @@ def main() -> dict[str, str]:
         "SCAN": str(scan),
         "BOOK": str(book),
         "REGISTER": str(register),
+        "MEMO": str(memo),
     }
 
 

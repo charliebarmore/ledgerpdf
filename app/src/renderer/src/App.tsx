@@ -82,7 +82,14 @@ const MOD = window.wpt.platform === 'darwin' ? '⌘' : 'Ctrl'
 
 function sourceMatches(source: SourceDoc, probe: ProbeWire): boolean {
   if (source.nPages !== probe.n_pages) return false
-  const probed = probe.kind === 'image' ? 'image' : probe.kind === 'sheet' ? 'sheet' : 'pdf'
+  const probed =
+    probe.kind === 'image'
+      ? 'image'
+      : probe.kind === 'sheet'
+        ? 'sheet'
+        : probe.kind === 'document'
+          ? 'document'
+          : 'pdf'
   if (source.kind !== probed) return false
   if (!source.fingerprint) return true // Legacy session: establish identity on this open.
   return source.fingerprint.sha256 === probe.fingerprint?.sha256
@@ -1375,7 +1382,7 @@ export default function App(): React.JSX.Element {
         {pages.length === 0 ? (
           <div className="dropzone">
             <div className="dropzone-inner">
-              <p className="dz-title">Drop PDFs, spreadsheets or images here</p>
+              <p className="dz-title">Drop PDFs, spreadsheets, memos or images here</p>
               <p className="dz-sub">
                 or <button className="link" onClick={addViaDialog}>choose files</button> · nothing
                 leaves this machine

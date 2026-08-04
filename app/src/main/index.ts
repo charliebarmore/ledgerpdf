@@ -133,7 +133,9 @@ function runEngine(command: unknown): Promise<EngineOk | EngineErr> {
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'jpe', 'gif', 'bmp', 'tif', 'tiff', 'webp'] as const
 /** Excel IS the workpaper format — see engine/sheets.py for what it becomes. */
 const SHEET_EXTS = ['xlsx', 'xlsm', 'csv'] as const
-const SOURCE_EXTS = ['pdf', ...SHEET_EXTS, ...IMAGE_EXTS] as const
+/** Prose an agent writes — typeset, not dumped. See engine/documents.py. */
+const DOC_EXTS = ['md', 'markdown', 'docx'] as const
+const SOURCE_EXTS = ['pdf', ...SHEET_EXTS, ...DOC_EXTS, ...IMAGE_EXTS] as const
 
 function isSourcePath(p: string): boolean {
   const ext = path.extname(p).slice(1).toLowerCase()
@@ -231,6 +233,7 @@ function registerIpc(): void {
         { name: 'Workpaper sources', extensions: [...SOURCE_EXTS] },
         { name: 'PDF', extensions: ['pdf'] },
         { name: 'Spreadsheets', extensions: [...SHEET_EXTS] },
+        { name: 'Documents', extensions: [...DOC_EXTS] },
         { name: 'Images', extensions: [...IMAGE_EXTS] }
       ]
     })
@@ -262,7 +265,7 @@ function registerIpc(): void {
     // it "Invalid PDF structure" — import, text and export all worked and only
     // the thing a person looks at did not. Hand back the pages the sheet
     // BECOMES, which are the same pages the export writes.
-    if (SHEET_EXTS.some((ext) => abs.toLowerCase().endsWith(`.${ext}`))) {
+    if ([...SHEET_EXTS, ...DOC_EXTS].some((ext) => abs.toLowerCase().endsWith(`.${ext}`))) {
       const res = await runEngine({ cmd: 'materialize', path: abs })
       if (!res.ok || typeof res.pdf_base64 !== 'string') {
         throw new Error(`could not read ${path.basename(abs)}: ${String(res.error ?? 'no pages')}`)

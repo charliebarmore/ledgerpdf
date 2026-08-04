@@ -120,6 +120,9 @@ const SOURCE_EXTS = [
   '.xlsx',
   '.xlsm',
   '.csv',
+  '.md',
+  '.markdown',
+  '.docx',
   '.png',
   '.jpg',
   '.jpeg',
@@ -175,7 +178,9 @@ function resolveAllowedPath(p: string, options: { mustExist: boolean; purpose: s
 function resolveSource(p: string): string {
   const abs = resolveAllowedPath(p, { mustExist: true, purpose: 'reading a source' })
   if (!SOURCE_EXTS.some((e) => abs.toLowerCase().endsWith(e))) {
-    throw new Error(`not a PDF or supported image: ${abs}`)
+    throw new Error(
+      `not a supported source (PDF, spreadsheet, memo or image): ${abs}`
+    )
   }
   return abs
 }
@@ -397,7 +402,7 @@ registerTool(
 registerTool(
   'binder_add_pdfs',
   {
-    title: 'Add PDFs, spreadsheets or images to the binder',
+    title: 'Add PDFs, spreadsheets, documents or images to the binder',
     description:
       'Probe each file and append its pages to the end of the binder, in the order given. PDFs contribute all their pages; an image (png, jpg, tif, ...) contributes one Letter page, auto-oriented, with the picture centred. The same file may be added twice; each import is a distinct source.',
     inputSchema: { paths: z.array(z.string()).min(1).describe('Paths to .pdf or image files') }
@@ -802,7 +807,7 @@ async function pageText(
   // reader would simply fail to open one.
   // A spreadsheet's cells are really drawn into its pages, so its text is
   // exact — only a picture genuinely has nothing to read.
-  const readable = ['.pdf', '.xlsx', '.xlsm', '.csv']
+  const readable = ['.pdf', '.xlsx', '.xlsm', '.csv', '.md', '.markdown', '.docx']
   if (!readable.some((e) => src.path.toLowerCase().endsWith(e))) {
     return { text: '', words: [], hasText: false, source: 'none' }
   }
