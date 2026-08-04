@@ -33,6 +33,7 @@ import {
   nudgeBookmarkDepth,
   parseSession,
   parseAmount,
+  rebindToBinder,
   tapeKeyPress,
   toTapeEntry,
   removeTapeEntry,
@@ -97,13 +98,13 @@ function sourceMatches(source: SourceDoc, probe: ProbeWire): boolean {
 
 export default function App(): React.JSX.Element {
   const [session, setSession] = useState<Session>(newSession)
-  const [sessionPath, setSessionPath] = useState<string | null>(null)
+  /** The binder PDF being edited. The document itself, not a companion file. */
+  const [binderPath, setBinderPath] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [status, setStatus] = useState('Add PDFs or images to start a binder.')
   const [busy, setBusy] = useState(false)
   const [pageCounts, setPageCounts] = useState(true)
-  const [flatten, setFlatten] = useState(false)
   const [sideW, setSideW] = useState(300)
   const [autoEditKey, setAutoEditKey] = useState<string | null>(null)
   const [armed, setArmed] = useState<{ kind: ToolKind; text?: string } | null>(null)
@@ -212,15 +213,15 @@ export default function App(): React.JSX.Element {
    * Read through a ref so this subscribes once — resubscribing on every session
    * change would drop requests already in flight.
    */
-  const liveRefs = useRef({ session, sessionPath, apply, currentId })
-  liveRefs.current = { session, sessionPath, apply, currentId }
+  const liveRefs = useRef({ session, binderPath, apply, currentId })
+  liveRefs.current = { session, binderPath, apply, currentId }
   useEffect(() => {
     window.wpt.onLiveState((state) => setLiveOn(state.on))
     window.wpt.onLiveRequest((req) => {
       if (req.kind === 'pull') {
         window.wpt.liveReply(req.id, {
           session: liveRefs.current.session,
-          path: liveRefs.current.sessionPath,
+          path: liveRefs.current.binderPath,
           // What the person is actually looking at, so "why did you flag this
           // one?" resolves without them reading a page id off the screen.
           currentPage: liveRefs.current.currentId
@@ -725,103 +726,194 @@ export default function App(): React.JSX.Element {
 
   // --------------------------------------------------------------- persistence
 
-  const persistSession = useCallback(
+  /**
+   * Autosave, to the invisible sibling — never to the binder.
+   *
+   * Writing the binder means rebuilding the whole PDF, which is not something
+   * to do on a timer. Edits land in a small JSON file beside it and are only
+   * folded into the binder when the user saves; the sibling is deleted on a
+   * clean close, so its presence at open time means the app did not close
+   * cleanly. This is the invisible scratch file, not a second document.
+   */
+  useEffect(() => {
+    if (!binderPath || !dirty) return
+    const timer = window.setTimeout(() => {
+      void window.wpt.autosaveBinder(binderPath, session).catch(() => {
+        // An autosave that cannot be written must not interrupt editing. The
+        // binder on disk is still whatever was last saved.
+      })
+    }, 1500)
+    return () => window.clearTimeout(timer)
+  }, [session, binderPath, dirty])
+
+  /**
+   * Core write. Takes the session explicitly — never reads render-time state.
+   *
+   * `flatten` and `embedSession` are opposites, and that is the whole model:
+   * a working save carries the editable session and marks you can still move,
+   * the copy that leaves the firm carries neither.
+   */
+  const writeBinder = useCallback(
     async (
-      value: Session,
-      existingPath: string | null,
-      mode: 'manual' | 'auto',
-      suggested?: string
+      target: Session,
+      out: string,
+      opts: { flatten?: boolean; reveal?: boolean } = {}
     ) => {
-      if (saving.current) return null
+      const { flatten = false, reveal = false } = opts
+      setBusy(true)
+      setStatus(flatten ? 'Preparing copy…' : 'Saving…')
+      try {
+        const res = await window.wpt.exportBinder(
+          toExportSpec(target, out, { pageCounts, flatten, embedSession: !flatten })
+        )
+        if (res.ok) {
+          const r = res.result as {
+            pages: number
+            marks: number
+            check_problems: string[]
+            session_bytes?: number
+          }
+          const clean = r.check_problems.length === 0
+          setStatus(
+            flatten
+              ? `Copy for sending saved to ${baseName(out)} — ${r.pages} pages, ${r.marks} mark(s) printed on permanently`
+              : `Saved ${baseName(out)} — ${r.pages} pages${
+                  clean ? '' : ` · ${r.check_problems.length} validation warning(s)`
+                }`
+          )
+          if (reveal) await window.wpt.reveal(out)
+        } else {
+          setStatus(`${flatten ? 'Copy' : 'Save'} failed — ${res.error}`)
+        }
+        return res
+      } finally {
+        setBusy(false)
+      }
+    },
+    [pageCounts]
+  )
+
+  /** Save the binder. One file, one action. */
+  const saveBinder = useCallback(
+    async (forceDialog = false) => {
+      if (!pages.length) return setStatus('Nothing to save yet — add some pages.')
+      if (saving.current) return
       saving.current = true
       try {
-        const target = await window.wpt.saveSession(value, existingPath, suggested)
-        if (!target) return null
-        lastSaved.current = JSON.stringify(value)
-        setSessionPath(target)
-        setStatus(
-          mode === 'auto'
-            ? `Autosaved ${baseName(target)}`
-            : `Session saved to ${baseName(target)}`
-        )
-        return target
-      } catch (error) {
-        setStatus(`${mode === 'auto' ? 'Autosave' : 'Save'} failed — ${String((error as Error).message ?? error)}`)
-        return null
+        let out = forceDialog ? null : binderPath
+        if (!out) {
+          out = await window.wpt.chooseBinderOutput(`${binderStem}.pdf`)
+          if (!out) return
+        }
+        const res = await writeBinder(session, out)
+        if (!res.ok) return
+        // Only now is the file on disk the thing on screen.
+        lastSaved.current = JSON.stringify(session)
+        if (binderPath && binderPath !== out) await window.wpt.releaseBinder(binderPath)
+        setBinderPath(out)
       } finally {
         saving.current = false
       }
     },
+    [session, pages.length, binderPath, binderStem, writeBinder]
+  )
+
+  /**
+   * The copy that leaves the firm: marks printed permanently onto the page,
+   * no editable session inside. Deliberately a separate destination — it must
+   * never overwrite the working binder.
+   */
+  const saveCopyToSendOut = useCallback(async () => {
+    if (!pages.length) return setStatus('Nothing to send yet — add some pages.')
+    const out = await window.wpt.chooseBinderOutput(`${binderStem} (copy to send).pdf`)
+    if (!out) return
+    if (binderPath && out === binderPath) {
+      return setStatus(
+        'That is the binder you are working in. Choose a different name — a flattened copy cannot be edited again.'
+      )
+    }
+    await writeBinder(session, out, { flatten: true, reveal: true })
+  }, [session, pages.length, binderPath, binderStem, writeBinder])
+
+  /** Load a session into the editor, replacing whatever is open. */
+  const adoptSession = useCallback(
+    (next: Session, path: string | null, note: string, clean: boolean) => {
+      for (const s of next.sources) forgetDoc(s.id)
+      past.current = []
+      future.current = []
+      lastSaved.current = clean ? JSON.stringify(next) : `${JSON.stringify(next)} `
+      setSession(next)
+      setBinderPath(path)
+      setSelected(new Set())
+      setCurrentId(next.pages[0]?.id ?? null)
+      setStatus(note)
+    },
     []
   )
 
-  // Once the user chooses where the engagement lives, every subsequent edit
-  // is saved after a short quiet period. The write is atomic in the main
-  // process and retains the previous complete generation beside the session.
-  useEffect(() => {
-    if (!sessionPath || !dirty) return
-    const timer = window.setTimeout(() => {
-      void persistSession(session, sessionPath, 'auto')
-    }, 1500)
-    return () => window.clearTimeout(timer)
-  }, [session, sessionPath, dirty, persistSession])
+  const openBinder = useCallback(async () => {
+    if (dirty && !(await window.wpt.confirmDiscard())) return
 
-  /** Core export. Takes the session explicitly — never reads render-time state. */
-  const exportSession = useCallback(async (target: Session, out: string, reveal = true) => {
-    setBusy(true)
-    setStatus('Exporting…')
-    try {
-      const res = await window.wpt.exportBinder(toExportSpec(target, out, { pageCounts, flatten }))
-      if (res.ok) {
-        const r = res.result as { pages: number; marks: number; check_problems: string[] }
-        const clean = r.check_problems.length === 0
-        setStatus(
-          `Exported ${r.pages} pages to ${baseName(out)}${
-            flatten && r.marks ? ` · ${r.marks} mark(s) flattened` : ''
-          }${clean ? ' · validation clean' : ` · ${r.check_problems.length} validation warning(s)`}`
-        )
-        if (reveal) await window.wpt.reveal(out)
-      } else {
-        setStatus(`Export failed — ${res.error}`)
-      }
-      return res
-    } finally {
-      setBusy(false)
-    }
-  }, [pageCounts, flatten])
-
-  const exportBinder = useCallback(async () => {
-    if (!pages.length) return setStatus('Nothing to export.')
-    const suggested = flatten
-      ? `${binderStem}-binder-flat.pdf`
-      : `${binderStem}-binder.pdf`
-    const out = await window.wpt.chooseBinderOutput(suggested)
-    if (out) await exportSession(session, out)
-  }, [session, pages, exportSession, flatten, binderStem])
-
-  const saveSession = useCallback(
-    async (forceDialog = false) => {
-      await persistSession(
-        session,
-        forceDialog ? null : sessionPath,
-        'manual',
-        `${binderStem}.wptsession.json`
-      )
-    },
-    [session, sessionPath, persistSession, binderStem]
-  )
-
-  const openSession = useCallback(async () => {
-    if (dirty) {
-      if (sessionPath) {
-        const saved = await persistSession(session, sessionPath, 'auto')
-        if (!saved) return
-      } else if (!(await window.wpt.confirmDiscard())) {
-        return
-      }
-    }
-    const res = await window.wpt.openSession()
+    const res = await window.wpt.openBinder()
     if (!res) return
+
+    if (res.kind === 'error') {
+      return setStatus(`Cannot open ${baseName(res.path)} — ${res.error}`)
+    }
+
+    // An ordinary PDF with nothing of ours inside. Not a failure — it is how
+    // every binder starts. Say so in words that suggest the next action.
+    if (res.kind === 'plain') {
+      return setStatus(
+        `${baseName(res.path)} is a plain PDF with no saved marks. Use Add files to start a binder from it.`
+      )
+    }
+
+    // ---- a saved binder
+    if (res.kind === 'binder') {
+      const parsed = parseSession(res.session)
+      if ('error' in parsed) {
+        return setStatus(`Cannot open ${baseName(res.path)} — ${parsed.error}`)
+      }
+      if (!res.payloadIntact) {
+        return setStatus(
+          `Cannot open ${baseName(res.path)} — the saved marks inside it are damaged.`
+        )
+      }
+      const probed = await window.wpt.probe(res.workingPath)
+      if (!probed.ok || !probed.probe) {
+        return setStatus(`Cannot read ${baseName(res.path)} — ${probed.error ?? 'unreadable'}`)
+      }
+      const rebound = rebindToBinder(
+        parsed.session,
+        probed.probe as ProbeWire,
+        res.workingPath,
+        baseName(res.path)
+      )
+      if (rebound.error) {
+        return setStatus(`Cannot open ${baseName(res.path)} — ${rebound.error}`)
+      }
+
+      // The pages moved since this session was written. The marks will load and
+      // will look fine, and some of them will be in the wrong place. Say that
+      // plainly rather than opening quietly.
+      const moved = !res.geometryMatches
+      const stale = res.pendingAutosave !== undefined
+
+      adoptSession(
+        rebound.session,
+        res.path,
+        moved
+          ? `Opened ${baseName(res.path)} — WARNING: another program changed the pages since this was saved, so marks may no longer line up. Check before relying on them.`
+          : stale
+            ? `Opened ${baseName(res.path)} — it was last closed without saving; unsaved edits from that session were not applied.`
+            : `Opened ${baseName(res.path)} — ${rebound.session.pages.length} pages.`,
+        !moved
+      )
+      return
+    }
+
+    // ---- the older two-file format, opened once so it can be converted
     if (res.session === undefined) {
       return setStatus(`Cannot open session — ${res.error ?? 'unreadable file'}`)
     }
@@ -835,7 +927,6 @@ export default function App(): React.JSX.Element {
       }
     }
     if ('error' in parsed) return setStatus(`Cannot open session — ${parsed.error}`)
-    const originalSerialized = JSON.stringify(parsed.session)
     const resolvedSources: SourceDoc[] = []
 
     for (const source of parsed.session.sources) {
@@ -877,31 +968,24 @@ export default function App(): React.JSX.Element {
     }
 
     const openedSession = { ...parsed.session, sources: resolvedSources }
-    for (const s of parsed.session.sources) forgetDoc(s.id)
-    past.current = []
-    future.current = []
-    // A relink or first fingerprinting of a legacy session is a real change and
-    // will autosave. Recovered data remains clean until the explicit Save As.
-    lastSaved.current = recovered ? JSON.stringify(openedSession) : originalSerialized
-    setSession(openedSession)
-    // Never overwrite an unreadable primary with recovered data implicitly.
-    // Save As makes the recovery decision explicit and preserves both files.
-    setSessionPath(recovered ? null : res.path)
-    setSelected(new Set())
-    setCurrentId(openedSession.pages[0]?.id ?? null)
-    setStatus(
+    // Converting: the old file stays exactly where it is and is never written
+    // to again. There is no binder yet, so the next Save asks where to put one.
+    adoptSession(
+      openedSession,
+      null,
       recovered
-        ? `Recovered ${baseName(res.path)} from its previous complete save — use Save to choose a safe destination.`
-        : `Opened ${baseName(res.path)} — ${openedSession.pages.length} pages; source identity verified.`
+        ? `Recovered ${baseName(res.path)} from its previous complete save. This is the older two-file format — Save will convert it to a single binder.`
+        : `Opened ${baseName(res.path)} — ${openedSession.pages.length} pages, source identity verified. This is the older two-file format — Save will convert it to a single binder.`,
+      false
     )
-  }, [dirty, sessionPath, session, persistSession])
+  }, [dirty, adoptSession])
 
   // Dev seam (WPT_DEV_OPEN / WPT_DEV_EXPORT): drive the whole Phase 1 flow —
   // import, then optionally a real export through IPC + engine — with no
   // dialogs, so it can be smoke-tested automatically. Handlers are read through
   // refs so this subscribes exactly once.
-  const devRefs = useRef({ importPaths, exportSession })
-  devRefs.current = { importPaths, exportSession }
+  const devRefs = useRef({ importPaths, writeBinder })
+  devRefs.current = { importPaths, writeBinder }
   useEffect(() => {
     window.wpt.onDevOpen(async ({ paths, exportTo, seedMarks }) => {
       let imported = await devRefs.current.importPaths(paths)
@@ -980,7 +1064,7 @@ export default function App(): React.JSX.Element {
       // missing file.
       let exported: string | undefined
       if (exportTo && imported) {
-        const res = await devRefs.current.exportSession(imported, exportTo, false)
+        const res = await devRefs.current.writeBinder(imported, exportTo)
         exported = res?.ok ? 'ok' : `failed: ${res?.error ?? 'no result'}`
       }
       // Report what loaded, not merely that we got here — an import that threw
@@ -1012,12 +1096,12 @@ export default function App(): React.JSX.Element {
       }
       if (mod && e.key.toLowerCase() === 's') {
         e.preventDefault()
-        void saveSession(e.shiftKey)
+        void saveBinder(e.shiftKey)
         return
       }
       if (mod && e.key.toLowerCase() === 'o') {
         e.preventDefault()
-        void openSession()
+        void openBinder()
         return
       }
       if (mod && e.key.toLowerCase() === 'i') {
@@ -1032,7 +1116,7 @@ export default function App(): React.JSX.Element {
       }
       if (mod && e.key.toLowerCase() === 'e') {
         e.preventDefault()
-        void exportBinder()
+        void saveCopyToSendOut()
         return
       }
       // A live tape owns the keyboard — digits, operators, Enter, ⌫, Esc —
@@ -1098,10 +1182,10 @@ export default function App(): React.JSX.Element {
     remove,
     step,
     nudge,
-    saveSession,
-    openSession,
+    saveBinder,
+    openBinder,
     addViaDialog,
-    exportBinder,
+    saveCopyToSendOut,
     addBookmarkHere,
     resizeMark,
     deleteMark,
@@ -1361,27 +1445,30 @@ export default function App(): React.JSX.Element {
         >
           Add
         </button>
-        <button onClick={openSession} title={`Open a saved .wptsession.json  ${MOD}O`}>
+        <button onClick={openBinder} title={`Open a binder  ${MOD}O`}>
           Open
         </button>
-        <button
-          onClick={() => saveSession(false)}
-          disabled={!pages.length}
-          title={`Save the editable session (.wptsession.json) — your work in progress, sources untouched  ${MOD}S`}
-        >
-          Save session
-        </button>
         <ExportMenu
-          flatten={flatten}
-          onFlatten={setFlatten}
           numbering={numberCfg}
           onNumbering={(patch) =>
-            apply({ ...session, numbering: { ...numberCfg, ...patch } }, 'Export options updated.')
+            apply({ ...session, numbering: { ...numberCfg, ...patch } }, 'Binder options updated.')
           }
           pageCount={pages.length}
         />
-        <button className="primary" onClick={() => void exportBinder()} disabled={busy || !pages.length}>
-          Export PDF
+        <button
+          onClick={() => void saveCopyToSendOut()}
+          disabled={busy || !pages.length}
+          title={`Save a copy for a client or a file room. Marks are printed on permanently and it cannot be reopened for editing.  ${MOD}E`}
+        >
+          Save a copy to send out
+        </button>
+        <button
+          className="primary"
+          onClick={() => void saveBinder(false)}
+          disabled={busy || !pages.length}
+          title={`Save this binder  ${MOD}S    (${MOD}⇧S to save it under a new name)`}
+        >
+          Save
         </button>
         </div>
       </header>
@@ -1568,8 +1655,8 @@ export default function App(): React.JSX.Element {
           {liveOn ? 'Live agent access: ON' : 'Live agent access: off'}
         </button>
         <span className="muted">
-          {sessionPath ? baseName(sessionPath) : 'unsaved session'}
-          {dirty ? ' · unsaved changes' : sessionPath ? ' · autosaved' : ''} · drag to reorder · [ ] rotate ·
+          {binderPath ? baseName(binderPath) : 'unsaved binder'}
+          {dirty ? ' · unsaved changes' : binderPath ? ' · saved' : ''} · drag to reorder · [ ] rotate ·
           ⌫ delete · {MOD}Z undo
         </span>
       </footer>

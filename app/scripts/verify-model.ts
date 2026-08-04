@@ -34,6 +34,7 @@ import {
   nudgeBookmarkDepth,
   parseAmount,
   parseSession,
+  rebindToBinder,
   popTapeEntry,
   pushTapeEntry,
   markCursor,
@@ -1881,6 +1882,122 @@ async function main(): Promise<number> {
       'flattened marks are page content, not annotations',
       isContent.code === 0,
       isContent.out.trim()
+    )
+  }
+
+  // ------------------------------------------- the single-file round trip (#3)
+  //
+  // Everything above proves a binder can be WRITTEN. This proves it can be
+  // opened again, which is the half that makes the file the document. It walks
+  // the exact path the app walks on Open: recover the session from the PDF,
+  // build the de-marked working copy, probe it, and re-point the session at the
+  // binder's own pages.
+  {
+    const RT = path.join(REPO, 'spike', 'out', 'roundtrip.pdf')
+    const RT_WORK = path.join(REPO, 'spike', 'out', '.roundtrip.wpt-working.pdf')
+    const RT2 = path.join(REPO, 'spike', 'out', 'roundtrip-2.pdf')
+
+    let s = newSession()
+    for (const f of ['fixture_a.pdf', 'fixture_b.pdf']) {
+      const probe = await runEngine({ cmd: 'probe', path: path.join(FIXTURES, f) })
+      s = addSource(s, probe.probe)
+    }
+    s = rotatePages(s, [s.pages[1].id], 90)
+    s = addMark(s, { page: s.pages[0].id, kind: 'tick', nx: 0.75, ny: 0.25, size: 24, author: 'CJB' }).session
+    s = addMark(s, { page: s.pages[3].id, kind: 'text', text: 'F', nx: 0.4, ny: 0.6, size: 24, author: 'CJB' }).session
+    s = addTape(s, { page: s.pages[0].id, nx: 0.5, ny: 0.5, entries: [], author: 'CJB' }).session
+    s = { ...s, reviewer: 'CJB', stamps: ['TB'] }
+
+    const wrote = await runEngine({
+      cmd: 'export',
+      binder: toExportSpec(s, RT, { embedSession: true })
+    })
+    check('round trip: binder saved with a session inside', wrote.ok === true, wrote.error ?? '')
+    check(
+      'round trip: the session is actually in the file',
+      (wrote.result?.session_bytes ?? 0) > 0,
+      `${wrote.result?.session_bytes} bytes`
+    )
+
+    const opened = await runEngine({ cmd: 'open_binder', path: RT })
+    check('round trip: reopening finds the session', opened.binder?.found === true)
+    check('round trip: the session is undamaged', opened.binder?.payload_intact === true)
+    check('round trip: the pages have not moved', opened.binder?.geometry_matches === true)
+
+    const parsed = parseSession(opened.binder?.session)
+    check('round trip: the recovered session is valid', !('error' in parsed), (parsed as any).error ?? '')
+
+    const cleaned = await runEngine({ cmd: 'clean_copy', path: RT, output: RT_WORK })
+    check('round trip: working copy written', cleaned.ok === true, cleaned.error ?? '')
+    const workProbe = await runEngine({ cmd: 'probe', path: RT_WORK })
+
+    const rebound = rebindToBinder(
+      (parsed as { session: any }).session,
+      workProbe.probe,
+      RT_WORK,
+      'roundtrip.pdf'
+    )
+    check('round trip: re-pointed at the binder', !rebound.error, rebound.error ?? '')
+
+    const back = rebound.session
+    check(
+      'round trip: every page survived, in order',
+      back.pages.length === s.pages.length &&
+        back.pages.every((p: any, i: number) => p.id === s.pages[i].id),
+      `${back.pages.length} pages`
+    )
+    check(
+      'round trip: the binder is now its own and only source',
+      back.sources.length === 1 && back.pages.every((p: any) => p.source === back.sources[0].id),
+      back.sources.map((x: any) => x.name).join(',')
+    )
+    check(
+      'round trip: marks and tapes still attached to their pages',
+      back.marks?.length === s.marks?.length &&
+        back.tapes?.length === s.tapes?.length &&
+        (back.marks ?? []).every((m: any, i: number) => m.page === (s.marks ?? [])[i]?.page),
+      `${back.marks?.length} marks, ${back.tapes?.length} tapes`
+    )
+    check(
+      'round trip: the firm legend and reviewer travelled with the file',
+      back.reviewer === 'CJB' && back.stamps?.[0] === 'TB'
+    )
+    // The rotation was baked into the page when the binder was written. Carrying
+    // the delta forward would turn the page a second time on every save.
+    check(
+      'round trip: rotation is not applied twice',
+      back.pages.every((p: any) => p.rotate === 0),
+      back.pages.map((p: any) => p.rotate).join(',')
+    )
+    const rotatedPage = back.pages[1]
+    check(
+      'round trip: the rotated page is landscape in the reopened binder',
+      (rotatedPage.w ?? 0) > (rotatedPage.h ?? 0),
+      `${rotatedPage.w}x${rotatedPage.h}`
+    )
+
+    // Save again from the reopened state — where duplicate marks would appear.
+    const wrote2 = await runEngine({
+      cmd: 'export',
+      binder: toExportSpec(back, RT2, { embedSession: true })
+    })
+    check('round trip: saving the reopened binder works', wrote2.ok === true, wrote2.error ?? '')
+    const countMarks = await runPython([
+      '-c',
+      `import pikepdf,sys
+from pikepdf import Name
+n=0
+with pikepdf.open(sys.argv[1]) as pdf:
+    for pg in pdf.pages:
+        for a in pg.obj.get(Name('/Annots')) or []:
+            if Name('/WPT_Data') in a: n+=1
+print(n)`,
+      RT2
+    ])
+    check(
+      'round trip: marks did not double on the second save',
+      countMarks.out.trim() === '3',
+      `${countMarks.out.trim()} marks (expected 3: 2 marks + 1 tape)`
     )
   }
 

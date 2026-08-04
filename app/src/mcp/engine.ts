@@ -48,6 +48,7 @@ export interface EngineResult {
   probe?: unknown
   text?: unknown
   cells?: unknown
+  binder?: unknown
   result?: unknown
 }
 

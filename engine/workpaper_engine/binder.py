@@ -18,6 +18,8 @@ Binder spec (JSON-friendly dict):
   "links":    [{"page": "pg1", "rect_n": [x0,y0,x1,y1], "target_page": "pg3"}],
   "bookmarks":[{"title": "...", "page": "pg1", "children": [...]}],
   "flatten":  false,   # true = paint marks into page content, not annotations
+  "session":  {...},   # the editable session, embedded in the binder (issue #3).
+                       #   Ignored when flatten is true — see step 6.
   "output":   "/abs/path/out.pdf"
 }
 """
@@ -32,7 +34,7 @@ from uuid import uuid4
 import pikepdf
 from pikepdf import Array, Name, OutlineItem
 
-from . import appearance, documents, images, sheets, shapes, status
+from . import appearance, documents, images, session_store, sheets, shapes, status
 from .geometry import PageGeom, page_geom
 from .probe import fingerprint_file, sanitize_text
 
@@ -158,7 +160,23 @@ def export_binder(spec: dict) -> dict:
                     current = int(page_obj.get(Name.Rotate, 0))
                     page_obj.Rotate = (current + delta) % 360
 
-            # 2. Normalize pre-existing annotations on imported pages: repoint /P
+            # 2a. A source may be a previously saved binder, carrying our own
+            #     marks as annotations. They are re-drawn from the session in
+            #     step 3, so the old generation comes off first — otherwise
+            #     every save would stack another copy on top of the last.
+            #     Annotations the client's original PDF arrived with have no
+            #     /WPT_Data and are deliberately untouched.
+            session_store.strip_wpt_annotations(out)
+
+            #     A source binder also carries an embedded session, and the
+            #     page-level copy of it rides along on the page dictionary. It
+            #     must come off here or a flattened distribution copy would
+            #     arrive at the client carrying the firm's editable working
+            #     session inside it. Step 6 re-embeds a fresh one when the save
+            #     is a working save.
+            session_store.strip_embedded_session(out)
+
+            # 2b. Normalize pre-existing annotations on imported pages: repoint /P
             #    at the new page so no annotation references its old document.
             for page in out.pages:
                 if Name.Annots in page.obj:
@@ -238,6 +256,17 @@ def export_binder(spec: dict) -> dict:
             # OutlineItem has no object until it is written.
             status.style_outline(out, spec.get("bookmarks", []))
 
+            # 6. The editable session, stored inside the binder (issue #3).
+            #    Flattening and embedding are mutually exclusive by design:
+            #    flattened marks are painted into the page content and can never
+            #    be lifted back out, so a flattened binder is the copy that
+            #    leaves the firm, not a file anyone can reopen and edit. Writing
+            #    a session into one would promise an edit that cannot happen.
+            session = spec.get("session")
+            session_bytes = 0
+            if session is not None and not flatten:
+                session_bytes = session_store.embed_session(out, session)
+
             out.save(temp_output)
 
         # 6. Validate the temporary artifact before it can replace a prior good
@@ -276,6 +305,7 @@ def export_binder(spec: dict) -> dict:
         "pages": n_pages,
         "marks": n_marks,
         "flattened": flatten,
+        "session_bytes": session_bytes,
         "final_index": final_index,
         "check_problems": [],
     }

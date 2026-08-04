@@ -10,11 +10,67 @@
 import { randomUUID } from 'node:crypto'
 import { open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 
 export function recoveryPathFor(target: string): string {
   return /\.wptsession\.json$/i.test(target)
     ? target.replace(/\.wptsession\.json$/i, '.recovery.wptsession.json')
     : `${target}.recovery.json`
+}
+
+/**
+ * The de-marked copy of a binder that the app renders from while it is open.
+ *
+ * A saved binder carries our marks as real PDF annotations so that any viewer
+ * shows them. The app draws its own interactive layer on top, so it needs the
+ * pages *without* them or every tick would appear twice.
+ *
+ * It is a sibling of the binder, not a file in the OS temp directory. A working
+ * copy of a binder is client data, and an engagement folder is somewhere a firm
+ * has already decided is appropriate for that; the temp directory is not, and
+ * "a decrypted copy of client workpapers is written to C:\Users\...\Temp" is not
+ * a sentence anyone wants in a WISP. Same reasoning as the recovery sibling
+ * above, and one fewer location to explain.
+ */
+/**
+ * Hide a sibling from the user's file browser.
+ *
+ * The dot prefix does that on macOS and Linux and does NOTHING on Windows, so
+ * a preparer there would open an engagement folder and find
+ * ".CJB-Q2 2026.wpt-working.pdf" and ".CJB-Q2 2026.wpt-recovery.json" sitting
+ * next to their binder — a stray JSON they cannot interpret and a second PDF
+ * they might open and mark up by mistake. That is the exact confusion the
+ * single-file model exists to remove.
+ *
+ * Node exposes no API for the attribute, so this shells out. Failure is
+ * deliberately ignored: a visible scratch file is untidy, a save that fails
+ * because `attrib` was unavailable is not acceptable.
+ */
+export async function hideFromUser(target: string): Promise<void> {
+  if (process.platform !== 'win32') return
+  await new Promise<void>((resolve) => {
+    const child = spawn('attrib', ['+h', target], { windowsHide: true, stdio: 'ignore' })
+    child.once('error', () => resolve())
+    child.once('close', () => resolve())
+  })
+}
+
+export function workingCopyPathFor(binder: string): string {
+  const dir = path.dirname(path.resolve(binder))
+  return path.join(dir, `.${path.basename(binder, path.extname(binder))}.wpt-working.pdf`)
+}
+
+/**
+ * Autosave sibling for an open binder.
+ *
+ * Saving re-writes the whole binder PDF, which is far too expensive to do after
+ * every keystroke. So edits are autosaved to this small JSON file and the binder
+ * is written when the user saves. It is the invisible scratch file issue #3
+ * described — never something the user opens or names.
+ */
+export function binderRecoveryPathFor(binder: string): string {
+  const dir = path.dirname(path.resolve(binder))
+  return path.join(dir, `.${path.basename(binder, path.extname(binder))}.wpt-recovery.json`)
 }
 
 async function syncDirectory(dir: string): Promise<void> {

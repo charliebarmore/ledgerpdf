@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   BrowserWindow,
@@ -10,7 +10,13 @@ import {
   type IpcMainEvent,
   type IpcMainInvokeEvent
 } from 'electron'
-import { atomicWriteJson, readSessionWithRecovery } from './persistence'
+import {
+  atomicWriteJson,
+  binderRecoveryPathFor,
+  hideFromUser,
+  readSessionWithRecovery,
+  workingCopyPathFor
+} from './persistence'
 import { restrictedProcessEnv, runJsonCommand } from '../shared/json-process'
 import { toSaved, type Session } from '../renderer/src/session'
 
@@ -82,6 +88,25 @@ const allowedInputs = new Set<string>()
 const allowedOutputs = new Set<string>()
 /** Session paths chosen in a save/open dialog. Existing saves must stay here. */
 const allowedSessions = new Set<string>()
+/** binder path -> its de-marked working copy, for cleanup on close. */
+const openWorkingCopies = new Map<string, string>()
+
+/**
+ * Drop the sibling files a binder needs only while it is open.
+ *
+ * The working copy is derived data and must not outlive the session that made
+ * it — a stray de-marked copy of client workpapers left in an engagement folder
+ * is exactly the kind of thing a firm should never find. The autosave sibling
+ * goes too, because a clean save means there is nothing left to recover.
+ */
+async function releaseBinder(binder: string): Promise<void> {
+  const working = openWorkingCopies.get(binder)
+  openWorkingCopies.delete(binder)
+  await Promise.all([
+    working ? rm(working, { force: true }).catch(() => {}) : Promise.resolve(),
+    rm(binderRecoveryPathFor(binder), { force: true }).catch(() => {})
+  ])
+}
 let rendererDirty = false
 const trustedWebContents = new Set<number>()
 
@@ -313,53 +338,128 @@ function registerIpc(): void {
     return runEngine({ cmd: 'export', binder: { ...s, output } })
   })
 
-  ipcMain.handle('session:save', async (_e, session: unknown, existing: unknown, suggested: unknown) => {
+  /**
+   * Autosave for an open binder.
+   *
+   * Writes the small JSON sibling, never the binder itself — re-writing a
+   * several-hundred-page PDF after every edit is not something to do on a timer.
+   * The binder is written when the user saves.
+   */
+  ipcMain.handle('binder:autosave', async (_e, binder: unknown, session: unknown) => {
     assertTrustedIpc(_e)
-    let target = typeof existing === 'string' ? assertAllowed(allowedSessions, existing, 'session path') : null
-    if (!target) {
-      const res = await dialog.showSaveDialog({
-        title: 'Save binder session',
-        // Name it after the binder, like the PDF export does — a folder of
-        // files all called binder.wptsession.json helps nobody.
-        defaultPath:
-          typeof suggested === 'string' && suggested.trim()
-            ? suggested
-            : 'binder.wptsession.json',
-        filters: [{ name: 'Workpaper session', extensions: ['json'] }]
-      })
-      if (res.canceled || !res.filePath) return null
-      target = path.resolve(res.filePath)
-      allowedSessions.add(target)
-    }
-    await atomicWriteJson(target, toSaved(session as Session))
-    return target
+    const target = assertAllowed(allowedOutputs, binder, 'binder path')
+    const recovery = binderRecoveryPathFor(target)
+    await atomicWriteJson(recovery, { binder: target, savedAt: new Date().toISOString(), session }, {
+      keepRecovery: false
+    })
+    // A dot prefix hides this on macOS and does nothing on Windows.
+    await hideFromUser(recovery)
+    return recovery
   })
 
-  ipcMain.handle('session:open', async (event) => {
+  /** Discard the working copy and autosave sibling once a binder is closed. */
+  ipcMain.handle('binder:release', async (_e, binder: unknown) => {
+    assertTrustedIpc(_e)
+    if (typeof binder !== 'string') return
+    await releaseBinder(path.resolve(binder))
+  })
+
+  /**
+   * Open a saved binder — or an older `.wptsession.json`, once, so nothing
+   * made before the single-file model is stranded.
+   *
+   * For a binder this does three things the renderer cannot: recovers the
+   * embedded session, writes the de-marked working copy the app renders from,
+   * and reports whether the pages moved since the session was written.
+   */
+  ipcMain.handle('binder:open', async (event) => {
     assertTrustedIpc(event)
     const res = await dialog.showOpenDialog({
-      title: 'Open binder session',
+      title: 'Open binder',
       properties: ['openFile'],
-      filters: [{ name: 'Workpaper session', extensions: ['json'] }]
+      filters: [
+        { name: 'Workpaper binder', extensions: ['pdf'] },
+        { name: 'Older session file', extensions: ['json'] }
+      ]
     })
     if (res.canceled || !res.filePaths[0]) return null
     const target = path.resolve(res.filePaths[0])
-    allowedSessions.add(target)
-    const read = await readSessionWithRecovery(target)
-    // Selecting a session authorizes only the PDF/image paths it explicitly
-    // references. The renderer never gets a generic string-to-file capability.
-    for (const raw of [read.session, read.recoverySession]) {
-      if (typeof raw !== 'object' || raw === null) continue
-      const sources = (raw as { sources?: unknown }).sources
-      if (!Array.isArray(sources)) continue
-      for (const source of sources) {
-        const candidate = (source as { path?: unknown })?.path
-        if (typeof candidate === 'string' && isSourcePath(candidate)) {
-          allowedInputs.add(path.resolve(candidate))
+
+    // ---- the older two-file format: read it so the user can convert it once
+    if (path.extname(target).toLowerCase() === '.json') {
+      allowedSessions.add(target)
+      const read = await readSessionWithRecovery(target)
+      // Opening a session authorizes only the PDF/image paths it explicitly
+      // references. The renderer never gets a generic string-to-file capability.
+      for (const raw of [read.session, read.recoverySession]) {
+        if (typeof raw !== 'object' || raw === null) continue
+        const sources = (raw as { sources?: unknown }).sources
+        if (!Array.isArray(sources)) continue
+        for (const source of sources) {
+          const candidate = (source as { path?: unknown })?.path
+          if (typeof candidate === 'string' && isSourcePath(candidate)) {
+            allowedInputs.add(path.resolve(candidate))
+          }
         }
       }
+      return { kind: 'legacy' as const, path: target, ...read }
     }
-    return { path: target, ...read }
+
+    // ---- a binder
+    allowedInputs.add(target)
+    // Saving writes back over this same file, so it is an authorized output too.
+    allowedOutputs.add(target)
+
+    const opened = await runEngine({ cmd: 'open_binder', path: target })
+    if (!opened.ok) {
+      return { kind: 'error' as const, path: target, error: (opened as EngineErr).error }
+    }
+    const info = (opened as EngineOk).binder as {
+      found: boolean
+      reason?: string
+      payload_intact?: boolean
+      geometry_matches?: boolean
+      session?: unknown
+    }
+
+    // A PDF with no session is an ordinary file someone wants to work on, which
+    // is the normal way a binder starts. Hand it back for import, not an error.
+    if (!info.found) {
+      return { kind: 'plain' as const, path: target, reason: info.reason }
+    }
+
+    const working = workingCopyPathFor(target)
+    const cleaned = await runEngine({ cmd: 'clean_copy', path: target, output: working })
+    if (!cleaned.ok) {
+      return { kind: 'error' as const, path: target, error: (cleaned as EngineErr).error }
+    }
+    await hideFromUser(working)
+    allowedInputs.add(working)
+    openWorkingCopies.set(target, working)
+
+    // An autosave sibling newer than the binder means the app closed without a
+    // save. Hand both to the renderer and let the user choose; never silently
+    // prefer one over the other.
+    let pendingAutosave: unknown
+    try {
+      const recoveryPath = binderRecoveryPathFor(target)
+      const [recoveryStat, binderStat] = await Promise.all([stat(recoveryPath), stat(target)])
+      if (recoveryStat.mtimeMs > binderStat.mtimeMs) {
+        pendingAutosave = JSON.parse(await readFile(recoveryPath, 'utf8'))
+      }
+    } catch {
+      // No autosave sibling is the normal case.
+    }
+
+    return {
+      kind: 'binder' as const,
+      path: target,
+      workingPath: working,
+      session: info.session,
+      payloadIntact: info.payload_intact === true,
+      geometryMatches: info.geometry_matches === true,
+      ...(pendingAutosave !== undefined ? { pendingAutosave } : {})
+    }
   })
 
   ipcMain.handle('dialog:relinkSource', async (_e, sourceName: unknown) => {
@@ -607,4 +707,13 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+/**
+ * Never leave a de-marked copy of client workpapers behind. Best effort and
+ * synchronous-ish: a crash can still strand one, which is why opening a binder
+ * overwrites any working copy already sitting beside it.
+ */
+app.on('before-quit', async () => {
+  await Promise.all([...openWorkingCopies.keys()].map((binder) => releaseBinder(binder)))
 })

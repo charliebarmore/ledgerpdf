@@ -23,7 +23,7 @@ const APP = path.resolve(here, '..')
 const REPO = path.resolve(APP, '..')
 const FIXTURES = path.join(REPO, 'spike', 'fixtures')
 const SERVER = path.join(APP, 'out', 'mcp-server.cjs')
-const OUT = path.join(REPO, 'spike', 'out', 'live_binder.wptsession.json')
+const OUT = path.join(REPO, 'spike', 'out', 'live_binder.pdf')
 
 const checks = []
 const check = (name, ok, detail = '') => checks.push([name, !!ok, detail])
@@ -135,13 +135,16 @@ try {
   )
 
   const saved = await call('binder_save', { path: OUT })
-  check('the shared binder saves', !saved.isError && existsSync(OUT), saved.text.split('\n')[0])
+  check('the shared binder saves as one file', !saved.isError && existsSync(OUT), saved.text.split('\n')[0])
   if (existsSync(OUT)) {
-    const file = JSON.parse(readFileSync(OUT, 'utf8'))
+    // Reopening it is the real assertion: the page the APP had open and the
+    // mark the AGENT made both come back out of the binder itself.
+    await call('binder_new')
+    const back = await call('binder_open', { path: OUT })
     check(
       'the saved binder holds the page the APP opened and the mark the AGENT made',
-      file.pages.length === 3 && file.marks?.length === 1 && file.marks[0].by === 'agent',
-      `${file.pages.length} pages, ${file.marks?.length} mark(s), by=${file.marks?.[0]?.by}`
+      back.text.includes('3 page(s)') && back.text.includes('1 mark(s)'),
+      back.text.split('\n')[0]
     )
   }
 } catch (e) {

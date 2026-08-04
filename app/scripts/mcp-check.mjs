@@ -23,7 +23,7 @@ const PY = path.join(ENGINE, '.venv', process.platform === 'win32' ? 'Scripts/py
 const FIXTURES = path.join(REPO, 'spike', 'fixtures')
 const SERVER = path.join(APP, 'out', 'mcp-server.cjs')
 const OUT_PDF = path.join(REPO, 'spike', 'out', 'mcp_binder.pdf')
-const OUT_SESSION = path.join(REPO, 'spike', 'out', 'mcp_binder.wptsession.json')
+const OUT_BINDER = path.join(REPO, 'spike', 'out', 'mcp_binder_saved.pdf')
 
 const checks = []
 const check = (name, ok, detail = '') => checks.push([name, !!ok, detail])
@@ -59,7 +59,7 @@ if (!existsSync(SERVER)) {
   process.exit(1)
 }
 rmSync(OUT_PDF, { force: true })
-rmSync(OUT_SESSION, { force: true })
+rmSync(OUT_BINDER, { force: true })
 
 const transport = new StdioClientTransport({
   command: process.execPath,
@@ -237,22 +237,44 @@ if (probe.ok) {
   check('the agent-added bookmark exported', titles.includes('Adjusting entries'), titles.slice(0, 200))
 }
 
-const saved = await call('binder_save', { path: OUT_SESSION })
-check('binder_save writes the session for handoff to the app', existsSync(OUT_SESSION), saved.text)
+// One Save, one file. An agent and a person now produce the same artifact: a
+// binder PDF with the editable session inside it, not a .wptsession.json a
+// preparer would have no idea what to do with.
+const saved = await call('binder_save', { path: OUT_BINDER })
+check('binder_save writes a binder PDF, not a session file', existsSync(OUT_BINDER), saved.text)
 check(
-  'binder_save tells the agent the app is where a human reviews it',
-  /open it in workpaper binder/i.test(saved.text),
+  'the saved binder says it can be reopened by double-clicking',
+  /double-click to reopen/i.test(saved.text),
   saved.text.split('\n').pop()
+)
+check(
+  'saving a binder to anything but a .pdf is refused',
+  (await call('binder_save', { path: path.join(REPO, 'spike', 'out', 'nope.wptsession.json') })).isError
 )
 
 await call('binder_new')
-const reopened = await call('binder_open', { path: OUT_SESSION })
+const reopened = await call('binder_open', { path: OUT_BINDER })
 check(
-  'a saved session reopens with its pages, marks and tapes intact',
+  'a saved binder reopens with its pages, marks and tapes intact',
   reopened.text.includes('6 page(s)') &&
     reopened.text.includes('2 mark(s)') &&
     reopened.text.includes('1 tape(s)'),
   reopened.text.split('\n')[0]
+)
+// The point of the single-file model: the binder carries its own pages, so the
+// sources it was built from are provenance rather than a dependency.
+check(
+  'the reopened binder points at itself, not at the original sources',
+  // Two sources went in; one comes back — the binder's own pages. That is what
+  // makes a saved binder portable: the originals are provenance, not a
+  // dependency, so it still opens after they move.
+  reopened.text.includes('1 source(s)') && reopened.text.includes('6 page(s)'),
+  reopened.text.split('\n')[0]
+)
+check(
+  'an ordinary PDF with no session is refused as a binder, with what to do instead',
+  (await call('binder_open', { path: a })).text.includes('binder_add_pdfs'),
+  (await call('binder_open', { path: a })).text.slice(0, 120)
 )
 
 // An agent should be able to drop a receipt photo into a binder too.

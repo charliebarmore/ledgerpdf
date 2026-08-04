@@ -31,7 +31,7 @@ import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import { runEngine } from './engine'
-import { atomicWriteJson, readSessionWithRecovery } from '../main/persistence'
+import { workingCopyPathFor } from '../main/persistence'
 import {
   addBookmark,
   addMark,
@@ -53,6 +53,7 @@ import {
   removeTapes,
   revertRun,
   rotatePages,
+  rebindToBinder,
   rotateVisual,
   setBookmarkTitle,
   setPageStatus,
@@ -347,37 +348,60 @@ registerTool(
 registerTool(
   'binder_open',
   {
-    title: 'Open a saved session',
+    title: 'Open a saved binder',
     description:
-      'Load a .wptsession.json written by this server or the desktop app. Source PDFs must still be where the session recorded them.',
-    inputSchema: { path: z.string().describe('Path to a .wptsession.json') }
+      'Open a binder PDF written by this server or the desktop app and keep working on it. The editable session travels inside the file, so the original source documents are provenance rather than a dependency — a binder can be moved or archived and still open. A PDF with no session is an ordinary document: use binder_add_pdfs to bring it in instead.',
+    inputSchema: { path: z.string().describe('Path to a binder .pdf') }
   },
   async ({ path: p }) => {
     try {
-      const abs = resolveAllowedPath(p, { mustExist: true, purpose: 'opening a session' })
-      const read = await readSessionWithRecovery(abs)
-      if (read.session === undefined) return fail(`cannot open session — ${read.error}`)
-      let parsed = parseSession(read.session)
-      let recovered = !!read.recoveredFrom
-      if ('error' in parsed && read.recoverySession !== undefined) {
-        const fallback = parseSession(read.recoverySession)
-        if (!('error' in fallback)) {
-          parsed = fallback
-          recovered = true
-        }
+      const target = resolveAllowedPath(p, { mustExist: true, purpose: 'opening a binder' })
+      const opened = await runEngine({ cmd: 'open_binder', path: target })
+      if (!opened.ok) return fail(`cannot open binder — ${opened.error}`)
+      const info = opened.binder as {
+        found: boolean
+        reason?: string
+        payload_intact?: boolean
+        geometry_matches?: boolean
+        session?: unknown
       }
-      if ('error' in parsed) return fail(`cannot open session — ${parsed.error}`)
-      session = parsed.session
-      for (const source of session.sources) {
-        resolveAllowedPath(source.path, { mustExist: true, purpose: 'opening a session source' })
+      if (!info.found) {
+        return fail(
+          `${baseName(target)} has no editable session — it is an ordinary PDF. ` +
+            `Use binder_add_pdfs to bring it into a binder. (${info.reason ?? ''})`
+        )
       }
-      sessionPath = recovered ? null : abs
-      const missing = session.sources.filter((s) => !existsSync(s.path))
+
+      const parsed = parseSession(info.session)
+      if ('error' in parsed) return fail(`cannot open binder — ${parsed.error}`)
+
+      // Same two steps the app takes: a de-marked working copy beside the
+      // binder, then re-point the session at the binder's own pages.
+      const working = workingCopyPathFor(target)
+      const cleaned = await runEngine({ cmd: 'clean_copy', path: target, output: working })
+      if (!cleaned.ok) return fail(`cannot open binder — ${cleaned.error}`)
+      const probed = await runEngine({ cmd: 'probe', path: working })
+      if (!probed.ok) return fail(`cannot read the binder's pages — ${probed.error}`)
+
+      const rebound = rebindToBinder(
+        parsed.session,
+        probed.probe as ProbeWire,
+        working,
+        baseName(target)
+      )
+      if (rebound.error) return fail(`cannot open binder — ${rebound.error}`)
+
+      session = rebound.session
+      sessionPath = target
+      const moved = info.geometry_matches === false
       return text(
-        `Opened ${baseName(abs)} — ${summary(session)}` +
-          (recovered ? '\nWARNING: recovered the previous complete generation; save to a new path.' : '') +
-          (missing.length
-            ? `\nWARNING: ${missing.length} source file(s) missing: ${missing.map((s) => s.path).join(', ')}`
+        `Opened ${baseName(target)} — ${summary(session)}` +
+          (moved
+            ? `\n\nWARNING: another program changed the pages since this was saved, so marks may ` +
+              `no longer line up. Check before relying on them.`
+            : '') +
+          (info.payload_intact === false
+            ? `\n\nWARNING: the embedded session did not match its own checksum.`
             : '')
       )
     } catch (e) {
@@ -389,25 +413,40 @@ registerTool(
 registerTool(
   'binder_save',
   {
-    title: 'Save the session',
+    title: 'Save the binder',
     description:
-      'Write the working binder to a .wptsession.json. THIS IS THE HANDOFF: open that file in the desktop app to review and finish the binder. Source PDFs are never modified.',
+      'Write the binder to a PDF with the editable session inside it. THIS IS THE HANDOFF, and it is the same artifact a person gets from Save in the app — one file they can double-click to reopen and keep working on. Source files are never modified. For a copy to send out of the firm, use binder_export with flatten, which deliberately writes no session.',
     inputSchema: {
       path: z
         .string()
         .optional()
-        .describe('Where to write it. Optional once the session has been saved before.')
+        .describe('Where to write the binder (.pdf). Optional once it has been saved before.')
     }
   },
   async ({ path: p }) => {
     const target = p
-      ? resolveAllowedPath(p, { mustExist: false, purpose: 'saving a session' })
+      ? resolveAllowedPath(p, { mustExist: false, purpose: 'saving a binder' })
       : sessionPath
-    if (!target) return fail('no path given and this session has never been saved')
+    if (!target) return fail('no path given and this binder has never been saved')
+    if (!/\.pdf$/i.test(target)) {
+      return fail(`a binder is a .pdf — got ${baseName(target)}`)
+    }
+    if (!session.pages.length) return fail('nothing to save — this binder is empty')
     try {
-      await atomicWriteJson(target, toSaved(session))
+      // The same call the app's Save makes. One definition, so an agent and a
+      // person cannot produce different artifacts from the same binder.
+      const spec = toExportSpec(session, target, { pageCounts: true, embedSession: true })
+      const res = await runEngine({ cmd: 'export', binder: spec })
+      if (!res.ok) return fail(`save failed: ${res.error}`)
+      const r = res.result as { pages: number; check_problems: string[] }
       sessionPath = target
-      return text(`Saved ${summary(session)}\n→ ${target}\nOpen it in Workpaper Binder to review.`)
+      return text(
+        `Saved ${summary(session)}\n→ ${target}\n` +
+          `${r.pages} page(s), editable session inside. Double-click to reopen it in Workpaper Binder.` +
+          (r.check_problems.length
+            ? `\nqpdf validation: ${r.check_problems.length} problem(s): ${r.check_problems.join('; ')}`
+            : '')
+      )
     } catch (e) {
       return fail(String((e as Error).message))
     }
