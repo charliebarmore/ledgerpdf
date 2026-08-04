@@ -1559,7 +1559,10 @@ export function nudgeBookmarkDepth(session: Session, key: string, delta: number)
 
 /** File-level bookmarks read as document names, not filenames. */
 function stripSourceExt(name: string): string {
-  return name.replace(/\.(pdf|png|jpe?g|jpe|gif|bmp|tiff?|webp)$/i, '')
+  // Keep in step with main/index.ts SOURCE_EXTS. A workbook that kept its
+  // ".xlsx" read as the odd one out in a bookmark list where every PDF and
+  // image had already lost its extension.
+  return name.replace(/\.(pdf|xlsx|xlsm|csv|png|jpe?g|jpe|gif|bmp|tiff?|webp)$/i, '')
 }
 
 /**

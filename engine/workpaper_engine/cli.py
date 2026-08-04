@@ -21,6 +21,7 @@ import traceback
 from . import __version__
 from .binder import export_binder
 from .probe import probe_pdf
+from .sources import materialize_source
 from .text import extract_text
 
 
@@ -32,6 +33,11 @@ def handle(command: dict) -> dict:
         return {"ok": True, "probe": probe_pdf(command["path"])}
     if cmd == "text":
         return {"ok": True, "text": extract_text(command)}
+    if cmd == "materialize":
+        # The pages a non-PDF source BECOMES, as PDF bytes. The renderer shows a
+        # spreadsheet by displaying exactly the pages that will be exported,
+        # rather than a separate preview that could drift from the binder.
+        return {"ok": True, "pdf_base64": materialize_source(command["path"])}
     if cmd == "export":
         return {"ok": True, "result": export_binder(command["binder"])}
     return {"ok": False, "error": f"unknown cmd: {cmd!r}"}

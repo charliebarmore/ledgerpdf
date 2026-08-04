@@ -68,7 +68,12 @@ const b = path.join(FIXTURES, 'fixture_b.pdf')
 // A receipt photo rides along so the app's own image preview — which draws the
 // Letter page itself rather than going through PDF.js — is exercised for real.
 const img = path.join(FIXTURES, 'receipt.jpg')
-if (!existsSync(a) || !existsSync(b) || !existsSync(img)) {
+// A workbook rides along because the renderer speaks PDF: a spreadsheet's own
+// bytes are a ZIP, and PDF.js drew "Invalid PDF structure" on every page while
+// import, text and export all looked fine. Only driving the real window caught
+// it, so the real window now covers it.
+const book = path.join(FIXTURES, 'trial_balance.xlsx')
+if (!existsSync(a) || !existsSync(b) || !existsSync(img) || !existsSync(book)) {
   console.error('fixtures missing — run: engine/.venv/bin/python spike/run_spike.py')
   process.exit(1)
 }
@@ -84,7 +89,7 @@ const app = await run('npm', ['run', 'dev'], {
   shell: process.platform === 'win32',
   env: {
     ...process.env,
-    WPT_DEV_OPEN: [a, b, img].join(path.delimiter),
+    WPT_DEV_OPEN: [a, b, img, book].join(path.delimiter),
     WPT_DEV_EXPORT: OUT_PDF,
     WPT_DEV_SHOT: SHOT,
     WPT_DEV_MARKS: '1',
@@ -104,13 +109,13 @@ if (existsSync(OUT_PDF)) {
   check('exported binder parses', probed.ok === true)
   if (probed.ok) {
     check(
-      '7 pages from 2 PDFs and an image',
-      probed.probe.n_pages === 7,
+      '9 pages from 2 PDFs, an image and a 2-sheet workbook',
+      probed.probe.n_pages === 9,
       `n_pages=${probed.probe.n_pages}`
     )
     const last = probed.probe.pages[6]
     check(
-      'the image became a landscape Letter page at the end of the binder',
+      'the image became a landscape Letter page',
       JSON.stringify(last.mediabox) === JSON.stringify([0, 0, 792, 612]),
       JSON.stringify(last.mediabox)
     )
@@ -121,7 +126,8 @@ if (existsSync(OUT_PDF)) {
       '  Schedule X -> 3',
       '    Detail X-1 (2 pages) -> 4',
       '  Schedule Y (2 pages) -> 4',
-      'receipt (1 page) -> 6'
+      'receipt (1 page) -> 6',
+      'trial_balance (2 pages) -> 7'
     ]
     check('bookmarks nested + retargeted', JSON.stringify(got) === JSON.stringify(want), got.join(' | '))
   }
@@ -141,6 +147,13 @@ if (existsSync(OUT_PDF)) {
     'an agent-placed mark is attributed to the AI in the exported PDF',
     marks.filter((m) => (m.author ?? '').includes('(AI)')).length === 1,
     JSON.stringify(marks.map((m) => [m.wpt_kind, m.author]))
+  )
+  check(
+    'a spreadsheet became real pages with its cells as text',
+    probed.ok &&
+      probed.probe.pages.length === 9 &&
+      JSON.stringify(probed.probe.pages[7].mediabox) === JSON.stringify([0, 0, 792, 612]),
+    JSON.stringify(probed.probe.pages[7]?.mediabox)
   )
   check(
     'a user-defined custom stamp exports with its own letters',

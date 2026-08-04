@@ -38,7 +38,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `verify:text` | 32 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
 | `verify:mcp` | 55 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
-| `smoke` | drives the **actual Electron app** headlessly: imports two PDFs and a receipt photo → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
+| `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, renders a synthetic PDF under `file://`, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
 
 All suites use synthetic fixtures only — **never client documents**.
@@ -159,6 +159,13 @@ pages are built in memory at export, exactly as images are.
 Because the cells are really drawn into the page, the ordinary text extraction
 reads them **exactly** — no OCR anywhere in the path — so a figure off a trial
 balance is addressable and tickable like any other.
+
+The renderer draws with PDF.js, so `fs:readSource` hands it the pages a sheet
+*becomes* rather than the workbook's own bytes — a ZIP got "Invalid PDF
+structure" on every page while import, text and export all worked, and only the
+thing a person looks at was broken. The window therefore shows exactly the pages
+the export writes, which cannot drift from the binder. The GUI smoke now carries
+a workbook for this reason.
 
 ## Reading scanned pages (OCR)
 

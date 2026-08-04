@@ -258,6 +258,17 @@ function registerIpc(): void {
   ipcMain.handle('fs:readSource', async (_e, p: unknown) => {
     assertTrustedIpc(_e)
     const abs = assertAllowed(allowedInputs, p, 'file')
+    // The renderer draws with PDF.js, so a spreadsheet's own bytes (a ZIP) get
+    // it "Invalid PDF structure" — import, text and export all worked and only
+    // the thing a person looks at did not. Hand back the pages the sheet
+    // BECOMES, which are the same pages the export writes.
+    if (SHEET_EXTS.some((ext) => abs.toLowerCase().endsWith(`.${ext}`))) {
+      const res = await runEngine({ cmd: 'materialize', path: abs })
+      if (!res.ok || typeof res.pdf_base64 !== 'string') {
+        throw new Error(`could not read ${path.basename(abs)}: ${String(res.error ?? 'no pages')}`)
+      }
+      return new Uint8Array(Buffer.from(res.pdf_base64, 'base64'))
+    }
     const buf = await readFile(abs)
     return new Uint8Array(buf)
   })
