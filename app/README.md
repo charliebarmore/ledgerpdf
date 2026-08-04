@@ -35,7 +35,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
 | `verify:model` | 181 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
-| `verify:text` | 32 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
+| `verify:text` | 36 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
 | `verify:mcp` | 55 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
@@ -152,9 +152,15 @@ pages are built in memory at export, exactly as images are.
   Excel last *calculated*; a workbook written by a tool that never calculated
   has none, and a blank where a number belongs is the worst outcome in a
   workpaper. Those cells render as their formula and the import warns.
-- Columns too wide for a page split onto continuation pages rather than being
-  truncated — a binder that silently drops a column is worse than one that runs
-  on.
+- **One sheet is one page whenever it can still be read.** The largest type
+  that fits everything on a single page is found first, and the page SHAPE is
+  chosen per sheet — a tall narrow transaction register fits portrait, a short
+  wide trial balance landscape. Fixing the orientation is what turned an 86-row
+  register into a full page plus a **13-row orphan**.
+- Only when one page would need type below ~4.5pt does it paginate, because two
+  readable pages beat one nobody can read. Columns too wide even then split onto
+  continuation pages rather than being truncated: a binder that silently drops a
+  column is worse than one that runs on.
 
 Because the cells are really drawn into the page, the ordinary text extraction
 reads them **exactly** — no OCR anywhere in the path — so a figure off a trial

@@ -232,6 +232,62 @@ def make_scan_fixture(source: Path, path: Path) -> None:
         pdf.save(path)
 
 
+def make_workbook_fixtures(book: Path, register: Path) -> None:
+    """A trial balance (short and wide) and a transaction register (long and
+    narrow) — the two shapes a workpaper workbook actually comes in, and the
+    reason page orientation is chosen per sheet rather than fixed.
+    """
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Trial Balance"
+    for row in [
+        ["Account", "Description", "Debit", "Credit"],
+        ["1000", "Cash - operating", 84200.00, None],
+        ["1200", "Accounts receivable", 41850.25, None],
+        ["1500", "Equipment", 128000.00, None],
+        ["2000", "Accounts payable", None, 33110.40],
+        ["3000", "Retained earnings", None, 220939.85],
+    ]:
+        ws.append(row)
+    # Left uncalculated on purpose: openpyxl writes no cached value, which is
+    # exactly the case that would otherwise render a blank where a total belongs.
+    ws.append(["", "TOTAL", "=SUM(C2:C4)", "=SUM(D5:D6)"])
+    dep = wb.create_sheet("Depreciation")
+    dep.append(["Asset", "Cost", "Life", "Current"])
+    dep.append(["Truck", 45000, 5, 9000])
+    dep.append(["Server rack", 12500, 3, 4166.67])
+    wb.save(book)
+
+    wb2 = openpyxl.Workbook()
+    reg = wb2.active
+    reg.title = "Categorized Transactions"
+    reg.append(["Date", "Description", "Source", "Acct #", "Account Name", "Debit", "Credit"])
+    vendors = [
+        "COMPUTER STORE", "ONLINE RETAILER - RETURN", "DOMAIN REGISTRAR", "PAYROLL SERVICE FEE",
+        "CARD PAYMENT", "DESIGN SUBSCRIPTION", "SOCIAL PLATFORM - PAID", "DOCS PLATFORM, INC.",
+    ]
+    accounts = [
+        (7260, "Small Equipment - De Minimis"), (7250, "Office Expenses"),
+        (7300, "Software Subscriptions"), (7100, "Dues"), (7080, "Payroll Service Fees"),
+    ]
+    # 86 rows: enough that a fixed landscape page split it into a full page plus
+    # a 13-row orphan, which is the bug that made fitting adaptive.
+    for i in range(86):
+        acct = accounts[i % len(accounts)]
+        reg.append([
+            f"2026-0{3 + i % 4}-{10 + i % 18:02d}",
+            vendors[i % len(vendors)],
+            "CARD" if i % 2 else "Operating #1010",
+            acct[0],
+            acct[1],
+            round(25 + (i * 37.5) % 1500, 2),
+            None,
+        ])
+    wb2.save(register)
+
+
 def main() -> dict[str, str]:
     FIXTURES.mkdir(parents=True, exist_ok=True)
     a = FIXTURES / "fixture_a.pdf"
@@ -244,6 +300,9 @@ def main() -> dict[str, str]:
     make_image_fixtures(img, img_rot, shot)
     scan = FIXTURES / "scan_a.pdf"
     make_scan_fixture(a, scan)
+    book = FIXTURES / "trial_balance.xlsx"
+    register = FIXTURES / "long_register.xlsx"
+    make_workbook_fixtures(book, register)
     return {
         "A": str(a),
         "B": str(b),
@@ -251,6 +310,8 @@ def main() -> dict[str, str]:
         "IMG_ROT": str(img_rot),
         "PNG": str(shot),
         "SCAN": str(scan),
+        "BOOK": str(book),
+        "REGISTER": str(register),
     }
 
 

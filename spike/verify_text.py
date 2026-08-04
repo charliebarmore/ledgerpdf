@@ -247,6 +247,40 @@ else:
         figure is not None and 0 < figure["nx"] < 1 and 0 < figure["ny"] < 1,
         f"nx={figure['nx']} ny={figure['ny']}" if figure else "missing",
     )
+    # An 86-row register used to become a full page plus a 13-row orphan. One
+    # sheet should be one page whenever it can be read at that size, and the
+    # page SHAPE is chosen per sheet: a tall narrow register fits portrait, a
+    # short wide trial balance fits landscape.
+    from workpaper_engine.sheets import probe_sheet  # noqa: E402
+
+    register = FIXTURES / "long_register.xlsx"
+    if register.exists():
+        reg = probe_sheet(str(register))
+        check(
+            "a long register fits on ONE page instead of leaving an orphan",
+            reg["n_pages"] == 1,
+            f"{reg['n_pages']} page(s)",
+        )
+        box = reg["pages"][0]["mediabox"] if reg["pages"] else []
+        check(
+            "page orientation is chosen to fit, not fixed",
+            box[2] < box[3],
+            f"{box[2]}x{box[3]} (portrait expected for a tall register)",
+        )
+        reg_text = extract_text({"path": str(register), "pages": [0]})["pages"][0]
+        check(
+            "every row survives fitting onto that one page",
+            reg_text["text"].count(chr(10)) >= 86,
+            f"{reg_text['text'].count(chr(10))} lines",
+        )
+    tb = probe_sheet(str(book))
+    tb_box = tb["pages"][0]["mediabox"]
+    check(
+        "a short wide trial balance stays landscape",
+        tb_box[2] > tb_box[3],
+        f"{tb_box[2]}x{tb_box[3]}",
+    )
+
     # Both sheets in the workbook become pages, so nothing is silently dropped.
     both = extract_text({"path": str(book)})
     check(

@@ -39,11 +39,17 @@ from pikepdf import Array, Dictionary, Name
 
 SHEET_SUFFIXES = frozenset({".xlsx", ".xlsm", ".csv"})
 
-# Landscape Letter: workpaper tables are wider than they are tall.
-PAGE = (792.0, 612.0)
+# Both Letter orientations are tried per sheet: a transaction register is tall
+# and narrow, a trial balance short and wide, and forcing one shape on both is
+# what turned an 87-row sheet into a full page plus a 13-row orphan.
+LANDSCAPE = (792.0, 612.0)
+PORTRAIT = (612.0, 792.0)
 MARGIN = 24.0
 FONT_MAX = 9.0
 FONT_MIN = 5.5
+# How small we will go to keep a sheet on ONE page. Below this it stops being
+# something a preparer can read, and two honest pages beat one unreadable one.
+ONE_PAGE_MIN = 4.5
 LINE_GAP = 1.35
 CHAR_W = 0.6  # Courier advance, in em — exact, not an approximation
 GRID_GREY = 0.75
@@ -138,30 +144,63 @@ def _trim(rows: list[list[str]]) -> list[list[str]]:
     return [r[:width] + [""] * (width - len(r)) for r in rows]
 
 
-def _plan(rows: list[list[str]]) -> tuple[float, list[float], int, list[list[int]]]:
-    """Choose a font size, column widths, rows per page, and column bands.
+def _fits(rows, widest, page, size) -> tuple[bool, bool]:
+    """(columns fit the width, all rows fit one page) at this size."""
+    wide = sum((w + 2) * CHAR_W * size for w in widest) <= page[0] - 2 * MARGIN
+    line = size * LINE_GAP
+    tall = len(rows) * line <= page[1] - 2 * MARGIN - line
+    return wide, tall
 
-    Columns are fitted by shrinking the font to a floor; anything still too wide
-    is split into bands on continuation pages rather than truncated, because a
-    workpaper that silently drops a column is worse than one that runs on.
+
+def _plan(rows: list[list[str]]) -> tuple[tuple[float, float], float, list[float], int, list[list[int]]]:
+    """Choose page shape, font size, column widths, rows per page, column bands.
+
+    ONE PAGE PER SHEET IS THE GOAL. A workbook that spills 13 rows onto a second
+    page has not been paginated, it has been broken: the preparer gets a full
+    page and an orphan. So the largest size that fits everything on a single
+    page is found first, in BOTH Letter orientations — a transaction register is
+    tall and narrow, a trial balance short and wide, and forcing one shape on
+    both is what caused the orphan.
+
+    Only when that would require type smaller than ONE_PAGE_MIN does it fall
+    back to paginating, because two readable pages beat one that nobody can
+    read.
     """
     if not rows:
-        return FONT_MAX, [], 1, [[]]
+        return LANDSCAPE, FONT_MAX, [], 1, [[]]
     n_cols = len(rows[0])
     # +2 chars of gutter, not +1: at 9pt one character is ~5pt and a label
     # ran straight into the figure beside it, which on a trial balance reads
     # as a single value.
     widest = [max((len(r[c]) for r in rows), default=0) for c in range(n_cols)]
-    usable = PAGE[0] - 2 * MARGIN
 
+    best: tuple[tuple[float, float], float] | None = None
+    for page in (LANDSCAPE, PORTRAIT):
+        size = FONT_MAX
+        while size >= ONE_PAGE_MIN:
+            wide, tall = _fits(rows, widest, page, size)
+            if wide and tall:
+                if best is None or size > best[1]:
+                    best = (page, size)
+                break
+            size -= 0.25
+
+    if best is not None:
+        page, size = best
+        cols = [(w + 2) * CHAR_W * size for w in widest]
+        return page, size, cols, len(rows), [list(range(n_cols))]
+
+    # Too much to fit legibly. Fall back to filling pages: pick the orientation
+    # that needs fewer column bands, then paginate rows.
+    page = LANDSCAPE
     size = FONT_MAX
     while size > FONT_MIN:
-        total = sum((w + 2) * CHAR_W * size for w in widest)
-        if total <= usable:
+        if _fits(rows, widest, page, size)[0]:
             break
         size -= 0.5
 
     cols = [(w + 2) * CHAR_W * size for w in widest]
+    usable = page[0] - 2 * MARGIN
     bands: list[list[int]] = []
     current: list[int] = []
     used = 0.0
@@ -176,8 +215,8 @@ def _plan(rows: list[list[str]]) -> tuple[float, list[float], int, list[list[int
     bands.append(current)
 
     line = size * LINE_GAP
-    per_page = max(1, int((PAGE[1] - 2 * MARGIN - line) // line))
-    return size, cols, per_page, bands
+    per_page = max(1, int((page[1] - 2 * MARGIN - line) // line))
+    return page, size, cols, per_page, bands
 
 
 def _esc(text: str) -> str:
@@ -185,11 +224,16 @@ def _esc(text: str) -> str:
 
 
 def _page_stream(
-    rows: list[list[str]], band: list[int], cols: list[float], size: float, title: str
+    rows: list[list[str]],
+    band: list[int],
+    cols: list[float],
+    size: float,
+    title: str,
+    page: tuple[float, float],
 ) -> bytes:
     parts: list[str] = []
     line = size * LINE_GAP
-    y = PAGE[1] - MARGIN - size
+    y = page[1] - MARGIN - size
 
     parts.append(f"BT /F1 {size:g} Tf {MARGIN:g} {y:g} Td ({_esc(title)}) Tj ET")
     y -= line
@@ -197,7 +241,7 @@ def _page_stream(
     # A hairline under the header keeps a long table readable without pretending
     # to reproduce the workbook's own formatting.
     parts.append(f"q {GRID_GREY:g} G 0.4 w {MARGIN:g} {y + size * 0.9:g} m "
-                 f"{PAGE[0] - MARGIN:g} {y + size * 0.9:g} l S Q")
+                 f"{page[0] - MARGIN:g} {y + size * 0.9:g} l S Q")
 
     for row in rows:
         x = MARGIN
@@ -226,7 +270,7 @@ def sheet_to_pdf(path: str | Path) -> pikepdf.Pdf:
 
     for name, raw in grids:
         rows = _trim(raw)
-        size, cols, per_page, bands = _plan(rows)
+        shape, size, cols, per_page, bands = _plan(rows)
         chunks = [rows[i : i + per_page] for i in range(0, len(rows), per_page)] or [[]]
         made = 0
         for band_i, band in enumerate(bands):
@@ -238,28 +282,35 @@ def sheet_to_pdf(path: str | Path) -> pikepdf.Pdf:
                     label += f"  (rows {chunk_i * per_page + 1}-{chunk_i * per_page + len(chunk)})"
                 if len(bands) > 1:
                     label += f"  (columns {band_i + 1} of {len(bands)})"
-                page = pdf.add_blank_page(page_size=PAGE)
-                page.obj.Contents = pdf.make_stream(_page_stream(chunk, band, cols, size, label))
-                page.obj.Resources = resources
+                sheet_page = pdf.add_blank_page(page_size=shape)
+                sheet_page.obj.Contents = pdf.make_stream(
+                    _page_stream(chunk, band, cols, size, label, shape)
+                )
+                sheet_page.obj.Resources = resources
                 made += 1
     if len(pdf.pages) == 0:
-        page = pdf.add_blank_page(page_size=PAGE)
-        page.obj.Contents = pdf.make_stream(_page_stream([], [], [], FONT_MAX, Path(path).name))
-        page.obj.Resources = resources
+        blank = pdf.add_blank_page(page_size=LANDSCAPE)
+        blank.obj.Contents = pdf.make_stream(
+            _page_stream([], [], [], FONT_MAX, Path(path).name, LANDSCAPE)
+        )
+        blank.obj.Resources = resources
     return pdf
 
 
 def probe_sheet(path: str | Path) -> dict:
     """Same shape probe_image returns, so import treats a sheet like any source."""
     grids, warnings = read_grids(path)
+    boxes: list[list[float]] = []
     with sheet_to_pdf(path) as pdf:
         n_pages = len(pdf.pages)
+        for page in pdf.pages:
+            boxes.append([float(v) for v in page.obj.MediaBox])
     return {
         "path": str(path),
         "n_pages": n_pages,
         "kind": "sheet",
         "pages": [
-            {"index": i, "rotate": 0, "mediabox": [0, 0, PAGE[0], PAGE[1]], "cropbox": None}
+            {"index": i, "rotate": 0, "mediabox": boxes[i], "cropbox": None}
             for i in range(n_pages)
         ],
         "outline": [],
