@@ -18,11 +18,14 @@ fixture_b.pdf ("SupportSchedules-B") — 3 pages, the hostile cases:
 
 from __future__ import annotations
 
+import io
+import sys
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
+REPO = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
@@ -201,6 +204,34 @@ def make_image_fixtures(landscape: Path, rotated: Path, png: Path) -> None:
     shot.save(png)
 
 
+def make_scan_fixture(source: Path, path: Path) -> None:
+    """A page with NO text layer whose contents we nevertheless know exactly.
+
+    Rasterizing a fixture we generated gives OCR a realistic scan while keeping
+    ground truth: the figures are the ones make_fixture_a drew, so an OCR check
+    can assert WHAT was read rather than merely that something was. Greyscale
+    JPEG at 200 dpi is what a desk scanner actually produces.
+    """
+    import pypdfium2 as pdfium
+
+    sys.path.insert(0, str(REPO / "engine"))
+    from workpaper_engine import images
+
+    doc = pdfium.PdfDocument(str(source))
+    try:
+        image = doc[0].render(scale=200 / 72).to_pil().convert("L")
+    finally:
+        doc.close()
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=88)
+    jpg = path.with_name("scan_page.jpg")
+    jpg.write_bytes(buf.getvalue())
+    # Through the engine's own image path, so the result is a page exactly like
+    # any photographed receipt a user would import.
+    with images.image_to_pdf(str(jpg)) as pdf:
+        pdf.save(path)
+
+
 def main() -> dict[str, str]:
     FIXTURES.mkdir(parents=True, exist_ok=True)
     a = FIXTURES / "fixture_a.pdf"
@@ -211,7 +242,16 @@ def main() -> dict[str, str]:
     img_rot = FIXTURES / "receipt_rot.jpg"
     shot = FIXTURES / "screenshot.png"
     make_image_fixtures(img, img_rot, shot)
-    return {"A": str(a), "B": str(b), "IMG": str(img), "IMG_ROT": str(img_rot), "PNG": str(shot)}
+    scan = FIXTURES / "scan_a.pdf"
+    make_scan_fixture(a, scan)
+    return {
+        "A": str(a),
+        "B": str(b),
+        "IMG": str(img),
+        "IMG_ROT": str(img_rot),
+        "PNG": str(shot),
+        "SCAN": str(scan),
+    }
 
 
 if __name__ == "__main__":

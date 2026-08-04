@@ -35,9 +35,9 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
 | `verify:model` | 181 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
-| `verify:text` | 17 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
+| `verify:text` | 23 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
-| `verify:mcp` | 49 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
+| `verify:mcp` | 55 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs and a receipt photo → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, renders a synthetic PDF under `file://`, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
 
@@ -131,6 +131,38 @@ This app holds client tax documents, so the boundaries are deliberate:
 - Packaged builds run that engine as a frozen, platform-native executable from
   the app's sealed resources; they never discover or invoke a workstation's
   ambient Python installation.
+
+## Reading scanned pages (OCR)
+
+A large share of real workpaper source material is scanned or photographed, and
+those pages carry no text layer — so the tie-out layer was blind on exactly the
+documents a preparer most wants help with.
+
+`binder_read_page` and `binder_find` take `ocr: true`. Two rules are treated as
+non-negotiable:
+
+- **OCR is a guess; a workpaper is evidence.** A misread digit that reaches a
+  tie-out is worse than no reading, because it is wrong *confidently*. So every
+  OCR word carries its confidence, hits are labelled `OCR 96.5%`, page reads
+  end with "a machine reading of a picture, not the document's own text", and
+  nothing is ever presented as the document's own text layer. Words below 40%
+  confidence are dropped rather than shown as figures.
+- **A page that HAS text is never OCR'd.** Embedded text is exact; OCR of the
+  same page is slower and worse.
+
+Coordinates come back in the same normalized display space as everything else,
+so a figure read off a scan can be ticked where it sits.
+
+**The backend is optional and NOT bundled.** It shells out to `tesseract`
+(Apache-2.0 — well clear of the MuPDF/AGPL line the licence guard protects),
+found on `PATH` or via `WPT_TESSERACT`. With no backend installed, pages report
+`source: "none"` and say why — the same honest answer as before, not a failure.
+
+> **Before a design partner build:** decide whether to bundle tesseract and its
+> language data (roughly 15–40 MB per platform, plus signing/notarization of a
+> second native binary) or to require an install. As it stands, OCR silently
+> does nothing on a machine without it, which is fine for a developer and not
+> fine for a firm. Tracked in `../ROADMAP.md`.
 
 ## Agent attribution
 

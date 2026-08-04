@@ -291,6 +291,64 @@ check(
   )
 )
 
+// ---------------------------------------------------------------------- OCR
+// A scan was the one thing the tie-out layer could not see at all.
+{
+  await call('binder_new')
+  const scan = path.join(FIXTURES, 'scan_a.pdf')
+  if (!existsSync(scan)) {
+    check('scan_a.pdf present', false, 'run spike/make_fixtures.py')
+  } else {
+    await call('binder_add_pdfs', { paths: [scan] })
+    const scanId = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])[0]
+
+    const plain = await call('binder_read_page', { pageId: scanId })
+    check(
+      'a scan says it has no text layer and how to read it',
+      plain.text.includes('no text layer') && plain.text.includes('ocr:true'),
+      plain.text
+    )
+
+    const read = await call('binder_read_page', { pageId: scanId, ocr: true })
+    if (read.text.includes('OCR is unavailable')) {
+      // Skipped, not failed: OCR is an optional backend and CI has none.
+      console.log('[SKIP] OCR agent checks - no backend on this machine')
+    } else {
+      check(
+        'OCR reads the figures off a page that has no text at all',
+        read.text.includes('84,200.00') && read.text.includes('88,750.00'),
+        read.text.split('\n').slice(0, 3).join(' | ')
+      )
+      check(
+        'the agent is told plainly that this is a machine reading',
+        read.text.includes('Read by OCR') && read.text.includes("not the document's own text"),
+        read.text.split('\n').slice(-1)[0]
+      )
+      const hits = await call('binder_find', { query: '88,750.00', ocr: true })
+      const hit = hits.text.match(/\[page (pg_\d+)\s+nx ([\d.]+)\s+ny ([\d.]+)\s+beside nx ([\d.]+)\]/)
+      check('binder_find locates a figure on a scan', !!hit, hits.text.split('\n')[1] ?? hits.text)
+      check(
+        'an OCR hit carries its confidence, so a guess is never mistaken for a reading',
+        /OCR \d/.test(hits.text),
+        hits.text.split('\n')[1] ?? ''
+      )
+      if (hit) {
+        const placed = await call('binder_place_mark', {
+          pageId: hit[1],
+          kind: 'tick',
+          nx: Number(hit[4]),
+          ny: Number(hit[3])
+        })
+        check(
+          'a figure read off a scan can be ticked where it sits',
+          !placed.isError && placed.text.includes('Placed tick'),
+          placed.text
+        )
+      }
+    }
+  }
+}
+
 // ------------------------------------------------------------ attribution
 // Everything this server does is agent work. A reviewer must be able to see
 // which changes were automated and take them back out.
@@ -433,9 +491,16 @@ await client.close()
 const lockedTransport = new StdioClientTransport({
   command: process.execPath,
   args: [SERVER],
-  env: Object.fromEntries(
-    Object.entries(process.env).filter(([key, value]) => key !== 'WPT_MCP_ROOTS' && value !== undefined)
-  )
+  env: {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key, value]) => key !== 'WPT_MCP_ROOTS' && value !== undefined
+      )
+    ),
+    // Isolated like the main client: attaching to a live app would make this
+    // check exercise that app's binder instead of a default-deny server.
+    WPT_NO_LIVE: '1'
+  }
 })
 const lockedClient = new Client({ name: 'wpt-mcp-locked-check', version: '1.0.0' })
 await lockedClient.connect(lockedTransport)

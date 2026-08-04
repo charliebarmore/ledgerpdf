@@ -770,6 +770,8 @@ interface Word {
   nx: number
   ny: number
   box: [number, number, number, number]
+  /** Present only for OCR: 0-100. A guess, and labelled as one. */
+  conf?: number
 }
 
 /**
@@ -780,24 +782,37 @@ interface Word {
  * and every coordinate is then turned by the user's rotation delta so a word's
  * position means the same thing a mark's position does.
  */
-async function pageText(page: {
-  id: string
-  source: string
-  index: number
-  rotate: number
-}): Promise<{ text: string; words: Word[]; hasText: boolean }> {
+async function pageText(
+  page: { id: string; source: string; index: number; rotate: number },
+  useOcr = false
+): Promise<{ text: string; words: Word[]; hasText: boolean; source: string; error?: string }> {
   const src = session.sources.find((s) => s.id === page.source)
   if (!src) throw new Error(`page ${page.id} has no source in this session`)
   // Images are scans by definition — no text layer, and the engine's PDF
   // reader would simply fail to open one.
   if (!src.path.toLowerCase().endsWith('.pdf')) {
-    return { text: '', words: [], hasText: false }
+    return { text: '', words: [], hasText: false, source: 'none' }
   }
-  const res = await runEngine({ cmd: 'text', path: src.path, pages: [page.index] })
+  const res = await runEngine({
+    cmd: 'text',
+    path: src.path,
+    pages: [page.index],
+    ...(useOcr ? { ocr: true } : {})
+  })
   if (!res.ok) throw new Error(String(res.error))
-  const wire = (res.text as { pages: Array<{ text: string; has_text: boolean; words?: Word[] }> })
-    .pages[0]
-  if (!wire) return { text: '', words: [], hasText: false }
+  const wire = (
+    res.text as {
+      pages: Array<{
+        text: string
+        has_text: boolean
+        source?: string
+        words?: Word[]
+        ocr_error?: string
+        ocr_confidence?: number
+      }>
+    }
+  ).pages[0]
+  if (!wire) return { text: '', words: [], hasText: false, source: 'none' }
   const turn = (w: Word): Word => {
     if (!page.rotate) return w
     const c = rotateVisual(w.nx, w.ny, page.rotate)
@@ -822,7 +837,9 @@ async function pageText(page: {
   return {
     text: wire.text ?? '',
     words: (wire.words ?? []).map(turn),
-    hasText: wire.has_text === true
+    hasText: wire.has_text === true,
+    source: wire.source ?? 'none',
+    ...(wire.ocr_error ? { error: wire.ocr_error } : {})
   }
 }
 
@@ -831,20 +848,35 @@ registerTool(
   {
     title: 'Read a page',
     description:
-      "The text of a binder page, laid out in lines. Use this to find out what a page actually says — which figures are on it, what schedule it is — before bookmarking, naming, or marking it. Returns nothing for a scanned page or a photo: those carry no text layer and would need OCR.",
-    inputSchema: { pageId: z.string() }
+      'The text of a binder page, laid out in lines. Use this to find out what a page actually says — which figures are on it, what schedule it is — before bookmarking, naming, or marking it. A scan or photo has no text layer: pass ocr:true to have it read by OCR, which returns a MACHINE READING with confidence, not the document\'s own text.',
+    inputSchema: {
+      pageId: z.string(),
+      ocr: z
+        .boolean()
+        .optional()
+        .describe('Read a scanned page with OCR. Slower, and the result is a guess — check confidence before relying on a figure.')
+    }
   },
-  async ({ pageId }) => {
+  async ({ pageId, ocr }) => {
     const page = session.pages.find((p) => p.id === pageId)
     if (!page) return fail(`unknown page id: ${pageId}`)
     try {
-      const got = await pageText(page)
+      const got = await pageText(page, ocr === true)
       if (!got.hasText) {
         return text(
-          `${pageId} has no text layer — it is a scan or a photo. Its content can only be read by eye or with OCR, which this tool does not do.`
+          `${pageId} has no text layer — it is a scan or a photo.` +
+            (got.error
+              ? ` OCR is unavailable: ${got.error}`
+              : ocr
+                ? ' OCR found nothing readable on it.'
+                : ' Call again with ocr:true to have it read by OCR.')
         )
       }
-      return text(`${pageId}:\n${got.text}`)
+      const provenance =
+        got.source === 'ocr'
+          ? '\n\n(Read by OCR — a machine reading of a picture, not the document\'s own text. Check a figure against the page before relying on it.)'
+          : ''
+      return text(`${pageId}:\n${got.text}${provenance}`)
     } catch (e) {
       return fail(String((e as Error).message))
     }
@@ -860,10 +892,14 @@ registerTool(
     inputSchema: {
       query: z.string().min(1).describe('e.g. "84,200.00" or "Taxable interest"'),
       pageId: z.string().optional().describe('Restrict to one page'),
-      limit: z.number().min(1).max(200).optional().describe('Max hits, default 50')
+      limit: z.number().min(1).max(200).optional().describe('Max hits, default 50'),
+      ocr: z
+        .boolean()
+        .optional()
+        .describe('Also search scanned pages by reading them with OCR. Much slower, and those hits are a machine reading — each carries its confidence.')
     }
   },
-  async ({ query, pageId, limit }) => {
+  async ({ query, pageId, limit, ocr }) => {
     const pages = pageId ? session.pages.filter((p) => p.id === pageId) : session.pages
     if (pageId && pages.length === 0) return fail(`unknown page id: ${pageId}`)
     const cap = limit ?? 50
@@ -873,19 +909,24 @@ registerTool(
     try {
       for (const page of pages) {
         if (hits.length >= cap) break
-        const got = await pageText(page)
+        const got = await pageText(page, ocr === true)
         if (!got.hasText) {
           skipped.push(page.id)
           continue
         }
         for (const w of got.words) {
           if (!w.t.toLowerCase().includes(needle)) continue
+          // An OCR hit is a guess. It is never presented like an exact reading:
+          // a figure read at 61% and one read at 97% are different claims, and
+          // the preparer signing the file is entitled to know which this is.
+          const read =
+            got.source === 'ocr' ? `  OCR ${w.conf !== undefined ? `${w.conf}%` : ''}` : ''
           // A tick centred on a figure covers its digits — no preparer ticks
           // through a number. Offer the position just past the word's right
           // edge as well, clamped to the page.
           const beside = Math.min(0.995, w.box[2] + (w.box[3] - w.box[1]) * 0.35)
           hits.push(
-            `${w.t}   [page ${page.id}  nx ${w.nx}  ny ${w.ny}  beside nx ${Number(beside.toFixed(5))}]`
+            `${w.t}   [page ${page.id}  nx ${w.nx}  ny ${w.ny}  beside nx ${Number(beside.toFixed(5))}]${read}`
           )
           if (hits.length >= cap) break
         }
@@ -894,7 +935,9 @@ registerTool(
       return fail(String((e as Error).message))
     }
     const note = skipped.length
-      ? `\n\n${skipped.length} page(s) have no text layer and were not searched (scans/photos): ${skipped.slice(0, 10).join(', ')}${skipped.length > 10 ? ' …' : ''}`
+      ? `\n\n${skipped.length} page(s) have no text layer and were not searched (scans/photos): ` +
+        `${skipped.slice(0, 10).join(', ')}${skipped.length > 10 ? ' …' : ''}` +
+        (ocr ? '' : '\nCall again with ocr:true to read them.')
       : ''
     return text(
       hits.length

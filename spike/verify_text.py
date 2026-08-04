@@ -106,6 +106,70 @@ for fname, page_i, crop, rotate, token, drawn in CASES:
         f"{ink} dark px in {region.shape} at ({x0},{y0})-({x1},{y1})",
     )
 
+# ------------------------------------------------------------------------ OCR
+# A scan is where the tie-out layer was previously blind. These assert WHAT was
+# read, not merely that something was — the fixture is a rasterized copy of
+# fixture_a, so the correct answers are known.
+from workpaper_engine import ocr as ocr_backend  # noqa: E402
+
+scan = FIXTURES / "scan_a.pdf"
+if not scan.exists():
+    check("scan_a.pdf present", False, "run spike/make_fixtures.py")
+elif not ocr_backend.available():
+    # Skipped, not failed: OCR is an optional backend and CI has none. Saying
+    # so out loud beats a green run that silently proved nothing.
+    print("[SKIP] OCR checks - no backend (install tesseract, or set WPT_TESSERACT)")
+else:
+    plain = extract_text({"path": str(scan), "pages": [0]})["pages"][0]
+    check(
+        "a scan reads as having no text until OCR is asked for",
+        plain["has_text"] is False and plain["source"] == "none",
+        f"source={plain['source']}",
+    )
+
+    read = extract_text({"path": str(scan), "pages": [0], "ocr": True})["pages"][0]
+    check(
+        "OCR is labelled as OCR, never as the document's own text",
+        read["source"] == "ocr",
+        f"source={read['source']}",
+    )
+    check(
+        "every figure on the scanned page is read correctly",
+        all(
+            fig in read["text"]
+            for fig in ("84,200.00", "1,150.00", "3,400.00", "88,750.00")
+        ),
+        read["text"].replace(chr(10), " | "),
+    )
+    check(
+        "confidence travels with the reading",
+        isinstance(read.get("ocr_confidence"), float)
+        and all("conf" in w for w in read["words"]),
+        f"avg {read.get('ocr_confidence')} min {read.get('ocr_min_confidence')}",
+    )
+
+    # The point of the coordinates: a figure read off a scan must be markable.
+    doc = pdfium.PdfDocument(str(scan))
+    try:
+        arr = np.asarray(doc[0].render(scale=2).to_pil().convert("L"))
+    finally:
+        doc.close()
+    hit = next((w for w in read["words"] if w["t"] == "84,200.00"), None)
+    check("the read figure is located, not just recognized", hit is not None)
+    if hit:
+        h, wpx = arr.shape
+        nx0, ny0, nx1, ny1 = hit["box"]
+        region = arr[
+            max(0, int(ny0 * h) - 2) : min(h, int(ny1 * h) + 2),
+            max(0, int(nx0 * wpx) - 2) : min(wpx, int(nx1 * wpx) + 2),
+        ]
+        ink = int((region < 128).sum()) if region.size else 0
+        check(
+            "an OCR word's box lands on the ink it read",
+            ink > 0,
+            f"{ink} dark px, conf {hit.get('conf')}",
+        )
+
 # --------------------------------------------------------------- scanned pages
 # An image-only page has no text layer. Reporting that plainly is the whole
 # point: it tells an agent OCR is missing rather than that the page is blank.

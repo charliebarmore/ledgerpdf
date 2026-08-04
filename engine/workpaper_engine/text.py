@@ -26,6 +26,7 @@ from __future__ import annotations
 import pikepdf
 import pypdfium2 as pdfium
 
+from . import ocr as ocr_backend
 from .geometry import page_geom, user_to_visual
 from .probe import sanitize_text
 
@@ -148,6 +149,8 @@ def extract_text(spec: dict) -> dict:
     path = spec["path"]
     want_words = spec.get("words", True)
     wanted = spec.get("pages")
+    # OCR is opt-in: it is slow, and it is a guess. Never implicit.
+    want_ocr = spec.get("ocr", False)
 
     out_pages: list[dict] = []
     budget = MAX_WORDS_TOTAL
@@ -180,9 +183,31 @@ def extract_text(spec: dict) -> dict:
                     "index": i,
                     "text": body[:MAX_CHARS_PER_PAGE],
                     "has_text": bool(body.strip()),
+                    # Where the reading came from. "pdf" is the document's own
+                    # text and is exact; "ocr" is a machine reading of a picture
+                    # and can be wrong. A caller must never have to guess which.
+                    "source": "pdf" if body.strip() else "none",
                 }
                 if clipped:
                     entry["text_truncated"] = True
+
+                # Only a page with NO text layer is a candidate: embedded text is
+                # exact, so OCR of the same page would be slower and worse.
+                if want_ocr and not entry["has_text"]:
+                    read, problem = ocr_backend.ocr_page(page)
+                    if problem:
+                        entry["ocr_error"] = problem
+                    elif read:
+                        words = read
+                        body = ocr_backend.ocr_lines(read)
+                        entry["text"] = body[:MAX_CHARS_PER_PAGE]
+                        entry["has_text"] = True
+                        entry["source"] = "ocr"
+                        confs = [w["conf"] for w in read if "conf" in w]
+                        if confs:
+                            entry["ocr_confidence"] = round(sum(confs) / len(confs), 1)
+                            entry["ocr_min_confidence"] = round(min(confs), 1)
+
                 if want_words:
                     entry["words"] = words
                 if truncated:
@@ -196,6 +221,7 @@ def extract_text(spec: dict) -> dict:
     scanned = [p["index"] for p in out_pages if not p["has_text"]]
     return {
         "pages": out_pages,
+        "ocr_available": ocr_backend.available(),
         # Named so a caller cannot mistake "this page is a scan" for "extraction
         # failed" — the distinction decides whether OCR is the missing piece.
         "pages_without_text": scanned,
