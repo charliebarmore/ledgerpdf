@@ -170,6 +170,53 @@ else:
             f"{ink} dark px, conf {hit.get('conf')}",
         )
 
+    # ------------------------------------------------- two engines, one answer
+    # Vision and tesseract share no code and disagree about coordinate origins
+    # (Vision measures y UP from the bottom). Independent agreement is what
+    # makes a reading a property of the page rather than of one library - the
+    # same reason the viewer conformance runs pdfium AND poppler. A y-flip in
+    # either backend fails here immediately.
+    import os
+
+    def read_with(engine: str) -> dict | None:
+        before = os.environ.get("WPT_OCR_ENGINE")
+        os.environ["WPT_OCR_ENGINE"] = engine
+        try:
+            if ocr_backend.engine_name() != engine:
+                return None
+            return extract_text({"path": str(scan), "pages": [0], "ocr": True})["pages"][0]
+        finally:
+            if before is None:
+                os.environ.pop("WPT_OCR_ENGINE", None)
+            else:
+                os.environ["WPT_OCR_ENGINE"] = before
+
+    both = {n: read_with(n) for n in ("macos-vision", "tesseract")}
+    present = {k: v for k, v in both.items() if v}
+    if len(present) < 2:
+        print(
+            f"[SKIP] cross-engine OCR agreement - only {', '.join(present) or 'no'} backend"
+        )
+    else:
+        for figure in ("84,200.00", "88,750.00"):
+            spots = {}
+            for engine, page_read in present.items():
+                w = next((x for x in page_read["words"] if x["t"] == figure), None)
+                if w:
+                    spots[engine] = (w["nx"], w["ny"])
+            check(
+                f"both OCR engines read {figure!r}",
+                len(spots) == 2,
+                ", ".join(f"{k}={v}" for k, v in spots.items()) or "missing",
+            )
+            if len(spots) == 2:
+                (ax, ay), (bx, by) = spots.values()
+                check(
+                    f"both OCR engines put {figure!r} in the same place",
+                    abs(ax - bx) < 0.02 and abs(ay - by) < 0.02,
+                    ", ".join(f"{k}=({v[0]:.4f},{v[1]:.4f})" for k, v in spots.items()),
+                )
+
 # --------------------------------------------------------------- scanned pages
 # An image-only page has no text layer. Reporting that plainly is the whole
 # point: it tells an agent OCR is missing rather than that the page is blank.

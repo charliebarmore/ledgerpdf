@@ -785,7 +785,14 @@ interface Word {
 async function pageText(
   page: { id: string; source: string; index: number; rotate: number },
   useOcr = false
-): Promise<{ text: string; words: Word[]; hasText: boolean; source: string; error?: string }> {
+): Promise<{
+  text: string
+  words: Word[]
+  hasText: boolean
+  source: string
+  engine?: string
+  error?: string
+}> {
   const src = session.sources.find((s) => s.id === page.source)
   if (!src) throw new Error(`page ${page.id} has no source in this session`)
   // Images are scans by definition — no text layer, and the engine's PDF
@@ -808,6 +815,7 @@ async function pageText(
         source?: string
         words?: Word[]
         ocr_error?: string
+        ocr_engine?: string
         ocr_confidence?: number
       }>
     }
@@ -839,6 +847,7 @@ async function pageText(
     words: (wire.words ?? []).map(turn),
     hasText: wire.has_text === true,
     source: wire.source ?? 'none',
+    ...(wire.ocr_engine ? { engine: wire.ocr_engine } : {}),
     ...(wire.ocr_error ? { error: wire.ocr_error } : {})
   }
 }
@@ -874,7 +883,7 @@ registerTool(
       }
       const provenance =
         got.source === 'ocr'
-          ? '\n\n(Read by OCR — a machine reading of a picture, not the document\'s own text. Check a figure against the page before relying on it.)'
+          ? `\n\n(Read by OCR${got.engine ? ` — ${got.engine}` : ''} — a machine reading of a picture, not the document\'s own text. Check a figure against the page before relying on it.)`
           : ''
       return text(`${pageId}:\n${got.text}${provenance}`)
     } catch (e) {

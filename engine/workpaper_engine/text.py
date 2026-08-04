@@ -194,7 +194,9 @@ def extract_text(spec: dict) -> dict:
                 # Only a page with NO text layer is a candidate: embedded text is
                 # exact, so OCR of the same page would be slower and worse.
                 if want_ocr and not entry["has_text"]:
-                    read, problem = ocr_backend.ocr_page(page)
+                    read, problem, engine = ocr_backend.ocr_page(page)
+                    if engine:
+                        entry["ocr_engine"] = engine
                     if problem:
                         entry["ocr_error"] = problem
                     elif read:
@@ -222,6 +224,7 @@ def extract_text(spec: dict) -> dict:
     return {
         "pages": out_pages,
         "ocr_available": ocr_backend.available(),
+        "ocr_engine": ocr_backend.engine_name(),
         # Named so a caller cannot mistake "this page is a scan" for "extraction
         # failed" — the distinction decides whether OCR is the missing piece.
         "pages_without_text": scanned,

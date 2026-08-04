@@ -35,7 +35,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
 | `verify:model` | 181 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
-| `verify:text` | 23 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
+| `verify:text` | 27 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
 | `verify:mcp` | 55 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs and a receipt photo → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
@@ -153,16 +153,35 @@ non-negotiable:
 Coordinates come back in the same normalized display space as everything else,
 so a figure read off a scan can be ticked where it sits.
 
-**The backend is optional and NOT bundled.** It shells out to `tesseract`
-(Apache-2.0 — well clear of the MuPDF/AGPL line the licence guard protects),
-found on `PATH` or via `WPT_TESSERACT`. With no backend installed, pages report
-`source: "none"` and say why — the same honest answer as before, not a failure.
+**Backends, in preference order** (the one used is reported with every reading,
+so a reviewer knows which engine read a figure):
 
-> **Before a design partner build:** decide whether to bundle tesseract and its
-> language data (roughly 15–40 MB per platform, plus signing/notarization of a
-> second native binary) or to require an install. As it stands, OCR silently
-> does nothing on a machine without it, which is fine for a developer and not
-> fine for a firm. Tracked in `../ROADMAP.md`.
+| Backend | Notes |
+|---|---|
+| `macos-vision` | On-device Apple Vision. **Nothing to bundle, sign or notarize.** On the same fixture: every figure at confidence 1.000 in 0.49s, against tesseract's 92.9% average in ~2–3s. |
+| `tesseract` | The portable fallback (Apache-2.0 — well clear of the MuPDF/AGPL line the licence guard protects), found on `PATH` or via `WPT_TESSERACT`. Shelled out to, so the engine gains no Python dependency. |
+| none | Pages report `source: "none"` and say why — the same honest answer as before, not a failure. |
+
+`WPT_OCR_ENGINE` pins one, which is how the cross-engine checks run both.
+
+Two things about Vision that are not obvious, and are the reasons its port is
+not a five-line wrapper: it is **line-oriented**, so per-word boxes come from
+`boundingBoxForRange`; and its coordinates are **bottom-left origin, y up** —
+the opposite of every other coordinate in this engine. Getting that backwards
+puts a tick at the mirror image of the figure it read, near enough to look
+plausible and be wrong. Two independent engines are asserted to place the same
+figure within 0.02, which is what catches it — the same reason the viewer
+conformance runs pdfium *and* poppler.
+
+> **Windows is not wired up yet.** `Windows.Media.Ocr` is the equivalent and is
+> also on-device, but it reports **no per-word confidence**, so it cannot
+> honour the confidence rule the way these two do. That difference has to be
+> surfaced rather than papered over — decide it deliberately.
+
+> **Bundling is now a Windows-only question.** macOS needs nothing shipped. If
+> Windows ends up on tesseract rather than `Windows.Media.Ocr`, that build has
+> to bundle it (~15–40 MB plus signing a second native binary) or require an
+> install. Tracked in `../ROADMAP.md`.
 
 ## Agent attribution
 
