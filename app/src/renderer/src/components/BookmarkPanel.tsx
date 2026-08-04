@@ -35,6 +35,7 @@ export function BookmarkPanel({
   onAdd,
   onRemove,
   onIndent,
+  onMoveSection,
   currentPageId,
   onAssign,
   onClearAssign,
@@ -50,6 +51,8 @@ export function BookmarkPanel({
   onAdd: () => void
   onRemove: (key: string) => void
   onIndent: (key: string, delta: number) => void
+  /** Drag a bookmark: its whole section of pages moves with it. */
+  onMoveSection: (key: string, beforeKey: string | null) => void
   /** Where "assign here" would send a bookmark: the page you are on. */
   currentPageId: string | null
   onAssign: (key: string, pageId: string) => void
@@ -59,6 +62,8 @@ export function BookmarkPanel({
   onAutoEditDone: () => void
 }): React.JSX.Element {
   const [editing, setEditing] = useState<{ key: string; value: string } | null>(null)
+  const [dragKey, setDragKey] = useState<string | null>(null)
+  const [dropKey, setDropKey] = useState<string | null>(null)
   const tree = buildBookmarks(session, { pageCounts })
   const retargeted = new Set(Object.keys(session.bookmarkPages ?? {}))
   const numberOf = new Map(session.pages.map((p, i) => [p.id, i + 1]))
@@ -102,8 +107,34 @@ export function BookmarkPanel({
         ) : (
           <button
             key={`${n.key}:${i}`}
-            className={`bm-row${renamed ? ' is-renamed' : ''}${isUser ? ' is-user' : ''}`}
+            className={
+              `bm-row${renamed ? ' is-renamed' : ''}${isUser ? ' is-user' : ''}` +
+              `${dragKey === n.key ? ' is-dragging' : ''}${dropKey === n.key ? ' drop-before' : ''}`
+            }
             style={{ paddingLeft: pad }}
+            draggable
+            onDragStart={(e) => {
+              setDragKey(n.key)
+              e.dataTransfer.effectAllowed = 'move'
+              // Some data is required or Firefox/Chromium refuse the drag.
+              e.dataTransfer.setData('text/plain', n.key)
+            }}
+            onDragOver={(e) => {
+              if (!dragKey || dragKey === n.key) return
+              e.preventDefault()
+              setDropKey(n.key)
+            }}
+            onDragLeave={() => setDropKey((k) => (k === n.key ? null : k))}
+            onDrop={(e) => {
+              e.preventDefault()
+              if (dragKey && dragKey !== n.key) onMoveSection(dragKey, n.key)
+              setDragKey(null)
+              setDropKey(null)
+            }}
+            onDragEnd={() => {
+              setDragKey(null)
+              setDropKey(null)
+            }}
             onClick={() => onJump(n.page)}
             onDoubleClick={() => setEditing({ key: n.key, value: stripPageCount(n.title) })}
             // Full title in the tooltip — real workpaper names are long and the
@@ -134,37 +165,40 @@ export function BookmarkPanel({
                   onClearAssign(n.key)
                 }}
               >
-                ⇱
+                Reset
               </span>
             )}
             {isUser ? (
+              // Words, not arrows. ⇤ ⇥ × told a preparer nothing about what
+              // they do, and this panel is where the binder's structure is
+              // edited — the one place guessing is expensive.
               <span className="bm-tools">
                 <span
-                  title="Outdent"
+                  title="Move this bookmark out one level"
                   onClick={(e) => {
                     e.stopPropagation()
                     onIndent(n.key, -1)
                   }}
                 >
-                  ⇤
+                  Out
                 </span>
                 <span
-                  title="Indent (nest under the bookmark above)"
+                  title="Nest this bookmark under the one above it"
                   onClick={(e) => {
                     e.stopPropagation()
                     onIndent(n.key, 1)
                   }}
                 >
-                  ⇥
+                  In
                 </span>
                 <span
-                  title="Remove this bookmark"
+                  title="Remove this bookmark (the pages stay in the binder)"
                   onClick={(e) => {
                     e.stopPropagation()
                     onRemove(n.key)
                   }}
                 >
-                  ×
+                  Delete
                 </span>
               </span>
             ) : (
@@ -209,7 +243,28 @@ export function BookmarkPanel({
       {tree.length === 0 ? (
         <div className="panel-empty">No bookmarks yet.</div>
       ) : (
-        <div className="bm-list">{rows(tree)}</div>
+        <div className="bm-list">
+          {rows(tree)}
+          {/* A landing strip at the end: without it a section can be dropped
+              before any bookmark but never moved to the back of the binder. */}
+          <div
+            className={`bm-drop-end${dropKey === '__end__' ? ' is-over' : ''}`}
+            onDragOver={(e) => {
+              if (!dragKey) return
+              e.preventDefault()
+              setDropKey('__end__')
+            }}
+            onDragLeave={() => setDropKey((k) => (k === '__end__' ? null : k))}
+            onDrop={(e) => {
+              e.preventDefault()
+              if (dragKey) onMoveSection(dragKey, null)
+              setDragKey(null)
+              setDropKey(null)
+            }}
+          >
+            {dragKey ? 'Drop here to move to the end' : ''}
+          </div>
+        </div>
       )}
     </div>
   )

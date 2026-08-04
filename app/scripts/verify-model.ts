@@ -50,6 +50,8 @@ import {
   shapesOnPage,
   updateShape,
   agentWork,
+  bookmarkSection,
+  moveBookmarkSection,
   beginRun,
   endRun,
   record,
@@ -186,6 +188,87 @@ async function main(): Promise<number> {
   )
   t = rotatePages(s, [aIds[0]], -270)
   check('negative rotation normalizes', t.pages.find((p) => p.id === aIds[0])!.rotate === 270)
+
+  // --- dragging a bookmark moves its SECTION. Getting the span wrong here
+  // scrambles a binder silently, so the boundaries are asserted directly.
+  {
+    let w = s
+    const order = () => w.pages.map((p) => p.id).join(',')
+    const before = order()
+    const tree = buildBookmarks(w)
+    const first = tree[0]
+    const second = tree[1]
+    check('two file-level bookmarks to move between', !!first && !!second, tree.map((t) => t.title).join(' | '))
+
+    const section = bookmarkSection(w, second.key)
+    check(
+      "a bookmark's section is the pages it is labelled as owning",
+      section.length > 0 && section.every((id) => w.pages.some((p) => p.id === id)),
+      `${section.length} page(s)`
+    )
+    check(
+      "a section is a contiguous run, not a scatter",
+      (() => {
+        const idx = section.map((id) => w.pages.findIndex((p) => p.id === id))
+        return idx.every((v, i) => i === 0 || v === idx[i - 1] + 1)
+      })(),
+      section.join(',')
+    )
+
+    // A parent carries its children: their pages are inside its span.
+    const parentSection = bookmarkSection(w, first.key)
+    // Pick whichever file-level node actually has an imported outline, or the
+    // nesting assertion below silently never runs.
+    const nested = tree.find((t) => t.children.length > 0)
+    const childKeys = nested ? nested.children.map((c) => c.key) : []
+    check(
+      "the two file-level sections do not overlap",
+      !parentSection.some((id) => section.includes(id)),
+      `${parentSection.length} + ${section.length} of ${w.pages.length}`
+    )
+    check('the fixture provides a nested outline to test with', childKeys.length > 0)
+    if (nested && childKeys.length) {
+      const parentPages = bookmarkSection(w, nested.key)
+      const childPages = bookmarkSection(w, childKeys[0])
+      check(
+        "a nested bookmark's pages sit inside its parent's section",
+        childPages.length > 0 && childPages.every((id) => parentPages.includes(id)),
+        `${childPages.length} in ${parentPages.length}`
+      )
+    }
+
+    // Move the second section to the front; the pages move as a block.
+    w = moveBookmarkSection(w, second.key, first.key)
+    check(
+      'moving a bookmark moves its pages to the front as one block',
+      w.pages.slice(0, section.length).map((p) => p.id).join(',') === section.join(','),
+      order()
+    )
+    check(
+      'no page is lost or duplicated by the move',
+      w.pages.length === s.pages.length &&
+        new Set(w.pages.map((p) => p.id)).size === w.pages.length,
+      `${w.pages.length} vs ${s.pages.length}`
+    )
+
+    // Dropping a section onto itself must be a no-op, not a scramble.
+    const same = moveBookmarkSection(w, second.key, second.key)
+    check('dropping a bookmark on itself changes nothing', same === w)
+    const inside = nested
+      ? moveBookmarkSection(w, nested.key, bookmarkSection(w, nested.key).length ? childKeys[0] : nested.key)
+      : w
+    check('dropping a section inside itself changes nothing', inside === w)
+    check('an unknown bookmark key is refused', moveBookmarkSection(w, 'nope', null) === w)
+
+    // And to the end.
+    w = moveBookmarkSection(w, second.key, null)
+    check(
+      'a section can be moved to the end of the binder',
+      w.pages.slice(-section.length).map((p) => p.id).join(',') === section.join(','),
+      order()
+    )
+    check('the binder still holds every page it started with', w.pages.length === s.pages.length, before)
+  }
 
   // --- attribution: a workpaper is evidence, so agent work must be findable
   // and removable without touching a person's.

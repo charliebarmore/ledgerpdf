@@ -1575,6 +1575,70 @@ function stripSourceExt(name: string): string {
  * never of a section heading — and a heading whose first child sits on the same
  * page would otherwise be labelled "(1 page)" while covering a dozen.
  */
+/**
+ * The pages a bookmark owns: from its own page up to the page before the next
+ * bookmark at the same or shallower depth.
+ *
+ * This is the span the "(N pages)" label already describes, so what a preparer
+ * reads is exactly what moves. Children are inside it by construction, which is
+ * why moving a section carries its nested bookmarks with it — their pages went
+ * along.
+ */
+export function bookmarkSection(session: Session, key: string): string[] {
+  const flat = flattenTree(buildBookmarks(session, { pageCounts: false }))
+  const indexOf = new Map(session.pages.map((p, i) => [p.id, i]))
+  const at = flat.findIndex((e) => e.key === key)
+  if (at < 0) return []
+  const start = indexOf.get(flat[at].page)
+  if (start === undefined) return []
+
+  let end = session.pages.length
+  for (let i = at + 1; i < flat.length; i++) {
+    if (flat[i].depth > flat[at].depth) continue
+    const next = indexOf.get(flat[i].page)
+    // A re-assigned bookmark can point backwards; only a page AFTER this one
+    // can bound the section.
+    if (next !== undefined && next > start) {
+      end = next
+      break
+    }
+  }
+  return session.pages.slice(start, end).map((p) => p.id)
+}
+
+/**
+ * Drag a bookmark, move its pages.
+ *
+ * Acrobat's bookmark drag reorders the outline and leaves the pages where they
+ * were. In a workpaper a bookmark IS a tab divider, so moving one has to take
+ * its section with it — otherwise the outline and the binder disagree, which is
+ * worse than not being able to drag at all.
+ *
+ * `beforeKey` is the bookmark to land in front of; null puts the section last.
+ */
+export function moveBookmarkSection(
+  session: Session,
+  key: string,
+  beforeKey: string | null
+): Session {
+  const ids = bookmarkSection(session, key)
+  if (!ids.length) return session
+  if (beforeKey === key) return session
+
+  const indexOf = new Map(session.pages.map((p, i) => [p.id, i]))
+  let target = session.pages.length
+  if (beforeKey) {
+    const flat = flattenTree(buildBookmarks(session, { pageCounts: false }))
+    const dest = flat.find((e) => e.key === beforeKey)
+    const at = dest ? indexOf.get(dest.page) : undefined
+    if (at === undefined) return session
+    // Dropping inside your own section is a no-op, not a scramble.
+    if (ids.includes(session.pages[at].id)) return session
+    target = at
+  }
+  return movePages(session, ids, target)
+}
+
 function applyPageCounts(
   nodes: BookmarkNode[],
   indexOf: Map<string, number>,

@@ -1789,3 +1789,38 @@ button.ai-count {
   background: var(--warning);
   filter: brightness(1.08);
 }
+
+/* ------------------------------------------------ bookmark section drag */
+
+.bm-row[draggable='true'] {
+  cursor: grab;
+}
+
+.bm-row.is-dragging {
+  opacity: 0.45;
+}
+
+/* The line lands ABOVE the row you are over, matching where the section goes. */
+.bm-row.drop-before {
+  box-shadow: inset 0 2px 0 0 var(--primary);
+}
+
+.bm-drop-end {
+  min-height: 22px;
+  margin: 2px var(--md) 0;
+  padding: 2px 0;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 2px solid transparent;
+}
+
+.bm-drop-end.is-over {
+  border-top-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Word labels need room the arrows did not. */
+.bm-tools > span {
+  padding: 0 4px;
+  font-size: 11px;
+}

@@ -37,6 +37,8 @@ import {
   toTapeEntry,
   removeTapeEntry,
   updateTapeEntry,
+  bookmarkSection,
+  moveBookmarkSection,
   removeBookmark,
   removeMarks,
   clearPageStatus,
@@ -1373,7 +1375,7 @@ export default function App(): React.JSX.Element {
         {pages.length === 0 ? (
           <div className="dropzone">
             <div className="dropzone-inner">
-              <p className="dz-title">Drop PDFs or images here</p>
+              <p className="dz-title">Drop PDFs, spreadsheets or images here</p>
               <p className="dz-sub">
                 or <button className="link" onClick={addViaDialog}>choose files</button> · nothing
                 leaves this machine
@@ -1408,6 +1410,12 @@ export default function App(): React.JSX.Element {
                 onIndent={(key, delta) =>
                   apply(nudgeBookmarkDepth(session, key, delta), 'Bookmark nesting changed.')
                 }
+                onMoveSection={(key, beforeKey) => {
+                  const moving = bookmarkSection(session, key).length
+                  const next = moveBookmarkSection(session, key, beforeKey)
+                  if (next === session) return setStatus('Nothing to move there.')
+                  apply(next, `Moved ${moving} page${moving === 1 ? '' : 's'} with the bookmark.`)
+                }}
                 canAdd={!!current}
                 autoEditKey={autoEditKey}
                 onAutoEditDone={() => setAutoEditKey(null)}

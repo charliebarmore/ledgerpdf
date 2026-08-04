@@ -34,7 +34,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 |---|---|
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
-| `verify:model` | 181 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
+| `verify:model` | 194 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
 | `verify:text` | 36 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
 | `verify:mcp` | 55 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
@@ -223,6 +223,26 @@ conformance runs pdfium *and* poppler.
 > Windows ends up on tesseract rather than `Windows.Media.Ocr`, that build has
 > to bundle it (~15–40 MB plus signing a second native binary) or require an
 > install. Tracked in `../ROADMAP.md`.
+
+## Bookmarks move sections, not just labels
+
+Dragging a bookmark in the panel moves **the pages it owns**, as one block, in
+one undo step.
+
+Acrobat's bookmark drag reorders the outline and leaves the pages where they
+were. In a workpaper a bookmark is a tab divider, so moving one has to take its
+section with it — otherwise the outline and the binder disagree, which is worse
+than not being able to drag at all.
+
+A bookmark owns the pages from its own page up to the page before the next
+bookmark at the same or shallower depth — exactly the span the **"(N pages)"**
+label already describes, so what a preparer reads is what moves. Nested
+bookmarks come along because their pages are inside that run.
+
+Dropping a section on itself, or inside itself, is a no-op rather than a
+scramble; a landing strip at the bottom of the list moves a section to the end.
+The span and move semantics carry direct checks in `verify:model`, because
+getting them wrong reorders a binder silently.
 
 ## Agent attribution
 
