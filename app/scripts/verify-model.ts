@@ -50,6 +50,8 @@ import {
   shapesOnPage,
   updateShape,
   agentWork,
+  formatCents,
+  parseMoney,
   bookmarkSection,
   moveBookmarkSection,
   beginRun,
@@ -188,6 +190,59 @@ async function main(): Promise<number> {
   )
   t = rotatePages(s, [aIds[0]], -270)
   check('negative rotation normalizes', t.pages.find((p) => p.id === aIds[0])!.rotate === 270)
+
+  // --- money. A figure read wrong in a tie-out does not fail, it AGREES
+  // confidently, so every shape a workpaper writes is pinned down.
+  {
+    const reads: Array<[string, number | null, string?]> = [
+      ['1,203.26', 120326],
+      ['84,200.00', 8420000],
+      ['0.01', 1],
+      ['.5', 50],
+      ['$1,203.26', 120326],
+      ['1203.26', 120326],
+      ['-350.67', -35067],
+      ['(350.67)', -35067, 'parentheses'],
+      ['350.67-', -35067, 'trailing minus'],
+      ['(1,203.26)', -120326, 'parentheses'],
+      ['1,203.2', 120320],
+      ['1,203', 120300],
+      ['\u2212350.67', -35067],
+      ['1 203.26', 120326],
+      // Not money, and must not be guessed at.
+      ['', null],
+      ['abc', null],
+      ['1,2', null],
+      ['1,23,456', null],
+      ['12,34.5', null],
+      ['--5', null],
+      ['1.2.3', null]
+    ]
+    let bad = 0
+    for (const [raw, want, why] of reads) {
+      const got = parseMoney(raw)
+      const ok = want === null ? got === null : got?.cents === want
+      if (!ok) {
+        bad++
+        check(`parseMoney(${JSON.stringify(raw)})`, false, `got ${JSON.stringify(got)}, wanted ${want}`)
+      } else if (why && !(got?.as ?? '').includes(why)) {
+        bad++
+        check(`parseMoney(${JSON.stringify(raw)}) explains itself`, false, got?.as ?? 'no note')
+      }
+    }
+    check(`every money shape a workpaper writes reads correctly`, bad === 0, `${reads.length - bad}/${reads.length}`)
+    check(
+      'more precision than money has is rounded, and says so',
+      parseMoney('1.005')?.cents === 101 && (parseMoney('1.005')?.as ?? '').includes('rounded'),
+      JSON.stringify(parseMoney('1.005'))
+    )
+    check('cents come back the way a workpaper writes them', formatCents(-120326) === '(1,203.26)', formatCents(-120326))
+    check(
+      'a difference computes exactly, with no float drift',
+      parseMoney('0.1')!.cents + parseMoney('0.2')!.cents === parseMoney('0.30')!.cents,
+      `${parseMoney('0.1')!.cents} + ${parseMoney('0.2')!.cents}`
+    )
+  }
 
   // --- dragging a bookmark moves its SECTION. Getting the span wrong here
   // scrambles a binder silently, so the boundaries are asserted directly.

@@ -34,10 +34,10 @@ npm run verify     # typecheck + model verification + GUI smoke test
 |---|---|
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
-| `verify:model` | 194 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
+| `verify:model` | 198 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
 | `verify:text` | 53 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
-| `verify:mcp` | 86 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
+| `verify:mcp` | 96 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, renders a synthetic PDF under `file://`, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
 
@@ -268,6 +268,39 @@ conformance runs pdfium *and* poppler.
 > Windows ends up on tesseract rather than `Windows.Media.Ocr`, that build has
 > to bundle it (~15–40 MB plus signing a second native binary) or require an
 > install. Tracked in `../ROADMAP.md`.
+
+## Tie-out
+
+The split is deliberate: **the agent decides what should tie to what; the tool
+does the arithmetic and leaves the evidence.** A model doing money arithmetic is
+exactly where it should not be trusted, and a verdict in a chat log is not
+support for anything.
+
+- **`binder_tie`** checks a figure on one page against a figure on another. When
+  they agree it ticks both and cross-references each to the other's page; when
+  they do not, it notes both with the difference and flags both as open items.
+- **`binder_foot`** adds a column and checks it against the stated total. **The
+  tape it leaves IS the evidence** — it shows every addend, so a reviewer sees
+  what was added rather than taking the sum on trust. Stamps `F` when it foots,
+  notes and flags when it does not.
+- Both take a `toleranceCents`, defaulting to **0 — exact**. What is material is
+  the reviewer's call, not the tool's.
+
+**Money is read in whole cents by `parseMoney`, never floats**, and it handles
+what a workpaper actually writes: `(350.67)` is a negative — the accounting
+convention, which the tape's own `parseAmount` reads as nothing at all —
+along with currency symbols, thousands separators, trailing minus, and unicode
+dashes. Anything it cannot read with certainty is **refused rather than
+guessed**: a figure guessed wrong in a tie-out does not fail, it *agrees
+confidently*.
+
+Rounding is integer arithmetic end to end. `Number('1.005') * 100` is
+`100.4999…`, so rounding the product gives 1.00 where a workpaper says 1.01 — a
+systematic error at exactly the boundary money rounds on. 21 shapes of figure
+are pinned down in `verify:model`.
+
+When the tool reads a figure a person might read differently, it says so:
+`(1,230.00): read as a negative — parentheses`.
 
 ## Point it at a folder
 

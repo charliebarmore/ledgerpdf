@@ -43,6 +43,8 @@ import {
   buildBookmarks,
   deletePages,
   formatAmount,
+  formatCents,
+  parseMoney,
   movePages,
   newSession,
   parseSession,
@@ -1200,6 +1202,173 @@ function scanFolder(root: string, maxDepth = 4, cap = 200): { found: Found[]; sk
   walk(root, 0)
   return { found, skipped }
 }
+
+/** Read a list of figures, refusing the whole set if any one is not money. */
+function readAmounts(raw: string[]): { cents: number[]; notes: string[] } | string {
+  const cents: number[] = []
+  const notes: string[] = []
+  for (const value of raw) {
+    const read = parseMoney(value)
+    if (!read) {
+      return `"${value}" is not a figure I can read. Give me the amount as it appears on the page.`
+    }
+    cents.push(read.cents)
+    if (read.as) notes.push(`${value}: ${read.as}`)
+  }
+  return { cents, notes }
+}
+
+registerTool(
+  'binder_tie',
+  {
+    title: 'Tie one figure to another',
+    description:
+      "Check that a figure on one page equals a figure on another, and record the result IN THE BINDER: ticks and a cross-reference on both when they agree, notes carrying the difference and an open-item flag on both when they do not. The comparison is exact integer cents — never do this arithmetic yourself. Give the amounts exactly as they appear on the page; (350.67) is read as a negative.",
+    inputSchema: {
+      label: z.string().describe('What is being tied, e.g. "Wages — 1040 line 1 to W-2 box 1"'),
+      a: z.object({
+        pageId: z.string(),
+        amount: z.string().describe('As it appears on the page'),
+        nx: z.number().min(0).max(1),
+        ny: z.number().min(0).max(1),
+        what: z.string().optional().describe('What this figure is, for the cross-reference')
+      }),
+      b: z.object({
+        pageId: z.string(),
+        amount: z.string(),
+        nx: z.number().min(0).max(1),
+        ny: z.number().min(0).max(1),
+        what: z.string().optional()
+      }),
+      toleranceCents: z
+        .number()
+        .min(0)
+        .optional()
+        .describe('Difference to accept, in cents. Default 0 — exact. Materiality is your call, not mine.')
+    }
+  },
+  async ({ label, a, b, toleranceCents }) => {
+    for (const side of [a, b]) {
+      if (!session.pages.some((p) => p.id === side.pageId)) {
+        return fail(`unknown page id: ${side.pageId}`)
+      }
+    }
+    const read = readAmounts([a.amount, b.amount])
+    if (typeof read === 'string') return fail(read)
+    const [ca, cb] = read.cents
+    const diff = ca - cb
+    const agrees = Math.abs(diff) <= (toleranceCents ?? 0)
+
+    const pageNo = (id: string): number => session.pages.findIndex((p) => p.id === id) + 1
+    const refA = `${label} — ties to p.${pageNo(b.pageId)}${b.what ? ` (${b.what})` : ''}`
+    const refB = `${label} — ties to p.${pageNo(a.pageId)}${a.what ? ` (${a.what})` : ''}`
+
+    mutating(
+      'tie',
+      `${agrees ? 'Tied' : 'DID NOT tie'} ${label}: ${formatCents(ca)} vs ${formatCents(cb)}` +
+        (agrees ? '' : ` (difference ${formatCents(diff)})`)
+    )
+
+    if (agrees) {
+      session = addMark(session, {
+        page: a.pageId, kind: 'tick', nx: a.nx, ny: a.ny, size: 20, note: refA
+      }).session
+      session = addMark(session, {
+        page: b.pageId, kind: 'tick', nx: b.nx, ny: b.ny, size: 20, note: refB
+      }).session
+    } else {
+      const detail =
+        `${label} — DOES NOT TIE. p.${pageNo(a.pageId)} shows ${formatCents(ca)}, ` +
+        `p.${pageNo(b.pageId)} shows ${formatCents(cb)}. Difference ${formatCents(diff)}.`
+      session = addMark(session, {
+        page: a.pageId, kind: 'note', nx: a.nx, ny: a.ny, size: 20, note: detail
+      }).session
+      session = addMark(session, {
+        page: b.pageId, kind: 'note', nx: b.nx, ny: b.ny, size: 20, note: detail
+      }).session
+      session = setPageStatus(session, [a.pageId, b.pageId], 'open', session.reviewer ?? '')
+    }
+
+    return text(
+      `${agrees ? 'TIES' : 'DOES NOT TIE'} — ${label}\n` +
+        `  p.${pageNo(a.pageId)}: ${formatCents(ca)}\n` +
+        `  p.${pageNo(b.pageId)}: ${formatCents(cb)}\n` +
+        (agrees
+          ? `  Ticked both, cross-referenced.`
+          : `  Difference ${formatCents(diff)}. Noted on both pages and flagged as open items.`) +
+        (read.notes.length ? `\n  ${read.notes.join('; ')}` : '')
+    )
+  }
+)
+
+registerTool(
+  'binder_foot',
+  {
+    title: 'Foot a column and check its total',
+    description:
+      "Add a column of figures and check it against the stated total. The tape it leaves on the page IS the evidence — it shows every addend, so a reviewer can see what was added rather than take your word for the sum. Arithmetic is exact integer cents; never do it yourself. Ticks the total when it foots, notes and flags the page when it does not.",
+    inputSchema: {
+      pageId: z.string(),
+      label: z.string().describe('What is being footed, e.g. "Total expenses"'),
+      amounts: z.array(z.string()).min(2).describe('The column, as the figures appear'),
+      expectedTotal: z.string().describe('The stated total on the page'),
+      nx: z.number().min(0).max(1).describe('Where to leave the tape'),
+      ny: z.number().min(0).max(1),
+      toleranceCents: z.number().min(0).optional()
+    }
+  },
+  async ({ pageId, label, amounts, expectedTotal, nx, ny, toleranceCents }) => {
+    if (!session.pages.some((p) => p.id === pageId)) return fail(`unknown page id: ${pageId}`)
+    const read = readAmounts([...amounts, expectedTotal])
+    if (typeof read === 'string') return fail(read)
+    const stated = read.cents[read.cents.length - 1]
+    const parts = read.cents.slice(0, -1)
+    const sum = parts.reduce((t, c) => t + c, 0)
+    const diff = sum - stated
+    const foots = Math.abs(diff) <= (toleranceCents ?? 0)
+
+    mutating(
+      'foot',
+      `${foots ? 'Footed' : 'DID NOT foot'} ${label}: ${parts.length} line(s) = ${formatCents(sum)}` +
+        (foots ? '' : ` against ${formatCents(stated)} stated (difference ${formatCents(diff)})`)
+    )
+
+    // The tape is the evidence: it shows the addends, so the conclusion is
+    // checkable rather than asserted.
+    session = addTape(session, {
+      page: pageId,
+      nx,
+      ny,
+      entries: parts.map((c) => toTapeEntry(c / 100)),
+      title: label.slice(0, 28)
+    }).session
+
+    if (foots) {
+      session = addMark(session, {
+        page: pageId, kind: 'text', nx, ny: Math.max(0, ny - 0.04), size: 20, text: 'F',
+        note: `${label} — footed to ${formatCents(sum)}`
+      }).session
+    } else {
+      session = addMark(session, {
+        page: pageId, kind: 'note', nx, ny: Math.max(0, ny - 0.04), size: 20,
+        note:
+          `${label} — DOES NOT FOOT. The ${parts.length} lines add to ${formatCents(sum)}, ` +
+          `the page states ${formatCents(stated)}. Difference ${formatCents(diff)}.`
+      }).session
+      session = setPageStatus(session, [pageId], 'open', session.reviewer ?? '')
+    }
+
+    return text(
+      `${foots ? 'FOOTS' : 'DOES NOT FOOT'} — ${label}\n` +
+        `  ${parts.length} line(s) add to ${formatCents(sum)}\n` +
+        `  the page states ${formatCents(stated)}\n` +
+        (foots
+          ? `  Tape left on the page as the working, stamped F.`
+          : `  Difference ${formatCents(diff)}. Tape left showing the addends; noted and flagged.`) +
+        (read.notes.length ? `\n  ${read.notes.join('; ')}` : '')
+    )
+  }
+)
 
 registerTool(
   'binder_add_folder',

@@ -1199,6 +1199,80 @@ export function formatAmount(value: number): string {
  * Parse what the 10-key buffer holds into a number, or null if it isn't one.
  * Accepts what a preparer actually types: "1200", "1200.5", "1,200.50", ".75".
  */
+/**
+ * A money figure as it appears on a workpaper, in whole CENTS.
+ *
+ * Comparison is the whole job of a tie-out, so this is deliberately stricter
+ * and broader than parseAmount — broader because a real workpaper writes
+ * negatives as "(350.67)", which is the accounting convention and which
+ * parseAmount reads as nothing at all; stricter because anything it cannot
+ * read with certainty returns null rather than a guess. A figure guessed wrong
+ * in a tie-out is worse than a figure not read: it agrees confidently.
+ *
+ * Cents, not floats: 0.1 + 0.2 is a rounding error a reviewer cannot see and
+ * cannot forgive on a balance sheet.
+ */
+export interface MoneyRead {
+  cents: number
+  /** How it was read, when a reader might not agree — surfaced to the reviewer. */
+  as?: string
+}
+
+export function parseMoney(raw: string): MoneyRead | null {
+  let text = String(raw)
+    .replace(/[\u00a0\u2007\u202f\s]/g, '')
+    .replace(/[\u2212\u2013\u2014]/g, '-')
+  if (!text) return null
+
+  let negative = false
+  let note: string | undefined
+  // Accounting negatives: (350.67). Also seen as a trailing minus in ledger
+  // exports, and as CR in some trial balances — the last is NOT assumed,
+  // because whether a credit is negative depends on the schedule.
+  if (/^\((.*)\)$/.test(text)) {
+    negative = true
+    note = 'read as a negative — parentheses'
+    text = text.replace(/^\(|\)$/g, '')
+  } else if (/-$/.test(text)) {
+    negative = true
+    note = 'read as a negative — trailing minus'
+    text = text.slice(0, -1)
+  }
+
+  text = text.replace(/^[$£€]/, '').replace(/[$£€]$/, '')
+  if (text.startsWith('-')) {
+    negative = true
+    text = text.slice(1)
+  }
+  // Thousands separators only in the grouping positions; a bare "1,2" is not a
+  // number anyone wrote on purpose.
+  if (text.includes(',')) {
+    if (!/^\d{1,3}(,\d{3})*(\.\d+)?$/.test(text)) return null
+    text = text.replace(/,/g, '')
+  }
+  if (!/^(\d+(\.\d*)?|\.\d+)$/.test(text)) return null
+
+  const [whole, frac = ''] = text.split('.')
+  if (frac.length > 2) {
+    // More precision than money has. Rounding it silently would hide a real
+    // difference, so say what was done.
+    note = `${note ? `${note}; ` : ''}rounded from ${text} to 2 decimals`
+  }
+  // Integer arithmetic the whole way. Number('1.005') * 100 is 100.4999…, so
+  // rounding the product gives 1.00 where a workpaper says 1.01 — a systematic
+  // error at exactly the boundary where money rounds.
+  const digits = frac.padEnd(3, '0')
+  let cents = Number(whole || '0') * 100 + Number(digits.slice(0, 2))
+  if (Number(digits[2]) >= 5) cents += 1
+  if (!Number.isFinite(cents)) return null
+  return { cents: negative ? -cents : cents, ...(note ? { as: note } : {}) }
+}
+
+/** Cents back to the way a workpaper writes it. */
+export function formatCents(cents: number): string {
+  return `${cents < 0 ? '(' : ''}${formatAmount(Math.abs(cents) / 100)}${cents < 0 ? ')' : ''}`
+}
+
 export function parseAmount(raw: string): number | null {
   const cleaned = raw.replace(/,/g, '').trim()
   if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(cleaned)) return null

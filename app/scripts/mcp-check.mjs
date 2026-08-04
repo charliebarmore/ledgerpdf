@@ -293,6 +293,102 @@ check(
   )
 )
 
+// ----------------------------------------------------------------- tie-out
+// The agent decides WHAT should tie; the tool does the arithmetic and leaves
+// the evidence. A model doing money maths is exactly where it should not be
+// trusted, and a verdict in a chat log is not support for anything.
+{
+  await call('binder_new')
+  await call('binder_add_pdfs', { paths: [a, b] })
+  await call('binder_set_reviewer', { initials: 'CJB' })
+  const ids = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+
+  const tied = await call('binder_tie', {
+    label: 'Wages — 1040 to W-2',
+    a: { pageId: ids[0], amount: '84,200.00', nx: 0.75, ny: 0.13, what: '1040 line 1' },
+    b: { pageId: ids[3], amount: '84,200.00', nx: 0.5, ny: 0.3, what: 'W-2 box 1' }
+  })
+  check('an agreeing figure ties', tied.text.startsWith('TIES'), tied.text.split('\n')[0])
+  const afterTie = await call('binder_annotations')
+  check(
+    'both sides are ticked and cross-referenced to each other',
+    (afterTie.text.match(/tick/g) ?? []).length === 2 && afterTie.text.includes('ties to p.'),
+    afterTie.text.split('\n').filter((l) => l.includes('tick')).join(' | ').slice(0, 140)
+  )
+
+  const off = await call('binder_tie', {
+    label: 'Interest',
+    // (1,230.00) is the accounting convention for a negative. Reading it as
+    // positive would make this "agree" by 2,380.00.
+    a: { pageId: ids[0], amount: '1,150.00', nx: 0.75, ny: 0.19 },
+    b: { pageId: ids[3], amount: '(1,230.00)', nx: 0.5, ny: 0.4 }
+  })
+  check(
+    'a difference is caught, with the accounting negative read correctly',
+    off.text.startsWith('DOES NOT TIE') && off.text.includes('2,380.00'),
+    off.text.split('\n').slice(0, 4).join(' | ')
+  )
+  check(
+    'the tool says how it read a figure a person might read differently',
+    off.text.includes('read as a negative'),
+    off.text.split('\n').slice(-1)[0]
+  )
+  const queueT = await call('binder_review_queue')
+  check(
+    'both sides of a broken tie are flagged and noted',
+    (queueT.text.match(/DOES NOT TIE/g) ?? []).length === 2,
+    queueT.text.split('\n').slice(0, 3).join(' | ')
+  )
+
+  const foots = await call('binder_foot', {
+    pageId: ids[0],
+    label: 'Total income',
+    amounts: ['84,200.00', '1,150.00', '3,400.00'],
+    expectedTotal: '88,750.00',
+    nx: 0.4,
+    ny: 0.55
+  })
+  check('a column that adds up foots', foots.text.startsWith('FOOTS'), foots.text.split('\n')[0])
+  const withTape = await call('binder_annotations')
+  check(
+    'the tape left behind shows the addends, so the sum is checkable',
+    withTape.text.includes('88,750.00') && (withTape.text.match(/tp_\d+/g) ?? []).length === 1,
+    withTape.text.split('\n').find((l) => l.includes('tp_')) ?? ''
+  )
+
+  const bad = await call('binder_foot', {
+    pageId: ids[1],
+    label: 'Deductions',
+    amounts: ['14,600.00', '1,000.00'],
+    expectedTotal: '15,000.00',
+    nx: 0.4,
+    ny: 0.55
+  })
+  check(
+    'a column that does not add up is caught, with the difference',
+    bad.text.startsWith('DOES NOT FOOT') && bad.text.includes('600.00'),
+    bad.text.split('\n').slice(0, 4).join(' | ')
+  )
+
+  check(
+    'a figure the tool cannot read is refused, never guessed',
+    (
+      await call('binder_tie', {
+        label: 'x',
+        a: { pageId: ids[0], amount: 'about 84k', nx: 0.5, ny: 0.5 },
+        b: { pageId: ids[1], amount: '84,200.00', nx: 0.5, ny: 0.5 }
+      })
+    ).isError
+  )
+  const within = await call('binder_tie', {
+    label: 'Rounding',
+    a: { pageId: ids[0], amount: '1,000.00', nx: 0.3, ny: 0.3 },
+    b: { pageId: ids[1], amount: '999.99', nx: 0.3, ny: 0.3 },
+    toleranceCents: 1
+  })
+  check('a tolerance the reviewer sets is respected', within.text.startsWith('TIES'), within.text.split('\n')[0])
+}
+
 // ------------------------------------------------------------ folder intake
 // "Point me at the engagement folder" is step one of the real workflow, and a
 // folder full of client documents is full of traps.
