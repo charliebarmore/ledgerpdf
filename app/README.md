@@ -37,7 +37,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `verify:model` | 194 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
 | `verify:text` | 53 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
-| `verify:mcp` | 78 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
+| `verify:mcp` | 86 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, renders a synthetic PDF under `file://`, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
 
@@ -268,6 +268,28 @@ conformance runs pdfium *and* poppler.
 > Windows ends up on tesseract rather than `Windows.Media.Ocr`, that build has
 > to bundle it (~15–40 MB plus signing a second native binary) or require an
 > install. Tracked in `../ROADMAP.md`.
+
+## Point it at a folder
+
+`binder_add_folder` imports everything in an engagement folder that a binder can
+hold, in the order a person would file it: subfolders in turn, and **"9" before
+"10"** rather than after — lexical sort puts `10 - Notes` before `2 -
+Deductions`, which is not how anyone reads a numbered folder.
+
+`dryRun: true` lists what it would take without touching the binder.
+
+**Every skip carries a reason**, because "skipped 3 files" tells a reviewer
+nothing and a document missing because a tool quietly ignored it is the worst
+outcome this app has. Empty files, unsupported types, and unreadable folders are
+all named.
+
+One skip is a real signal rather than noise: an Office **lock file** (`~$…`)
+means that workbook is **open right now**, so the copy on disk may be missing
+unsaved changes. That is worth a preparer knowing before they build a binder out
+of it, so it is reported by name. Dotfiles and `.DS_Store` stay silent — those
+are OS noise, and reporting them would bury the signal.
+
+Subfolders are listed back so an agent can bookmark by section afterwards.
 
 ## Where every document ended up
 

@@ -11,7 +11,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -292,6 +292,91 @@ check(
     'outside WPT_MCP_ROOTS'
   )
 )
+
+// ------------------------------------------------------------ folder intake
+// "Point me at the engagement folder" is step one of the real workflow, and a
+// folder full of client documents is full of traps.
+{
+  const ENG = path.join(REPO, 'spike', 'out', 'engagement')
+  rmSync(ENG, { recursive: true, force: true })
+  mkdirSync(path.join(ENG, '1 - Income'), { recursive: true })
+  mkdirSync(path.join(ENG, '2 - Deductions'), { recursive: true })
+  mkdirSync(path.join(ENG, '10 - Notes'), { recursive: true })
+  copyFileSync(a, path.join(ENG, '1 - Income', 'W-2.pdf'))
+  copyFileSync(path.join(FIXTURES, 'trial_balance.xlsx'), path.join(ENG, '1 - Income', '9 - interest.xlsx'))
+  copyFileSync(path.join(FIXTURES, 'trial_balance.xlsx'), path.join(ENG, '1 - Income', '10 - dividends.xlsx'))
+  copyFileSync(path.join(FIXTURES, 'receipt.jpg'), path.join(ENG, '2 - Deductions', 'receipt.jpg'))
+  copyFileSync(path.join(FIXTURES, 'review_memo.md'), path.join(ENG, '10 - Notes', 'memo.md'))
+  // The traps a real client folder has.
+  copyFileSync(path.join(FIXTURES, 'trial_balance.xlsx'), path.join(ENG, '1 - Income', '~$open-workbook.xlsx'))
+  writeFileSync(path.join(ENG, '2 - Deductions', '.DS_Store'), 'x')
+  writeFileSync(path.join(ENG, 'empty.pdf'), '')
+  writeFileSync(path.join(ENG, 'notes.py'), 'print(1)')
+
+  const folderClient = new Client({ name: 'wpt-folder-check', version: '1.0.0' })
+  await folderClient.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [SERVER],
+      env: { ...process.env, WPT_MCP_ROOTS: ENG, WPT_NO_LIVE: '1' }
+    })
+  )
+  const fcall = async (name, args = {}) => {
+    const r = await folderClient.callTool({ name, arguments: args })
+    return { text: (r.content ?? []).map((c) => c.text ?? '').join('\n'), isError: !!r.isError }
+  }
+  await fcall('binder_new')
+
+  const dry = await fcall('binder_add_folder', { path: ENG, dryRun: true })
+  const order = dry.text
+    .split('\n')
+    .filter((l) => l.startsWith('  ') && l.includes('/'))
+    .map((l) => l.trim())
+  check(
+    'a dry run lists what it would take, without touching the binder',
+    dry.text.includes('would be imported') &&
+      (await fcall('binder_status')).text.includes('Empty binder'),
+    dry.text.split('\n')[0]
+  )
+  check(
+    'files are ordered the way a person files them, not lexically',
+    order[0]?.includes('9 - interest') && order[1]?.includes('10 - dividends'),
+    order.join(' | ')
+  )
+  check(
+    'subfolders run 1, 2, 10 — not 1, 10, 2',
+    order.findIndex((l) => l.startsWith('2 - ')) < order.findIndex((l) => l.startsWith('10 - ')),
+    order.join(' | ')
+  )
+  check(
+    'an Excel lock file is called out, because that workbook is open right now',
+    dry.text.includes('open in Excel and may have unsaved changes'),
+    dry.text.split('Skipped:')[1]?.trim().split('\n')[0]
+  )
+  check(
+    'every skip carries a reason',
+    dry.text.includes('empty.pdf — empty file') &&
+      dry.text.includes('notes.py — not a PDF'),
+    dry.text.split('Skipped:')[1]?.trim()
+  )
+  check('OS noise is not reported as a skip', !dry.text.includes('.DS_Store'), dry.text)
+
+  const done = await fcall('binder_add_folder', { path: ENG })
+  check(
+    'the folder imports and reports its subfolders for bookmarking',
+    done.text.includes('Imported 5 of 5') && done.text.includes('1 - Income/'),
+    done.text.split('\n')[0]
+  )
+  const invF = await fcall('binder_inventory')
+  check(
+    'the inventory accounts for every file that came in',
+    ['W-2.pdf', '9 - interest.xlsx', '10 - dividends.xlsx', 'receipt.jpg', 'memo.md'].every((n) =>
+      invF.text.includes(n)
+    ),
+    invF.text.split('\n')[0]
+  )
+  await folderClient.close()
+}
 
 // ------------------------------------------------- the binder's own account
 // A reviewer who did not do the work should not have to take the worker's word

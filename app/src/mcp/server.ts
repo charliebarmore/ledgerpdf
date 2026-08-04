@@ -26,7 +26,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, readdirSync, realpathSync, statSync, type Dirent } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
@@ -1122,6 +1122,151 @@ function pageRanges(numbers: number[]): string {
   }
   return runs.map(([a, b]) => (a === b ? `p.${a}` : `p.${a}-${b}`)).join(', ')
 }
+
+/** Human order: "9" before "10", and "1 - Income" before "2 - Deductions". */
+const NATURAL = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+
+interface Found {
+  path: string
+  rel: string
+  folder: string
+}
+
+/**
+ * Everything in a folder this binder can hold, in the order a person would
+ * file it.
+ *
+ * Skipping is reported with a reason, never silently: "I skipped 3 files" tells
+ * a reviewer nothing, and a document missing from a binder because a tool
+ * quietly ignored it is exactly the failure the inventory exists to catch.
+ */
+function scanFolder(root: string, maxDepth = 4, cap = 200): { found: Found[]; skipped: string[] } {
+  const found: Found[] = []
+  const skipped: string[] = []
+
+  const walk = (dir: string, depth: number): void => {
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch (e) {
+      skipped.push(`${path.relative(root, dir) || '.'} — unreadable (${(e as Error).message})`)
+      return
+    }
+    const sorted = [...entries].sort((x, y) => NATURAL.compare(x.name, y.name))
+    for (const entry of sorted) {
+      const full = path.join(dir, entry.name)
+      const rel = path.relative(root, full)
+      // Dotfiles are OS noise and stay silent. An Office lock file is NOT
+      // noise: it means that workbook is open right now, so the copy on disk
+      // may be missing unsaved changes — worth telling a preparer before they
+      // build a binder out of it.
+      if (entry.name.startsWith('.')) continue
+      if (entry.name.startsWith('~$')) {
+        skipped.push(
+          `${rel} — lock file; "${entry.name.slice(2)}" is open in Excel and may have unsaved changes`
+        )
+        continue
+      }
+      if (entry.isDirectory()) {
+        if (depth >= maxDepth) {
+          skipped.push(`${rel}/ — deeper than ${maxDepth} folders`)
+          continue
+        }
+        walk(full, depth + 1)
+        continue
+      }
+      if (!entry.isFile()) continue
+      if (!SOURCE_EXTS.some((e) => entry.name.toLowerCase().endsWith(e))) {
+        skipped.push(`${rel} — not a PDF, spreadsheet, memo or image`)
+        continue
+      }
+      try {
+        if (statSync(full).size === 0) {
+          skipped.push(`${rel} — empty file`)
+          continue
+        }
+      } catch {
+        skipped.push(`${rel} — unreadable`)
+        continue
+      }
+      if (found.length >= cap) {
+        skipped.push(`${rel} — over the ${cap}-file limit for one folder`)
+        continue
+      }
+      found.push({ path: full, rel, folder: path.dirname(rel) === '.' ? '' : path.dirname(rel) })
+    }
+  }
+
+  walk(root, 0)
+  return { found, skipped }
+}
+
+registerTool(
+  'binder_add_folder',
+  {
+    title: 'Build a binder from a folder',
+    description:
+      "Import everything in a folder that a binder can hold — PDFs, spreadsheets, memos, scans — in the order a person would file them: subfolders in turn, and \"9\" before \"10\" rather than after. Reports what it took AND what it skipped with the reason for each, because a document missing because a tool quietly ignored it is the worst outcome. Subfolders are reported so you can bookmark by section afterwards.",
+    inputSchema: {
+      path: z.string().describe('The engagement folder'),
+      recurse: z.boolean().optional().describe('Include subfolders (default true)'),
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe('List what would be imported without changing the binder')
+    }
+  },
+  async ({ path: folder, recurse, dryRun }) => {
+    try {
+      const root = resolveAllowedPath(folder, { mustExist: true, purpose: 'reading a folder' })
+      if (!statSync(root).isDirectory()) return fail(`not a folder: ${root}`)
+      const { found, skipped } = scanFolder(root, recurse === false ? 0 : 4)
+      if (!found.length) {
+        return text(
+          `Nothing in ${baseName(root)} that a binder can hold.` +
+            (skipped.length ? `\n\nSkipped:\n${skipped.map((x) => `  ${x}`).join('\n')}` : '')
+        )
+      }
+
+      const plan = found.map((f) => `  ${f.rel}`).join('\n')
+      if (dryRun) {
+        return text(
+          `${found.length} file(s) would be imported from ${baseName(root)}, in this order:\n${plan}` +
+            (skipped.length ? `\n\nSkipped:\n${skipped.map((x) => `  ${x}`).join('\n')}` : '')
+        )
+      }
+
+      mutating('add_folder', `Imported ${found.length} file(s) from ${baseName(root)}`, true)
+      const failed: string[] = []
+      let added = 0
+      for (const f of found) {
+        const probe = await runEngine({ cmd: 'probe', path: f.path })
+        if (!probe.ok) {
+          failed.push(`${f.rel} — ${String(probe.error).slice(0, 120)}`)
+          continue
+        }
+        session = addSource(session, probe.probe as ProbeWire)
+        added += 1
+      }
+
+      const folders = [...new Set(found.map((f) => f.folder).filter(Boolean))]
+      return text(
+        `Imported ${added} of ${found.length} file(s) from ${baseName(root)}.\n\n` +
+          `${summary(session)}\n` +
+          (folders.length
+            ? `\nSubfolders, in order — bookmark by section if you want that structure:\n` +
+              folders.map((d) => `  ${d}/`).join('\n') +
+              '\n'
+            : '') +
+          (failed.length ? `\nCould not read:\n${failed.map((x) => `  ${x}`).join('\n')}\n` : '') +
+          (skipped.length ? `\nSkipped:\n${skipped.map((x) => `  ${x}`).join('\n')}\n` : '') +
+          `\nbinder_inventory will show where each one ended up.`
+      )
+    } catch (e) {
+      return fail(String((e as Error).message))
+    }
+  }
+)
 
 registerTool(
   'binder_inventory',
