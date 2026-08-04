@@ -32,6 +32,9 @@ MARK_COLORS: dict[str, tuple[float, float, float]] = {
     "tick": TICK_COLOR,
     "cross": (0.72, 0.15, 0.15),
     "text": (0.10, 0.33, 0.60),
+    # Amber: a note asks for attention without asserting a fault the way the
+    # cross does.
+    "note": (0.78, 0.51, 0.10),
 }
 TEXT_MARK_FONT_SIZE = 12.0
 TEXT_MARK_PAD = 4.0
@@ -200,6 +203,40 @@ def _display_author(spec: dict) -> str:
     return author
 
 
+def note_appearance(pdf: pikepdf.Pdf, rotate: int, size: float) -> pikepdf.Stream:
+    """A small sheet with a folded corner and two rules — a note.
+
+    pdfium and several other renderers draw nothing for a /Text annotation with
+    no appearance stream, so a note left by an agent would be invisible in our
+    own page view and thumbnails. Providing one costs nothing and makes the note
+    render identically everywhere.
+    """
+    r, g, b = MARK_COLORS["note"]
+    w = h = size
+    fold = size * 0.28
+    ops = [
+        f"{r:.4f} {g:.4f} {b:.4f} rg",
+        # Body with the top-right corner cut away.
+        f"0 0 m {w:.3f} 0 l {w:.3f} {h - fold:.3f} l {w - fold:.3f} {h:.3f} l 0 {h:.3f} l f",
+        # The fold itself, lighter so it reads as a turned corner.
+        "1 1 1 rg",
+        f"{w - fold:.3f} {h:.3f} m {w:.3f} {h - fold:.3f} l {w - fold:.3f} {h - fold:.3f} l f",
+        # Two rules, so it reads as writing rather than a blank tile.
+        "1 1 1 RG",
+        f"{size * 0.09:.3f} w",
+        f"{size * 0.18:.3f} {h * 0.38:.3f} m {w - size * 0.18:.3f} {h * 0.38:.3f} l S",
+        f"{size * 0.18:.3f} {h * 0.60:.3f} m {w - size * 0.45:.3f} {h * 0.60:.3f} l S",
+    ]
+    form = pdf.make_stream(" ".join(ops).encode("ascii"))
+    form[Name("/Type")] = Name.XObject
+    form[Name("/Subtype")] = Name.Form
+    form[Name("/BBox")] = Array([0, 0, w, h])
+    matrix = appearance_matrix(rotate)
+    if matrix:
+        form[Name("/Matrix")] = Array(matrix)
+    return form
+
+
 def _base_annot(
     pdf: pikepdf.Pdf,
     rect: tuple[float, float, float, float],
@@ -208,10 +245,11 @@ def _base_annot(
     author: str,
     contents: str,
     kind: str,
+    subtype=Name.Stamp,
 ) -> pikepdf.Object:
     annot = Dictionary(
         Type=Name.Annot,
-        Subtype=Name.Stamp,
+        Subtype=subtype,
         Rect=Array(list(rect)),
         AP=Dictionary(N=form),
         NM=String(nm),
@@ -262,6 +300,10 @@ def make_mark(
         text = str(spec.get("text", "")).strip() or "?"
         form, w, h = text_appearance(pdf, text, geom.rotate, size * 0.5, color)
         note = spec.get("note") or f"Mark: {text}"
+    elif kind == "note":
+        form = note_appearance(pdf, geom.rotate, size)
+        note = spec.get("note") or ""
+        w = h = size
     else:
         if kind == "cross":
             form = cross_appearance(pdf, geom.rotate, size, color)
@@ -272,7 +314,16 @@ def make_mark(
         w = h = size
 
     rect = visual_rect_to_user_rect(geom, float(spec["nx"]), float(spec["ny"]), w, h)
-    annot = _base_annot(pdf, rect, form, nm, author, str(note), kind)
+    # /Text, not /Stamp, for a note: that is the subtype Acrobat collects into
+    # its Comments pane, which is where a reviewer looks for review comments and
+    # how they survive to anyone who opens the exported binder.
+    annot = _base_annot(
+        pdf, rect, form, nm, author, str(note), kind,
+        subtype=Name.Text if kind == "note" else Name.Stamp,
+    )
+    if kind == "note":
+        annot[Name("/Name")] = Name("/Comment")
+        annot[Name("/Open")] = False
     payload = {k: v for k, v in spec.items() if k not in ("nx", "ny")}
     payload.update({"nx": spec["nx"], "ny": spec["ny"]})
     annot[Name("/WPT_Data")] = String(json.dumps(payload, separators=(",", ":")))

@@ -37,7 +37,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `verify:model` | 194 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
 | `verify:text` | 53 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
-| `verify:mcp` | 55 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
+| `verify:mcp` | 64 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, renders a synthetic PDF under `file://`, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
 
@@ -268,6 +268,30 @@ conformance runs pdfium *and* poppler.
 > Windows ends up on tesseract rather than `Windows.Media.Ocr`, that build has
 > to bundle it (~15–40 MB plus signing a second native binary) or require an
 > install. Tracked in `../ROADMAP.md`.
+
+## Review notes and flagging
+
+An agent that finds a problem needs somewhere to put it that a human will see;
+otherwise the finding dies in a chat log.
+
+- **`binder_add_note`** leaves a comment at a spot on a page. It exports as a
+  PDF **Text** annotation — the subtype Acrobat collects into its Comments pane
+  — so a reviewer finds it where they already look, and it survives to anyone
+  who opens the exported binder rather than only inside this app.
+- **`note` is its own mark kind**, not a comment hung off a tick. A tick means
+  *agreed*; putting one on something an agent is questioning tells a reviewer
+  the opposite of what was meant, and a reviewer scanning a binder reads the
+  glyph, not the hover text. Amber, because a note asks for attention without
+  asserting a fault the way the cross does.
+- **`binder_set_status`** gives agents the page statuses the app already had —
+  `reviewed` / `open` / `na`, or a firm's own legend — so a flag an agent sets
+  shows in the thumbnail rail and bookmark tree while a person scrolls.
+- **`binder_review_queue`** lists everything waiting on a person, in binder
+  order, with the note text and who left it. A page marked reviewed with
+  nothing outstanding stays out of it.
+
+Notes carry attribution like every other agent artifact, so the exported
+annotation reads `CJB (AI)`.
 
 ## Bookmarks move sections, not just labels
 

@@ -189,7 +189,7 @@ def export_binder(spec: dict) -> dict:
                 page_obj = page.obj
                 geom = _page_geom(page_obj)
                 nm = f"wpt-{a['kind']}-{i:04d}"
-                if a["kind"] in ("tick", "cross", "text"):
+                if a["kind"] in ("tick", "cross", "text", "note"):
                     annot = appearance.make_mark(out, geom, a, nm)
                 elif a["kind"] in ("rect", "ellipse", "line", "arrow", "highlight", "textbox"):
                     annot = shapes.make_shape(out, geom, a, nm)

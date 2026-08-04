@@ -52,6 +52,10 @@ import {
   rotatePages,
   rotateVisual,
   setBookmarkTitle,
+  setPageStatus,
+  clearPageStatus,
+  statusDefs,
+  statusOf,
   tapeTotal,
   toTapeEntry,
   toExportSpec,
@@ -562,7 +566,7 @@ registerTool(
       'Put a tick (agreed), cross (does not agree), or short lettered stamp on a page. Coordinates are normalized to the page as displayed: nx 0→1 left to right, ny 0→1 TOP TO BOTTOM.',
     inputSchema: {
       pageId: z.string(),
-      kind: z.enum(['tick', 'cross', 'text']),
+      kind: z.enum(['tick', 'cross', 'text', 'note']),
       nx: z.number().min(0).max(1),
       ny: z.number().min(0).max(1),
       text: z.string().max(8).optional().describe('Required for kind "text" — e.g. F, TB, PY'),
@@ -573,6 +577,9 @@ registerTool(
   async ({ pageId, kind, nx, ny, text: letters, size, note }) => {
     if (!session.pages.some((p) => p.id === pageId)) return fail(`unknown page id: ${pageId}`)
     if (kind === 'text' && !letters?.trim()) return fail('kind "text" needs the text to stamp')
+    if (kind === 'note' && !note?.trim()) {
+      return fail('kind "note" needs the note text — an empty comment tells a reviewer nothing')
+    }
     mutating(
       'place_mark',
       `Placed ${kind === 'text' ? `"${letters}"` : kind} on ${pageId} at (${nx}, ${ny})`
@@ -900,6 +907,108 @@ registerTool(
     } catch (e) {
       return fail(String((e as Error).message))
     }
+  }
+)
+
+registerTool(
+  'binder_add_note',
+  {
+    title: 'Leave a review note on a page',
+    description:
+      "Attach a comment to a spot on a page — a question, something that does not tie, a follow-up. Exports as a PDF Text annotation, which is what Acrobat collects into its Comments pane, so a reviewer finds it where they already look and it survives to anyone who opens the binder. Use this rather than a tick with a note attached: a tick means AGREED, and putting one on something you are questioning tells a reviewer the opposite of what you mean.",
+    inputSchema: {
+      pageId: z.string(),
+      note: z.string().min(1).describe('What you want the reviewer to read'),
+      nx: z.number().min(0).max(1).describe('0 = left edge, 1 = right'),
+      ny: z.number().min(0).max(1).describe('0 = top of page, 1 = bottom'),
+      flag: z
+        .boolean()
+        .optional()
+        .describe('Also mark the page as an open item, so it shows in binder_review_queue')
+    }
+  },
+  async ({ pageId, note, nx, ny, flag }) => {
+    if (!session.pages.some((p) => p.id === pageId)) return fail(`unknown page id: ${pageId}`)
+    // min(1) lets "  " through, and a whitespace-only comment is an annotation
+    // that wastes a reviewer's attention and says nothing.
+    if (!note.trim()) {
+      return fail('a note needs actual text — an empty comment tells a reviewer nothing')
+    }
+    mutating('add_note', `Noted on ${pageId}: ${note.trim().slice(0, 80)}`)
+    const res = addMark(session, { page: pageId, kind: 'note', nx, ny, size: 20, note: note.trim() })
+    session = res.session
+    if (flag) {
+      session = setPageStatus(session, [pageId], 'open', session.reviewer ?? '')
+    }
+    return text(
+      `Note left on ${pageId}${flag ? ' and flagged as an open item' : ''}.\n` +
+        `${session.marks?.length} annotation(s) total.`
+    )
+  }
+)
+
+registerTool(
+  'binder_set_status',
+  {
+    title: 'Set a page status',
+    description:
+      'Mark a page reviewed, an open item, or not applicable — the same statuses the app shows in the thumbnail rail and bookmark tree, so a flag an agent sets is visible to a person scrolling the binder. Pass null to clear.',
+    inputSchema: {
+      pageId: z.string(),
+      status: z
+        .string()
+        .nullable()
+        .describe('A status id from binder_review_queue (reviewed, open, na), or null to clear')
+    }
+  },
+  async ({ pageId, status }) => {
+    if (!session.pages.some((p) => p.id === pageId)) return fail(`unknown page id: ${pageId}`)
+    const defs = statusDefs(session)
+    if (status !== null && !defs.some((d) => d.id === status)) {
+      return fail(`unknown status "${status}" — this binder has: ${defs.map((d) => d.id).join(', ')}`)
+    }
+    const label = status ? defs.find((d) => d.id === status)!.label : 'cleared'
+    mutating('set_status', `Set ${pageId} to ${label}`, true)
+    session = status
+      ? setPageStatus(session, [pageId], status, session.reviewer ?? '')
+      : clearPageStatus(session, [pageId])
+    return text(`${pageId}: ${label}.`)
+  }
+)
+
+registerTool(
+  'binder_review_queue',
+  {
+    title: 'What still needs a human',
+    description:
+      "Everything in this binder waiting on a person, in binder order: pages flagged as open items, pages carrying notes, and crosses. Use it to hand work back — an agent's findings are only useful if a reviewer can walk them.",
+    inputSchema: {}
+  },
+  async () => {
+    const defs = statusDefs(session)
+    const rows: string[] = []
+    session.pages.forEach((p, i) => {
+      const st = statusOf(session, p.id)
+      const notes = (session.marks ?? []).filter((m) => m.page === p.id && m.kind === 'note')
+      const crosses = (session.marks ?? []).filter((m) => m.page === p.id && m.kind === 'cross')
+      if (!st && !notes.length && !crosses.length) return
+      // "Reviewed" is not waiting on anyone; it is shown only when the page
+      // also carries something unresolved.
+      if (st?.id === 'reviewed' && !notes.length && !crosses.length) return
+      const bits = [
+        `p.${i + 1}  ${p.id}`,
+        st ? `[${st.label}]` : '',
+        crosses.length ? `${crosses.length} cross(es)` : '',
+        ...notes.map((n) => `\n      note: ${n.note ?? ''}${n.by === 'agent' ? '  (AI)' : ''}`)
+      ].filter(Boolean)
+      rows.push(bits.join('  '))
+    })
+    const legend = `statuses in this binder: ${defs.map((d) => `${d.id} (${d.label})`).join(', ')}`
+    return text(
+      rows.length
+        ? `${rows.length} page(s) need attention:\n\n${rows.join('\n')}\n\n${legend}`
+        : `Nothing flagged. ${legend}`
+    )
   }
 )
 

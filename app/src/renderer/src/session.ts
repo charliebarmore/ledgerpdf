@@ -135,7 +135,13 @@ export interface UserBookmark extends Provenance {
 }
 
 /** The review-mark palette. Colors and glyphs are defined by the engine. */
-export type MarkKind = 'tick' | 'cross' | 'text'
+/**
+ * 'note' is a review comment, not a verdict. A tick means agreed and a cross
+ * means it does not — an agent flagging something to look at had neither, and
+ * hanging the question off a tick puts an "agreed" glyph on the very thing it
+ * is questioning.
+ */
+export type MarkKind = 'tick' | 'cross' | 'text' | 'note'
 
 /**
  * Mark glyphs and colours. These mirror engine appearance.MARK_COLORS: they are
@@ -146,13 +152,19 @@ export type MarkKind = 'tick' | 'cross' | 'text'
 export const MARK_GLYPH: Record<MarkKind, string> = {
   tick: '✓',
   cross: '✕',
-  text: ''
+  text: '',
+  // A universal symbol, per the project's glyph rule — this one needs no word.
+  note: '✎'
 }
 
 export const MARK_COLOR: Record<MarkKind, string> = {
   tick: 'rgb(33,140,33)',
   cross: 'rgb(184,38,38)',
-  text: 'rgb(26,84,153)'
+  text: 'rgb(26,84,153)',
+  // Amber: asks for attention without asserting a fault the way the cross does.
+  // Must match engine appearance.MARK_COLORS['note'] — annotation content, not
+  // UI theme.
+  note: 'rgb(199,130,26)'
 }
 
 const XML_ESCAPE: Record<string, string> = {

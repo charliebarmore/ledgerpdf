@@ -293,6 +293,76 @@ check(
   )
 )
 
+// ------------------------------------------------------- notes and flagging
+// An agent that finds a problem needs somewhere to put it that a human will
+// see. Otherwise the finding dies in a chat log.
+{
+  await call('binder_new')
+  await call('binder_add_pdfs', { paths: [a] })
+  await call('binder_set_reviewer', { initials: 'CJB' })
+  const ids = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+
+  check(
+    'an empty note is refused — it tells a reviewer nothing',
+    (await call('binder_add_note', { pageId: ids[0], note: '  ', nx: 0.5, ny: 0.5 })).isError
+  )
+  const noted = await call('binder_add_note', {
+    pageId: ids[0],
+    nx: 0.8,
+    ny: 0.13,
+    flag: true,
+    note: 'Wages do not agree to the W-2 summary — difference 80.00.'
+  })
+  check('a note can be left on a page and flag it', !noted.isError && noted.text.includes('open item'), noted.text)
+
+  check(
+    'an unknown status is refused with the ones this binder has',
+    (await call('binder_set_status', { pageId: ids[1], status: 'nope' })).text.includes('reviewed, open, na')
+  )
+  await call('binder_set_status', { pageId: ids[1], status: 'reviewed' })
+
+  const queue = await call('binder_review_queue')
+  check(
+    'the review queue lists the flagged page with its note',
+    queue.text.includes('Open item') && queue.text.includes('do not agree to the W-2'),
+    queue.text.split('\n').slice(0, 4).join(' | ')
+  )
+  check(
+    'the queue attributes the note to the AI',
+    queue.text.includes('(AI)'),
+    queue.text.split('\n').find((l) => l.includes('note:')) ?? ''
+  )
+  check(
+    'a page marked reviewed does not clutter the queue',
+    !queue.text.includes(ids[1]),
+    queue.text
+  )
+
+  // A note is only useful if a reviewer meets it where they already look.
+  const notePdf = path.join(REPO, 'spike', 'out', 'mcp_noted.pdf')
+  rmSync(notePdf, { force: true })
+  await call('binder_export', { output: notePdf })
+  const probed2 = await engine({ cmd: 'probe', path: notePdf })
+  const annots = probed2.ok
+    ? probed2.probe.pages.flatMap((p) => p.annotations ?? []).filter((x) => x.wpt_kind === 'note')
+    : []
+  check(
+    'a note exports as a PDF Text annotation, which is what Acrobat shows in its Comments pane',
+    annots.length === 1 && annots[0].subtype === '/Text',
+    JSON.stringify(annots.map((x) => x.subtype))
+  )
+  check(
+    'the reviewer reads the whole comment, not a truncated one',
+    (annots[0]?.wpt_data?.note ?? '').includes('difference 80.00'),
+    (annots[0]?.wpt_data?.note ?? '').slice(0, 60)
+  )
+  check(
+    'the note is attributed to the AI in the exported PDF',
+    (annots[0]?.author ?? '').includes('(AI)'),
+    annots[0]?.author
+  )
+}
+
 // ---------------------------------------------------------------------- OCR
 // A scan was the one thing the tie-out layer could not see at all.
 {
