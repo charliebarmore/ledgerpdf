@@ -1,7 +1,24 @@
-"""Render app/resources/icon.png — the source of both the Dock icon and the
-launcher's .icns. Brand teal from DESIGN.md, stacked sheets, a review tick.
+"""Render app/resources/icon.png — the single source for the Dock icon, the
+packaged macOS/Windows icons (electron-builder points at this file), and the
+launcher's .icns.
 
     engine/.venv/bin/python tools/launcher/make-icon.py
+
+DESIGN. Three elements, and each earns its place at 32px, which is where a Dock
+icon actually lives:
+
+  - **The sheet** says workpaper.
+  - **The green review tick** is the domain symbol — a preparer reads it
+    instantly, and it is the same workpaper-green as appearance.MARK_COLORS.
+    Dropping it would cost more recognition than any restyling could win back.
+  - **The sparkle cluster** says an agent did it. It sits clear of the sheet in
+    the corner rather than on top of it: overlapping versions merged into one
+    blob at 32px, and a robot glyph would date badly and say "chatbot" rather
+    than "this thing works on your binder".
+
+Anything more — a third sparkle, text lines inside the page, a sparkle in the
+document body — tested worse small. The page keeps three lines, not four, for
+the same reason.
 """
 
 from pathlib import Path
@@ -12,29 +29,48 @@ REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "app" / "resources" / "icon.png"
 S = 1024
 
+TEAL = (1, 105, 111, 255)          # DESIGN.md --primary
+GREEN = (33, 140, 33, 255)         # appearance.MARK_COLORS tick
+GOLD = (245, 197, 66, 255)         # reads as "spark" on teal; clear of the green
+PAPER = (255, 255, 255, 255)
+RULE = (190, 195, 195, 255)
+
+
+def sparkle(d: ImageDraw.ImageDraw, cx: float, cy: float, r: float, fill) -> None:
+    """A four-point star with a pinched waist — the motif that currently reads
+    as "AI" without borrowing a robot."""
+    w = r * 0.30
+    d.polygon(
+        [
+            (cx, cy - r), (cx + w, cy - w), (cx + r, cy), (cx + w, cy + w),
+            (cx, cy + r), (cx - w, cy + w), (cx - r, cy), (cx - w, cy - w),
+        ],
+        fill=fill,
+    )
+
 
 def main() -> None:
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
+
     # macOS icons sit inset in the canvas with a generous corner radius.
     m, r = 92, 200
-    d.rounded_rectangle([m, m, S - m, S - m], radius=r, fill=(1, 105, 111, 255))
+    d.rounded_rectangle([m, m, S - m, S - m], radius=r, fill=TEAL)
 
-    def sheet(x, y, w, h, fill):
-        d.rounded_rectangle([x, y, x + w, y + h], radius=18, fill=fill)
+    # A second sheet behind, just enough to read as a binder rather than a page.
+    d.rounded_rectangle([255, 250, 645, 770], radius=22, fill=(255, 255, 255, 150))
+    d.rounded_rectangle([225, 290, 615, 760], radius=22, fill=PAPER)
 
-    sheet(300, 250, 380, 500, (255, 255, 255, 90))
-    sheet(270, 285, 380, 500, (255, 255, 255, 160))
-    sheet(240, 320, 400, 420, (255, 255, 255, 255))
-    for i in range(4):
-        y = 390 + i * 55
-        d.rounded_rectangle(
-            [292, y, 292 + (250 if i % 2 == 0 else 190), y + 16],
-            radius=8,
-            fill=(190, 195, 195, 255),
-        )
-    # The tick is the workpaper-green from appearance.MARK_COLORS.
-    d.line([(430, 640), (500, 706), (640, 520)], fill=(33, 140, 33, 255), width=54, joint="curve")
+    for i in range(3):
+        y = 372 + i * 64
+        d.rounded_rectangle([282, y, 282 + (250 if i % 2 == 0 else 180), y + 18], radius=9, fill=RULE)
+
+    # Heavier than a UI tick: at 32px a thin stroke greys out into the page.
+    d.line([(300, 620), (390, 706), (560, 500)], fill=GREEN, width=62, joint="curve")
+
+    # Kept off the sheet and in from the corner — both were crowding at 32px.
+    sparkle(d, 706, 372, 146, GOLD)
+    sparkle(d, 828, 536, 72, GOLD)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     img.save(OUT)
