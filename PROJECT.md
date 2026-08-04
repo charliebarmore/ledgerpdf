@@ -108,7 +108,7 @@ BY AGENT (same binder, same model, no second-class path)
 
 | Question | Owner | Blocking? | Notes |
 | --- | --- | --- | --- |
-| Real product name | Charlie | No | "workpaper-tool" is the working name; decide before design partners see it |
+| Real product name | Charlie | **Yes, before code signing** | "Workpaper Binder" is the working name. The deadline is real: the name goes into a code-signing certificate, and changing product identity afterwards disrupts OS trust and update continuity. The rename itself is cheap — ~14 code sites plus docs and the launcher, and the live-agent endpoint directory is deliberately product-name-independent so a rename cannot silently stop agents finding the app. Candidates discussed 2026-08-04: **AgentBinder** (instantly clear, on-brand for selling through AI Lab/TCR; risk that "agent" dates, and descriptive-generic is hard to own) vs **Crossfoot** (accounting term for verifying totals tie — names the outcome, ages well, ownable, fits the tick icon, with the agent story in the tagline). Check domain + USPTO before committing. |
 | Sidecar packaging: PyInstaller vs Nuitka vs qpdf-CLI-only | Phase 5 | No (dev runs from the venv) | Decided by AV/SmartScreen behavior on the real Windows box |
 | ~~Commercial PDF SDK fallback needed?~~ | — | **Resolved 2026-07-27: No** | pikepdf/qpdf produced portable annotations in both pdfium and PDFKit; stage gate passed |
 | Real Windows x64 test hardware | Charlie | No (Phase 1), Yes (beta) | Mini PC vs. a design partner's workstation |
