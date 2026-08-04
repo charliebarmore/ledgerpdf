@@ -49,6 +49,12 @@ import {
   removeTapes,
   shapesOnPage,
   updateShape,
+  agentWork,
+  beginRun,
+  endRun,
+  record,
+  revertRun,
+  toSaved,
   rotatePages,
   rotateVisual,
   sanitizeTitle,
@@ -180,6 +186,92 @@ async function main(): Promise<number> {
   )
   t = rotatePages(s, [aIds[0]], -270)
   check('negative rotation normalizes', t.pages.find((p) => p.id === aIds[0])!.rotate === 270)
+
+  // --- attribution: a workpaper is evidence, so agent work must be findable
+  // and removable without touching a person's.
+  {
+    let w = s
+    const marksBefore = w.marks?.length ?? 0
+    // A person places a mark: no run open, so nothing extra is recorded.
+    w = addMark(w, { page: w.pages[0].id, kind: 'tick', nx: 0.1, ny: 0.1, size: 24 }).session
+    const human = w.marks![w.marks!.length - 1]
+    check('a human mark carries no agent attribution', !human.by && !human.run, JSON.stringify(human.by))
+    check('a human action writes nothing to the journal', (w.journal ?? []).length === 0)
+
+    const begun = beginRun(w)
+    w = begun.session
+    w = record(w, { action: 'place_mark', what: 'Ticked 84,200.00' })
+    w = addMark(w, { page: w.pages[0].id, kind: 'tick', nx: 0.2, ny: 0.2, size: 24 }).session
+    w = addTape(w, {
+      page: w.pages[0].id,
+      nx: 0.5,
+      ny: 0.5,
+      entries: [1, 2].map(toTapeEntry)
+    }).session
+    const agentMark = w.marks![w.marks!.length - 1]
+    check(
+      'a mark made during a run is stamped with the agent and the run',
+      agentMark.by === 'agent' && agentMark.run === begun.run,
+      `${agentMark.by} ${agentMark.run}`
+    )
+    check(
+      'agentWork counts only what the agent made',
+      agentWork(w).marks === 1 && agentWork(w).tapes === 1,
+      JSON.stringify(agentWork(w))
+    )
+
+    // Structural changes are recorded as unrevertible rather than pretended.
+    w = record(w, { action: 'move_pages', what: 'Moved 2 pages', structural: true })
+    const reverted = revertRun(w, begun.run)
+    check(
+      'reverting a run removes the agent annotations',
+      (reverted.session.marks?.length ?? 0) === marksBefore + 1 &&
+        (reverted.session.tapes?.length ?? 0) === (s.tapes?.length ?? 0),
+      `${reverted.session.marks?.length} marks left, removed ${reverted.removed}`
+    )
+    check(
+      "reverting leaves the person's own mark alone",
+      reverted.session.marks!.some((m) => m.id === human.id),
+      'human mark survived'
+    )
+    check(
+      'reverting reports the structural changes it could not undo',
+      reverted.structural.length === 1 && reverted.structural[0].what.includes('Moved'),
+      JSON.stringify(reverted.structural.map((e) => e.what))
+    )
+    check(
+      'the revert is itself recorded',
+      reverted.session.journal!.at(-1)!.action === 'revert_run',
+      reverted.session.journal!.at(-1)!.what
+    )
+    check('endRun clears the active run', !endRun(w).activeRun)
+
+    // The audit trail must survive a save/reopen round trip; the active run
+    // must NOT, or a person's later edits get stamped as the agent's.
+    const round = parseSession(JSON.parse(JSON.stringify(w)))
+    check(
+      'the journal survives save and reopen',
+      'session' in round && (round.session.journal?.length ?? 0) === (w.journal?.length ?? 0),
+      'session' in round ? String(round.session.journal?.length) : round.error
+    )
+    check(
+      'an active run does NOT survive reopen',
+      'session' in round && !round.session.activeRun,
+      'session' in round ? String(round.session.activeRun) : round.error
+    )
+    // Reading it back clean is not enough: the FILE must not claim an agent is
+    // working. Checking only the parsed form let a stale activeRun sit in a
+    // saved client record until the artifact itself was inspected.
+    check(
+      'a saved session file carries no activeRun at all',
+      !('activeRun' in JSON.parse(JSON.stringify(toSaved(w)))),
+      JSON.stringify(Object.keys(JSON.parse(JSON.stringify(toSaved(w)))))
+    )
+    check(
+      'a reopened agent mark keeps its attribution',
+      'session' in round && round.session.marks!.some((m) => m.by === 'agent' && m.run === begun.run)
+    )
+  }
 
   // --- rotateVisual: turns extracted text coordinates into the binder's own
   // display space. A wrong quadrant here puts an agent's tick on the wrong

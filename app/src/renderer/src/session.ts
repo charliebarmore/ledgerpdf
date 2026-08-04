@@ -8,7 +8,15 @@
  * numbers are computed only at export and page moves carry everything along.
  */
 
-export const SESSION_FORMAT_VERSION = 1
+/**
+ * 2 — added agent attribution: provenance on annotations plus the journal.
+ *
+ * Bumped rather than added quietly. A build that predates attribution would
+ * open a v2 session, ignore the journal, and drop it on the next save —
+ * silently destroying an audit trail. The version guard makes such a build
+ * refuse to open the file instead, which is the right failure for a record.
+ */
+export const SESSION_FORMAT_VERSION = 2
 
 // ------------------------------------------------------------------- types
 
@@ -73,7 +81,52 @@ export function pageSize(p: BinderPage): { w: number; h: number } {
  * A bookmark the user created (as opposed to one imported from a source PDF's
  * own outline). Anchored to a page id, so it moves with its page.
  */
-export interface UserBookmark {
+/**
+ * Who made a change. Absent means a person: everything written before
+ * attribution shipped was, and saying so implicitly keeps files small.
+ */
+export type Actor = 'human' | 'agent'
+
+/**
+ * Attribution carried by anything an agent creates.
+ *
+ * A workpaper is evidence. "The AI changed something and I cannot tell what"
+ * is the first thing that fails a file review, so every artifact an agent
+ * produces names itself and names the run it belongs to.
+ */
+export interface Provenance {
+  by?: Actor
+  /** Groups one agent session's work, so it can be reviewed or undone as a batch. */
+  run?: string
+}
+
+/**
+ * One recorded action. The journal answers "what did the AI do to this file",
+ * in order, in the reviewer's language.
+ *
+ * Deliberately records AGENT actions only. Journaling every human keystroke
+ * would turn an engagement record into an input log without answering the
+ * question anyone actually asks of it.
+ */
+export interface JournalEntry {
+  id: string
+  /** ISO timestamp. */
+  at: string
+  by: Actor
+  run?: string
+  /** Machine-readable, e.g. 'place_mark'. */
+  action: string
+  /** Human-readable, e.g. 'Ticked 84,200.00 on pg_7'. */
+  what: string
+  /**
+   * Set when reverting the run cannot undo this. Reordering, rotation and
+   * deletion change the binder itself rather than adding something removable,
+   * so revert reports them instead of pretending.
+   */
+  structural?: boolean
+}
+
+export interface UserBookmark extends Provenance {
   id: string
   page: string
   title: string
@@ -162,7 +215,7 @@ export const SHAPE_WIDTH_MAX = 8
 /** Highlighter appearance, mirrored from engine shapes.py for the preview. */
 export const HIGHLIGHT_FILL = 'rgba(255,235,59,0.4)'
 
-export interface Shape {
+export interface Shape extends Provenance {
   id: string
   page: string
   kind: ShapeKind
@@ -310,7 +363,7 @@ export function isShapeKind(k: ToolKind): k is ShapeKind {
  * ny top→bottom — exactly what a click on the rendered canvas gives, and
  * exactly what the engine's geometry module consumes.
  */
-export interface Mark {
+export interface Mark extends Provenance {
   id: string
   page: string
   kind: MarkKind
@@ -357,7 +410,7 @@ export interface TapeEntry {
   note?: string
 }
 
-export interface Tape {
+export interface Tape extends Provenance {
   id: string
   page: string
   /** Center of the tape card, normalized against the page as displayed. */
@@ -415,6 +468,16 @@ export interface Session {
   statusParts?: StatusParts
   /** Binder page numbering, applied at export. */
   numbering?: Numbering
+  /**
+   * What agents have done to this binder, oldest first. Part of the record —
+   * it travels with the session and is never pruned automatically.
+   */
+  journal?: JournalEntry[]
+  /**
+   * The run currently being recorded into. Set while an agent is working; new
+   * artifacts are stamped with it. Absent means a person is at the keyboard.
+   */
+  activeRun?: string
 }
 
 export interface BookmarkNode {
@@ -618,6 +681,140 @@ export function deletePages(session: Session, ids: string[]): Session {
 // ---------------------------------------------------------------------- marks
 
 /** Place a mark on a page at normalized display coordinates. */
+// ------------------------------------------------------------ attribution
+
+/**
+ * Open an agent run. Everything created until `endRun` is stamped with it and
+ * can be reviewed — or removed — as one batch.
+ */
+export function beginRun(session: Session): { session: Session; run: string } {
+  const seq = session.seq + 1
+  const run = `run_${seq}`
+  return { session: { ...session, seq, activeRun: run }, run }
+}
+
+export function endRun(session: Session): Session {
+  const { activeRun: _dropped, ...rest } = session
+  return rest
+}
+
+/**
+ * The session as it should be written to disk.
+ *
+ * `activeRun` is process state, not record state — it means "an agent is
+ * working right now", which is never true of a file sitting on disk. Writing
+ * it would put a false claim into a client record, and any reader that did not
+ * go through `parseSession` would believe it. Stripped at the one place every
+ * writer goes through, rather than trusting each caller to remember.
+ */
+export function toSaved(session: Session): Session {
+  return endRun(session)
+}
+
+/** Append to the record. No-op for human actions — see JournalEntry. */
+export function record(
+  session: Session,
+  entry: { action: string; what: string; structural?: boolean }
+): Session {
+  if (!session.activeRun) return session
+  const seq = session.seq + 1
+  const next: JournalEntry = {
+    id: `je_${seq}`,
+    at: new Date().toISOString(),
+    by: 'agent',
+    run: session.activeRun,
+    action: entry.action,
+    what: entry.what,
+    ...(entry.structural ? { structural: true } : {})
+  }
+  return { ...session, seq, journal: [...(session.journal ?? []), next] }
+}
+
+/**
+ * Undo an agent run by removing everything it added.
+ *
+ * Deliberately NOT a snapshot restore. Restoring the binder to its pre-run
+ * state would also discard whatever a person did while the agent worked, and
+ * would mean storing a copy of the engagement record inside itself. Removing
+ * stamped artifacts touches only the agent's own work.
+ *
+ * The honest cost: reordering, rotation and deletion changed the binder rather
+ * than adding something removable, so they survive. They are reported instead
+ * of being silently left behind.
+ */
+export function revertRun(
+  session: Session,
+  run: string
+): { session: Session; removed: number; structural: JournalEntry[] } {
+  const mine = <T extends Provenance>(xs: T[] | undefined): T[] => (xs ?? []).filter((x) => x.run === run)
+  const removed =
+    mine(session.marks).length +
+    mine(session.tapes).length +
+    mine(session.shapes).length +
+    mine(session.bookmarks).length
+  const drop = <T extends Provenance>(xs: T[] | undefined): T[] | undefined =>
+    xs ? xs.filter((x) => x.run !== run) : xs
+  const structural = (session.journal ?? []).filter((e) => e.run === run && e.structural)
+
+  let next: Session = {
+    ...session,
+    ...(session.marks ? { marks: drop(session.marks)! } : {}),
+    ...(session.tapes ? { tapes: drop(session.tapes)! } : {}),
+    ...(session.shapes ? { shapes: drop(session.shapes)! } : {}),
+    ...(session.bookmarks ? { bookmarks: drop(session.bookmarks)! } : {})
+  }
+  // The revert is itself part of the record — including what it could not undo.
+  const seq = next.seq + 1
+  next = {
+    ...next,
+    seq,
+    journal: [
+      ...(next.journal ?? []),
+      {
+        id: `je_${seq}`,
+        at: new Date().toISOString(),
+        by: 'human',
+        action: 'revert_run',
+        what:
+          `Reverted ${run}: removed ${removed} agent annotation(s)` +
+          (structural.length
+            ? `; ${structural.length} structural change(s) could not be undone`
+            : '')
+      }
+    ]
+  }
+  return { session: next, removed, structural }
+}
+
+/** What an agent has touched in this binder — the reviewer's summary. */
+export function agentWork(session: Session): {
+  runs: string[]
+  marks: number
+  tapes: number
+  shapes: number
+  bookmarks: number
+} {
+  const byAgent = <T extends Provenance>(xs: T[] | undefined): number =>
+    (xs ?? []).filter((x) => x.by === 'agent').length
+  return {
+    runs: [...new Set((session.journal ?? []).map((e) => e.run).filter(Boolean) as string[])],
+    marks: byAgent(session.marks),
+    tapes: byAgent(session.tapes),
+    shapes: byAgent(session.shapes),
+    bookmarks: byAgent(session.bookmarks)
+  }
+}
+
+/**
+ * Attribution to stamp on something being created right now.
+ *
+ * Empty when no run is active, so a person's work carries no extra fields and
+ * a session written by hand is byte-identical to one from before attribution.
+ */
+export function stamp(session: Session): Provenance {
+  return session.activeRun ? { by: 'agent', run: session.activeRun } : {}
+}
+
 export function addMark(
   session: Session,
   mark: Omit<Mark, 'id' | 'created' | 'author'> & { author?: string }
@@ -626,6 +823,7 @@ export function addMark(
   const id = `mk_${seq}`
   const next: Mark = {
     ...mark,
+    ...stamp(session),
     id,
     author: mark.author ?? session.reviewer ?? '',
     created: new Date().toISOString()
@@ -1060,6 +1258,7 @@ export function addTape(
   const id = `tp_${seq}`
   const next: Tape = {
     ...tape,
+    ...stamp(session),
     id,
     author: tape.author ?? session.reviewer ?? '',
     created: new Date().toISOString()
@@ -1331,7 +1530,10 @@ export function addBookmark(
     session: {
       ...session,
       seq,
-      bookmarks: [...(session.bookmarks ?? []), { id, page: pageId, title, depth }]
+      bookmarks: [
+        ...(session.bookmarks ?? []),
+        { id, page: pageId, title, depth, ...stamp(session) }
+      ]
     },
     key: `${USER_BOOKMARK_PREFIX}${id}`
   }
@@ -1605,7 +1807,12 @@ export function toExportSpec(
         ...(m.text ? { text: m.text } : {}),
         ...(m.author ? { author: m.author } : {}),
         ...(m.note ? { note: m.note } : {}),
-        ...(m.created ? { created: m.created } : {})
+        ...(m.created ? { created: m.created } : {}),
+        // Attribution travels into the PDF: /WPT_Data keeps the raw values and
+        // the visible author is qualified, so a reviewer opening the exported
+        // binder in any viewer can tell agent work from a person's.
+        ...(m.by ? { by: m.by } : {}),
+        ...(m.run ? { run: m.run } : {})
       })),
       // Drawn annotations. Two corners, not a point — the engine turns them
       // into stroked paths sized to the drag.
@@ -1623,7 +1830,9 @@ export function toExportSpec(
           ...(x.text ? { text: x.text } : {}),
           ...(x.author ? { author: x.author } : {}),
           ...(x.note ? { note: x.note } : {}),
-          ...(x.created ? { created: x.created } : {})
+          ...(x.created ? { created: x.created } : {}),
+          ...(x.by ? { by: x.by } : {}),
+          ...(x.run ? { run: x.run } : {})
         })),
       // Page numbers, from each page's FINAL position in the binder.
       ...(() => {
@@ -1692,7 +1901,9 @@ export function toExportSpec(
             ...(t.title ? { title: t.title } : {}),
             ...(t.created ? { created: t.created } : {})
           },
-          ...(t.author ? { author: t.author } : {})
+          ...(t.author ? { author: t.author } : {}),
+          ...(t.by ? { by: t.by } : {}),
+          ...(t.run ? { run: t.run } : {})
         }))
     ],
     ...(flatten ? { flatten: true } : {}),
@@ -1791,6 +2002,17 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
           }
         : {}),
       ...(typeof s.reviewer === 'string' ? { reviewer: s.reviewer } : {}),
+      // The audit trail survives reopen intact. `activeRun` deliberately does
+      // NOT: a run belongs to the agent process that opened it, and reviving
+      // one would silently stamp a person's later edits as the AI's work.
+      ...(Array.isArray(s.journal)
+        ? {
+            journal: s.journal.filter(
+              (e): e is JournalEntry =>
+                !!e && typeof e.id === 'string' && typeof e.what === 'string'
+            )
+          }
+        : {}),
       ...(Array.isArray(s.stamps)
         ? {
             stamps: [

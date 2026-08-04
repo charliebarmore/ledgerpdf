@@ -196,7 +196,7 @@ def export_binder(spec: dict) -> dict:
                 elif a["kind"] == "tape":
                     annot = appearance.make_tape(
                         out, geom, a["nx"], a["ny"], a["lines"], a.get("tape", {}),
-                        nm, author=a.get("author", ""),
+                        nm, author=appearance._display_author(a),
                     )
                 else:
                     raise ValueError(f"unknown annotation kind: {a['kind']}")

@@ -130,12 +130,17 @@ if (existsSync(OUT_PDF)) {
     : []
   check(
     'review marks placed in the app land in the exported PDF',
-    marks.length === 4 &&
+    marks.length === 5 &&
       marks
         .filter((m) => m.wpt_kind !== 'tape')
         .every((m) => m.has_ap && m.wpt_data?.author === 'CJB') &&
       marks.some((m) => m.wpt_data?.text === 'F'),
     JSON.stringify(marks.map((m) => [m.wpt_kind, m.wpt_data?.author, m.wpt_data?.text]))
+  )
+  check(
+    'an agent-placed mark is attributed to the AI in the exported PDF',
+    marks.filter((m) => (m.author ?? '').includes('(AI)')).length === 1,
+    JSON.stringify(marks.map((m) => [m.wpt_kind, m.author]))
   )
   check(
     'a user-defined custom stamp exports with its own letters',

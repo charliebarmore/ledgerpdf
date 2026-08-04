@@ -34,9 +34,9 @@ npm run verify     # typecheck + model verification + GUI smoke test
 |---|---|
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
-| `verify:model` | 106 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
+| `verify:model` | 181 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
 | `verify:text` | 17 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
-| `verify:mcp` | 41 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
+| `verify:mcp` | 49 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs and a receipt photo → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, renders a synthetic PDF under `file://`, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
 
@@ -130,6 +130,41 @@ This app holds client tax documents, so the boundaries are deliberate:
 - Packaged builds run that engine as a frozen, platform-native executable from
   the app's sealed resources; they never discover or invoke a workstation's
   ambient Python installation.
+
+## Agent attribution
+
+A workpaper is evidence, so a reviewer must be able to tell automated work from
+their own — and take it back out.
+
+- Anything an agent creates is stamped `by: 'agent'` with the **run** it belongs
+  to. Human work carries no extra fields, so a hand-made session is identical to
+  one written before attribution existed.
+- The session keeps a **journal** of every agent action, in order, in the
+  reviewer's language. It travels with the file and is never pruned.
+  Deliberately agent-only: journaling every human keystroke would turn an
+  engagement record into an input log without answering the question anyone
+  asks of it.
+- The status bar says **"N by AI"** on open, and the mark inspector names the
+  placer. Nobody has to go looking.
+- In the exported PDF the visible author becomes `CJB (AI)` — the raw initials
+  stay in `/WPT_Data`. Without this an agent placing marks under the reviewer's
+  initials would appear in Acrobat as the reviewer: a person's signature on work
+  they did not do.
+- `binder_revert_run` removes everything a run added. It is **not** a snapshot
+  restore, deliberately: rolling the binder back would also discard whatever a
+  person did alongside the agent, and would mean storing a copy of the
+  engagement record inside itself. The cost is that reordering, rotation and
+  deletion are not undone — so the result says exactly which ones survived
+  rather than looking complete. Deletions name the pages they removed, because
+  nothing else can bring them back.
+- `activeRun` is process state and is stripped before writing. A file on disk
+  must never claim an agent is working in it.
+
+Session format **2** carries this. The version was bumped rather than added
+quietly: a build predating attribution would open a v2 session, ignore the
+journal, and drop it on the next save — silently destroying an audit trail. The
+guard makes such a build refuse the file instead, which is the right failure for
+a record.
 
 ## Session durability
 

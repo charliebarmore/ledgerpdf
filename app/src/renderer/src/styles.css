@@ -940,6 +940,14 @@ button.link {
   flex: none;
 }
 
+/* Agent attribution. --warning, not --primary: this is meant to be noticed
+   before someone signs the file, which is a different job from the app's
+   ordinary accent. Not --error either — automated work is not a fault. */
+.mi-agent > b,
+.ai-count {
+  color: var(--warning);
+}
+
 .mi-row input {
   font: inherit;
   flex: 1;
@@ -1167,6 +1175,12 @@ button.link {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+}
+
+/* Excluded rather than out-specified: `.counts b` would otherwise win on
+   specificity and repaint the AI count as ordinary text — the same way
+   `button:hover` once beat `.primary` and blanked the Export button. */
+.counts b:not(.ai-count) {
   color: var(--text);
 }
 

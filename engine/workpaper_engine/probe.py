@@ -98,6 +98,10 @@ def _annot_summary(annot, page_map) -> dict:
         "subtype": str(subtype) if subtype is not None else None,
         "rect": [float(v) for v in annot.Rect] if Name.Rect in annot else None,
         "nm": str(annot.get(Name.NM)) if Name.NM in annot else None,
+        # /T is the name a viewer displays against the annotation. Exposed so
+        # attribution can be checked as a reviewer would see it, rather than
+        # only in our own private /WPT_Data.
+        "author": sanitize_text(str(annot[Name.T])) if Name.T in annot else None,
         "has_ap": Name.AP in annot,
     }
     if Name("/WPT_Kind") in annot:

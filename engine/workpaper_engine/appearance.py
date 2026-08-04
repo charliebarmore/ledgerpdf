@@ -186,6 +186,20 @@ def tape_appearance(
     return form, w, h
 
 
+def _display_author(spec: dict) -> str:
+    """The name a viewer shows against an annotation.
+
+    An agent placing marks under the reviewer's initials would show up in
+    Acrobat as the reviewer — a person's signature on work they did not do,
+    which is precisely what a file review must be able to tell apart. The raw
+    initials stay in /WPT_Data; only the visible author is qualified.
+    """
+    author = str(spec.get("author", ""))
+    if spec.get("by") == "agent":
+        return f"{author} (AI)" if author else "AI"
+    return author
+
+
 def _base_annot(
     pdf: pikepdf.Pdf,
     rect: tuple[float, float, float, float],
@@ -241,7 +255,7 @@ def make_mark(
     """
     kind = spec.get("kind", "tick")
     size = float(spec.get("size", TICK_SIZE))
-    author = str(spec.get("author", ""))
+    author = _display_author(spec)
     color = MARK_COLORS.get(kind, TICK_COLOR)
 
     if kind == "text":

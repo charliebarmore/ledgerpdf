@@ -114,6 +114,13 @@ export function MarkInspector({
           />
         </label>
 
+        {mark.by === 'agent' ? (
+          <div className="mi-row mi-agent" title={`Placed by an agent during ${mark.run ?? 'an AI run'}`}>
+            <span>Placed by</span>
+            <b>AI</b>
+          </div>
+        ) : null}
+
         <label className="mi-row">
           <span>Note</span>
           <input

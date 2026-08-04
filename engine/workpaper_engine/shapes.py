@@ -22,6 +22,7 @@ from __future__ import annotations
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
+from .appearance import _display_author
 from .geometry import PageGeom, appearance_matrix, visual_rect_to_user_rect
 
 # Named colors, so the app and the engine cannot drift into different reds.
@@ -255,7 +256,7 @@ def make_shape(pdf: pikepdf.Pdf, geom: PageGeom, spec: dict, nm: str) -> pikepdf
         Rect=Array(list(rect)),
         AP=Dictionary(N=form),
         NM=String(nm),
-        T=String(str(spec.get("author", ""))),
+        T=String(_display_author(spec)),
         Contents=String(str(spec.get("note", "") or _default_note(kind, spec))),
         F=4,  # print flag — drawn annotations are part of the record
     )

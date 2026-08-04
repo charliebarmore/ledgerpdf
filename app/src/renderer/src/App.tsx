@@ -15,6 +15,8 @@ import {
   STAMP_MAX_LEN,
   addBookmark,
   addMark,
+  endRun,
+  beginRun,
   addSource,
   addShape,
   assignBookmarkPage,
@@ -115,6 +117,11 @@ export default function App(): React.JSX.Element {
   const saving = useRef(false)
 
   const pages = session.pages
+  /** Annotations an agent placed, so the status bar can say so on open. */
+  const aiCount =
+    (session.marks ?? []).filter((m) => m.by === 'agent').length +
+    (session.tapes ?? []).filter((t) => t.by === 'agent').length +
+    (session.shapes ?? []).filter((x) => x.by === 'agent').length
   const serializedSession = useMemo(() => JSON.stringify(session), [session])
   const dirty = serializedSession !== lastSaved.current
   const current = useMemo(
@@ -866,6 +873,24 @@ export default function App(): React.JSX.Element {
           size: 24,
           text: 'TB'
         }).session
+        // One mark placed as an agent would place it, so the smoke covers the
+        // attribution path end to end: stamped in the model, shown in the UI,
+        // and exported as "(AI)" rather than under the reviewer's initials.
+        // On page 1, not page 0: this is a green tick, and page 0's green
+        // centroid check would then average two green objects. Same "one
+        // asserted colour per page" rule the conformance harness follows.
+        {
+          const run = beginRun(imported)
+          const agent = addMark(run.session, {
+            page: imported.pages[1].id,
+            kind: 'tick',
+            nx: 0.28,
+            ny: 0.62,
+            size: 24,
+            note: 'Placed by an agent'
+          })
+          imported = endRun(agent.session)
+        }
         // A tape with lines already on it, so the smoke test exercises the
         // grid and the export rather than an empty card.
         const tape = addTape(imported, {
@@ -1418,6 +1443,17 @@ export default function App(): React.JSX.Element {
           {session.tapes?.length ? (
             <>
               {' '}· <b>{session.tapes.length}</b> tape{session.tapes.length === 1 ? '' : 's'}
+            </>
+          ) : null}
+          {/* Opening a binder an agent worked on should say so without being
+              asked. A reviewer signing this file needs to know before they
+              scroll, not after. */}
+          {aiCount ? (
+            <>
+              {' '}·{' '}
+              <b className="ai-count" title="Annotations placed by an agent, not by you">
+                {aiCount} by AI
+              </b>
             </>
           ) : null}
         </span>

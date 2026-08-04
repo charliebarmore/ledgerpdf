@@ -34,6 +34,8 @@ import { atomicWriteJson, readSessionWithRecovery } from '../main/persistence'
 import {
   addBookmark,
   addMark,
+  agentWork,
+  beginRun,
   addSource,
   addTape,
   baseName,
@@ -43,15 +45,19 @@ import {
   movePages,
   newSession,
   parseSession,
+  record,
   removeMarks,
   removeTapes,
+  revertRun,
   rotatePages,
   rotateVisual,
   setBookmarkTitle,
   tapeTotal,
   toTapeEntry,
   toExportSpec,
+  toSaved,
   type BookmarkNode,
+  type JournalEntry,
   type ProbeWire,
   type Session
 } from '../renderer/src/session'
@@ -61,6 +67,18 @@ import {
 /** The working binder. One per server process, like one open document. */
 let session: Session = newSession()
 let sessionPath: string | null = null
+
+/**
+ * Everything this server changes is agent work, so a run is opened on the
+ * first mutation and every artifact created under it is stamped.
+ *
+ * Opened lazily rather than at connect: a server that only ever reads should
+ * not leave a run in someone's engagement record.
+ */
+function mutating(action: string, what: string, structural = false): void {
+  if (!session.activeRun) session = beginRun(session).session
+  session = record(session, { action, what, structural })
+}
 
 const text = (s: string): { content: Array<{ type: 'text'; text: string }> } => ({
   content: [{ type: 'text', text: s }]
@@ -314,7 +332,7 @@ server.registerTool(
       : sessionPath
     if (!target) return fail('no path given and this session has never been saved')
     try {
-      await atomicWriteJson(target, session)
+      await atomicWriteJson(target, toSaved(session))
       sessionPath = target
       return text(`Saved ${summary(session)}\n→ ${target}\nOpen it in Workpaper Binder to review.`)
     } catch (e) {
@@ -344,6 +362,7 @@ server.registerTool(
       }
     }
     session = next
+    mutating('add_sources', `Imported ${paths.length} file(s): ${paths.map((x) => baseName(x)).join(', ')}`, true)
     const added = paths.length - failed.length
     return text(
       `Added ${added} file(s). ${summary(session)}` +
@@ -369,6 +388,7 @@ server.registerTool(
     const unknown = pageIds.filter((id) => !known.has(id))
     if (unknown.length) return fail(`unknown page id(s): ${unknown.join(', ')}`)
     session = movePages(session, pageIds, beforeIndex)
+    mutating('move_pages', `Moved ${pageIds.length} page(s) to position ${beforeIndex + 1}`, true)
     return text(`Moved ${pageIds.length} page(s).\n\n${pageTable(session)}`)
   }
 )
@@ -387,6 +407,7 @@ server.registerTool(
   async ({ pageIds, degrees }) => {
     if (degrees % 90 !== 0) return fail('degrees must be a multiple of 90')
     session = rotatePages(session, pageIds, degrees)
+    mutating('rotate_pages', `Rotated ${pageIds.length} page(s) by ${degrees}°`, true)
     return text(`Rotated ${pageIds.length} page(s) by ${degrees}°.`)
   }
 )
@@ -401,6 +422,9 @@ server.registerTool(
   },
   async ({ pageIds }) => {
     const before = session.pages.length
+    // Deletion is the one destructive structural act. Name the pages in the
+    // record, because reverting the run cannot restore them.
+    mutating('delete_pages', `Deleted ${pageIds.length} page(s): ${pageIds.join(', ')}`, true)
     session = deletePages(session, pageIds)
     return text(`Deleted ${before - session.pages.length} page(s). ${summary(session)}`)
   }
@@ -436,6 +460,7 @@ server.registerTool(
   },
   async ({ pageId, title, depth }) => {
     if (!session.pages.some((p) => p.id === pageId)) return fail(`unknown page id: ${pageId}`)
+    mutating('add_bookmark', `Bookmarked ${pageId} as "${title}"`)
     const res = addBookmark(session, pageId, title, depth ?? 0)
     session = res.session
     return text(`Added bookmark "${title}" on ${pageId} (key ${res.key}).`)
@@ -452,6 +477,7 @@ server.registerTool(
   },
   async ({ key, title }) => {
     session = setBookmarkTitle(session, key, title)
+    mutating('rename_bookmark', `Renamed bookmark ${key} to "${title}"`, true)
     return text(`Renamed ${key}${title ? ` to "${title}"` : ' back to its imported title'}.`)
   }
 )
@@ -465,6 +491,7 @@ server.registerTool(
   },
   async ({ initials }) => {
     session = { ...session, reviewer: initials.toUpperCase().slice(0, 4) }
+    mutating('set_reviewer', `Set reviewer initials to ${initials.toUpperCase().slice(0, 4)}`, true)
     return text(`Reviewer set to ${session.reviewer}.`)
   }
 )
@@ -488,6 +515,10 @@ server.registerTool(
   async ({ pageId, kind, nx, ny, text: letters, size, note }) => {
     if (!session.pages.some((p) => p.id === pageId)) return fail(`unknown page id: ${pageId}`)
     if (kind === 'text' && !letters?.trim()) return fail('kind "text" needs the text to stamp')
+    mutating(
+      'place_mark',
+      `Placed ${kind === 'text' ? `"${letters}"` : kind} on ${pageId} at (${nx}, ${ny})`
+    )
     const res = addMark(session, {
       page: pageId,
       kind,
@@ -549,6 +580,7 @@ server.registerTool(
   },
   async ({ markIds }) => {
     const before = (session.marks?.length ?? 0) + (session.tapes?.length ?? 0)
+    mutating('remove_annotations', `Removed ${markIds.length} annotation(s): ${markIds.join(', ')}`, true)
     session = removeTapes(removeMarks(session, markIds), markIds)
     const after = (session.marks?.length ?? 0) + (session.tapes?.length ?? 0)
     if (after === before) return fail(`no marks or tapes matched: ${markIds.join(', ')}`)
@@ -576,6 +608,10 @@ server.registerTool(
   async ({ pageId, nx, ny, entries, title }) => {
     if (!session.pages.some((p) => p.id === pageId)) return fail(`unknown page id: ${pageId}`)
     const lines = entries.map((e) => toTapeEntry(e as never))
+    mutating(
+      'add_tape',
+      `Tape on ${pageId}${title ? ` ("${title}")` : ''}: ${lines.length} line(s), total ${formatAmount(tapeTotal(lines))}`
+    )
     const res = addTape(session, { page: pageId, nx, ny, entries: lines, ...(title ? { title } : {}) })
     session = res.session
     return text(
@@ -617,6 +653,63 @@ server.registerTool(
           ? `qpdf validation: ${r.check_problems.length} problem(s): ${r.check_problems.join('; ')}`
           : 'qpdf validation: clean')
     )
+  }
+)
+
+// ------------------------------------------------------- audit and revert
+
+function journalLines(entries: JournalEntry[]): string {
+  return entries
+    .map(
+      (e) =>
+        `${e.at.slice(0, 19).replace('T', ' ')}  ${e.by === 'agent' ? 'AI ' : 'you'}  ` +
+        `${e.what}${e.structural ? '   [structural — revert cannot undo this]' : ''}` +
+        `${e.run ? `   (${e.run})` : ''}`
+    )
+    .join('\n')
+}
+
+server.registerTool(
+  'binder_history',
+  {
+    title: 'What has been done to this binder',
+    description:
+      'The record of every change an agent has made to this binder, in order, with what can and cannot be undone. A workpaper is evidence — use this to show a reviewer exactly what was automated.',
+    inputSchema: {
+      run: z.string().optional().describe('Restrict to one run id')
+    }
+  },
+  async ({ run }) => {
+    const all = session.journal ?? []
+    const entries = run ? all.filter((e) => e.run === run) : all
+    const work = agentWork(session)
+    const head =
+      `${entries.length} recorded change(s)` +
+      (work.runs.length ? ` across ${work.runs.length} run(s): ${work.runs.join(', ')}` : '') +
+      `\nStill present from agent work: ${work.marks} mark(s), ${work.tapes} tape(s), ` +
+      `${work.shapes} shape(s), ${work.bookmarks} bookmark(s)`
+    return text(entries.length ? `${head}\n\n${journalLines(entries)}` : `${head}\n\nNothing recorded.`)
+  }
+)
+
+server.registerTool(
+  'binder_revert_run',
+  {
+    title: 'Undo an agent run',
+    description:
+      "Remove everything an agent run added — its marks, tapes, shapes and bookmarks. Deliberately does NOT roll the binder back to a snapshot, so anything a person did alongside the agent is untouched. Page order, rotation and deletions are NOT undone; the result says exactly which ones survived.",
+    inputSchema: { run: z.string().describe('Run id, from binder_history') }
+  },
+  async ({ run }) => {
+    const known = new Set((session.journal ?? []).map((e) => e.run).filter(Boolean))
+    if (!known.has(run)) return fail(`unknown run: ${run} — see binder_history`)
+    const res = revertRun(session, run)
+    session = res.session
+    const tail = res.structural.length
+      ? `\n\n${res.structural.length} change(s) could NOT be undone, because they altered the binder rather than adding something removable:\n` +
+        res.structural.map((e) => `  ${e.what}`).join('\n')
+      : ''
+    return text(`Reverted ${run}: removed ${res.removed} agent annotation(s).${tail}\n\n${summary(session)}`)
   }
 )
 

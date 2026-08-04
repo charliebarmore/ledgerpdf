@@ -288,6 +288,66 @@ check(
   )
 )
 
+// ------------------------------------------------------------ attribution
+// Everything this server does is agent work. A reviewer must be able to see
+// which changes were automated and take them back out.
+await call('binder_new')
+await call('binder_add_pdfs', { paths: [a] })
+await call('binder_set_reviewer', { initials: 'CJB' })
+const attIds = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+await call('binder_place_mark', { pageId: attIds[0], kind: 'tick', nx: 0.3, ny: 0.3 })
+await call('binder_add_tape', { pageId: attIds[0], nx: 0.5, ny: 0.6, entries: [10, 20] })
+await call('binder_rotate_pages', { pageIds: [attIds[1]], degrees: 90 })
+
+const history = await call('binder_history')
+const runId = history.text.match(/\brun_\d+\b/)?.[0]
+check('binder_history records what the agent did, in order', !!runId && history.text.includes('Placed tick'), history.text.split('\n').slice(0, 4).join(' | '))
+check(
+  'binder_history flags what a revert will not be able to undo',
+  history.text.includes('[structural — revert cannot undo this]'),
+  history.text.split('\n').find((l) => l.includes('Rotated')) ?? ''
+)
+
+// Attribution has to survive into the exported PDF, or it is only a claim the
+// app makes about itself.
+const attPdf = path.join(REPO, 'spike', 'out', 'mcp_attribution.pdf')
+rmSync(attPdf, { force: true })
+await call('binder_export', { output: attPdf })
+const attProbe = await engine({ cmd: 'probe', path: attPdf })
+const attAnnots = attProbe.ok
+  ? attProbe.probe.pages.flatMap((p) => (p.annotations ?? []).filter((x) => x.wpt_kind))
+  : []
+check(
+  'an agent mark is attributed to the AI in the exported PDF, not to the reviewer',
+  attAnnots.length > 0 && attAnnots.every((x) => (x.author ?? '').includes('(AI)')),
+  JSON.stringify(attAnnots.map((x) => [x.wpt_kind, x.author]))
+)
+check(
+  "the reviewer's own initials are still recorded underneath",
+  // Tapes carry their structured entries in wpt_data rather than an author —
+  // the same split the GUI smoke asserts.
+  attAnnots.filter((x) => x.wpt_kind !== 'tape').every((x) => x.wpt_data?.author === 'CJB'),
+  JSON.stringify(attAnnots.map((x) => [x.wpt_kind, x.wpt_data?.author]))
+)
+
+const reverted = await call('binder_revert_run', { run: runId })
+check(
+  'binder_revert_run removes the agent annotations',
+  reverted.text.includes('removed 2 agent annotation(s)'),
+  reverted.text.split('\n')[0]
+)
+check(
+  'binder_revert_run says plainly what it could not undo',
+  reverted.text.includes('could NOT be undone') && reverted.text.includes('Rotated'),
+  reverted.text.split('\n').slice(-3).join(' | ')
+)
+check(
+  'the binder really has no agent annotations left',
+  (await call('binder_history')).text.includes('0 mark(s), 0 tape(s)'),
+  (await call('binder_history')).text.split('\n')[1]
+)
+check('reverting an unknown run is refused', (await call('binder_revert_run', { run: 'run_nope' })).isError)
+
 // ---------------------------------------------------------------- reading
 // The point of text extraction: an agent can address a figure by name instead
 // of being handed coordinates. Fresh binder so page ids are deterministic.

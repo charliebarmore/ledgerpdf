@@ -12,6 +12,7 @@ import {
 } from 'electron'
 import { atomicWriteJson, readSessionWithRecovery } from './persistence'
 import { restrictedProcessEnv, runJsonCommand } from '../shared/json-process'
+import { toSaved, type Session } from '../renderer/src/session'
 
 /**
  * Main process. Owns ALL filesystem and subprocess access; the renderer gets a
@@ -234,7 +235,7 @@ function registerIpc(): void {
       target = path.resolve(res.filePath)
       allowedSessions.add(target)
     }
-    await atomicWriteJson(target, session)
+    await atomicWriteJson(target, toSaved(session as Session))
     return target
   })
 
