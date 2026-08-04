@@ -290,6 +290,61 @@ else:
         f"{len(both['pages'])} page(s)",
     )
 
+# ------------------------------------------------- a sheet an agent can USE
+# The rendered page is for a human; it flattens a row and loses which column a
+# figure sits in. These assert the data path an agent should be reading instead.
+from workpaper_engine.sheets import read_cells  # noqa: E402
+
+tbc = FIXTURES / "tb_columns.xlsx"
+if not tbc.exists():
+    check("tb_columns.xlsx present", False, "run spike/make_fixtures.py")
+else:
+    page = extract_text({"path": str(tbc), "pages": [0]})["pages"][0]
+    check(
+        "an account number is NOT grouped like money",
+        "1001" in page["text"] and "1,001" not in page["text"],
+        [ln for ln in page["text"].split(chr(10)) if "Operating #1010" in ln],
+    )
+
+    data = read_cells(str(tbc))["sheets"][0]
+    check(
+        "the header row is found past the firm name and date",
+        data["header_row"] == 5 and data["headers"][0] == "Acct #",
+        f"row {data['header_row']}: {data['headers'][:3]}",
+    )
+    cash = next((r for r in data["rows"] if r["cells"].get("Account Name", "").startswith("Cash - Operating #1010")), None)
+    check("the cash row is found by account name", cash is not None)
+    if cash:
+        c = cash["cells"]
+        check(
+            "every figure keeps the column it was in",
+            c["Beg Dr"] == "7,412.68"
+            and c["Activity Dr"] == "5,310.40"
+            and c["Activity Cr"] == "4,982.15"
+            and c["Ending Dr"] == "7,740.93",
+            {k: v for k, v in c.items() if v},
+        )
+        check(
+            "a blank column is reported as blank, not dropped",
+            c["Beg Cr"] == "" and c["Ending Cr"] == "",
+            f"Beg Cr={c['Beg Cr']!r} Ending Cr={c['Ending Cr']!r}",
+        )
+        check("the row number matches what Excel shows", cash["row"] == 7, str(cash["row"]))
+
+    # And the human half: a column of figures aligns on its right edge.
+    # Values UNIQUE to one column — a trial balance repeats figures across the
+    # beginning and ending pairs, and matching "1734" found whichever came
+    # first, which made this read as a misalignment that was not there.
+    edges = {}
+    for w in page["words"]:
+        if w["t"] in ("5,310.40", "4,655.85"):  # both Activity Dr
+            edges[w["t"]] = w["box"][2]
+    check(
+        "figures in a column align on their right edge",
+        len(edges) == 2 and abs(edges["5,310.40"] - edges["4,655.85"]) < 0.002,
+        {k: round(v, 5) for k, v in edges.items()},
+    )
+
 # ---------------------------------------------------------------- documents
 # Prose an agent writes is most of what an engagement produces. It is TYPESET,
 # not dumped: raw markdown in a workpaper puts "## Heading" on the page.

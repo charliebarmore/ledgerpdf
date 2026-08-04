@@ -35,7 +35,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
 | `verify:model` | 194 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
-| `verify:text` | 46 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
+| `verify:text` | 53 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
 | `verify:mcp` | 55 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
@@ -193,6 +193,23 @@ pages are built in memory at export, exactly as images are.
 Because the cells are really drawn into the page, the ordinary text extraction
 reads them **exactly** — no OCR anywhere in the path — so a figure off a trial
 balance is addressable and tickable like any other.
+
+**But an agent should read `binder_read_cells`, not the page.** The rendered
+page is for a human, and flattening a row loses the blanks: a trial balance row
+becomes `1001 Cash 7,412.68 5,310.40 4,982.15 7,740.93`, where nothing says
+which figure is a beginning balance and which is an ending one. On a trial
+balance that IS the meaning. `binder_read_cells` hands over the parsed grid —
+header row, column names, every cell including the empty ones — because "this
+column is blank for this account" is a fact a reconciliation depends on.
+
+Two related rules in the renderer:
+
+- **Number formatting follows the workbook**, not a guess. Account 1001 was
+  being drawn as `1,001`; an agent searching for account 1001 would never find
+  it. Grouping now happens only when the cell's own format asks for it.
+- **Numeric columns right-align.** Accountants read a column of figures down
+  its right edge; left-aligned money is why a rendered trial balance looked
+  scattered.
 
 The renderer draws with PDF.js, so `fs:readSource` hands it the pages a sheet
 *becomes* rather than the workbook's own bytes — a ZIP got "Invalid PDF

@@ -63,17 +63,28 @@ def is_sheet(path: str | Path) -> bool:
     return Path(path).suffix.lower() in SHEET_SUFFIXES
 
 
-def _clean(value) -> str:
-    """One cell as a string a Courier/WinAnsi page can actually show."""
+def _clean(value, number_format: str = "") -> str:
+    """One cell as a string a Courier/WinAnsi page can actually show.
+
+    `number_format` is the workbook's own format for the cell, and it decides
+    whether a whole number is grouped. Guessing gets account numbers wrong:
+    1001 rendered as "1,001" is not a formatting nicety, it is a value an agent
+    searching for account 1001 will never find.
+    """
     if value is None:
         return ""
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
+    grouped = "#,#" in (number_format or "")
     if isinstance(value, float):
         # Trailing-zero noise ("1234.5600000000001") is not what was in the cell.
-        text = f"{value:,.2f}" if value != int(value) else f"{int(value):,}"
+        text = (
+            f"{value:,.2f}"
+            if value != int(value)
+            else (f"{int(value):,}" if grouped else f"{int(value)}")
+        )
     elif isinstance(value, int):
-        text = f"{value:,}"
+        text = f"{value:,}" if grouped else f"{value}"
     elif isinstance(value, (dt.datetime, dt.date)):
         text = value.strftime("%Y-%m-%d")
     else:
@@ -110,10 +121,10 @@ def read_grids(path: str | Path) -> tuple[list[tuple[str, list[list[str]]]], lis
             fsheet = formulas[name] if name in formulas.sheetnames else None
             rows: list[list[str]] = []
             frows = fsheet.iter_rows(values_only=True) if fsheet else iter(())
-            for row, frow in zip(vsheet.iter_rows(values_only=True), frows):
+            for row, frow in zip(vsheet.iter_rows(), frows):
                 out: list[str] = []
                 for i, cell in enumerate(row[:MAX_COLS]):
-                    text = _clean(cell)
+                    text = _clean(cell.value, getattr(cell, "number_format", ""))
                     if not text and i < len(frow):
                         raw = frow[i]
                         if isinstance(raw, str) and raw.startswith("="):
@@ -134,6 +145,80 @@ def read_grids(path: str | Path) -> tuple[list[tuple[str, list[list[str]]]], lis
             "as formulas — open and save the workbook in Excel to resolve them"
         )
     return grids, warnings
+
+
+def _header_row(rows: list[list[str]]) -> int:
+    """Which row names the columns.
+
+    A workpaper sheet usually opens with a firm name, a title and a date before
+    the real header. The header is taken to be the earliest row with at least
+    two non-empty cells and no numbers in them — a title row has one cell, a
+    data row has figures.
+    """
+    for i, row in enumerate(rows[:12]):
+        filled = [c for c in row if c.strip()]
+        if len(filled) < 2:
+            continue
+        numeric = sum(
+            1
+            for c in filled
+            if c.replace(",", "").replace(".", "").replace("-", "").isdigit()
+        )
+        if numeric == 0:
+            return i
+    return 0
+
+
+def read_cells(path: str | Path, max_rows: int = 2000) -> dict:
+    """The sheet as DATA, not as a picture of a page.
+
+    The rendered page flattens a row to "1001 Cash - Operating #1010 7,412.68
+    5,310.40 4,982.15 7,740.93" — blank cells vanish, so nothing says which
+    figure is Beg Dr and which is Ending Dr. On a trial balance that is the
+    entire meaning, and an agent asked to reconcile has to guess.
+
+    We parsed the real cells to build the page, so this hands them over rather
+    than making an agent recover structure from a rendering. Empty cells are
+    returned EXPLICITLY, because "this column is blank for this account" is a
+    fact a reconciliation depends on.
+    """
+    grids, warnings = read_grids(path)
+    out_sheets = []
+    for name, raw in grids:
+        rows = _trim(raw)
+        if not rows:
+            out_sheets.append({"name": name, "headers": [], "rows": [], "header_row": None})
+            continue
+        h = _header_row(rows)
+        headers = [c.strip() or f"col{i + 1}" for i, c in enumerate(rows[h])]
+        body = []
+        for r, row in enumerate(rows[h + 1 :][:max_rows], start=h + 2):
+            if not any(c.strip() for c in row):
+                continue
+            width = max(len(headers), len(row))
+            body.append(
+                {
+                    # 1-based, matching what Excel shows in the row gutter.
+                    "row": r,
+                    "cells": {
+                        (headers[i] if i < len(headers) else f"col{i + 1}"): (
+                            row[i] if i < len(row) else ""
+                        )
+                        for i in range(width)
+                    },
+                }
+            )
+        out_sheets.append(
+            {
+                "name": name,
+                # Reported so a caller can see what was guessed and disagree.
+                "header_row": h + 1,
+                "headers": headers,
+                "rows": body,
+                "truncated": len(rows) - h - 1 > max_rows,
+            }
+        )
+    return {"sheets": out_sheets, "warnings": warnings}
 
 
 def _trim(rows: list[list[str]]) -> list[list[str]]:
@@ -219,6 +304,29 @@ def _plan(rows: list[list[str]]) -> tuple[tuple[float, float], float, list[float
     return page, size, cols, per_page, bands
 
 
+def _numeric_columns(rows: list[list[str]], n_cols: int) -> list[bool]:
+    """Which columns hold figures.
+
+    Accountants read a column of numbers down its right edge — left-aligned
+    money is why a rendered trial balance looks scattered. Decided per column
+    from the data rather than per cell, so one stray note does not unalign the
+    whole column.
+    """
+    out: list[bool] = []
+    for c in range(n_cols):
+        values = [r[c].strip() for r in rows if c < len(r) and r[c].strip()]
+        if not values:
+            out.append(False)
+            continue
+        numeric = sum(
+            1
+            for v in values
+            if v.replace(",", "").replace(".", "").replace("-", "").replace("(", "").replace(")", "").isdigit()
+        )
+        out.append(numeric >= max(1, len(values) * 0.6))
+    return out
+
+
 def _esc(text: str) -> str:
     return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
 
@@ -243,12 +351,17 @@ def _page_stream(
     parts.append(f"q {GRID_GREY:g} G 0.4 w {MARGIN:g} {y + size * 0.9:g} m "
                  f"{page[0] - MARGIN:g} {y + size * 0.9:g} l S Q")
 
+    right = _numeric_columns(rows, len(cols)) if cols else []
     for row in rows:
         x = MARGIN
         for c in band:
             text = row[c] if c < len(row) else ""
             if text:
-                parts.append(f"BT /F1 {size:g} Tf {x:g} {y:g} Td ({_esc(text)}) Tj ET")
+                at = x
+                if c < len(right) and right[c]:
+                    # Right edge of the column, less one character of gutter.
+                    at = x + cols[c] - (len(text) + 1) * CHAR_W * size
+                parts.append(f"BT /F1 {size:g} Tf {at:g} {y:g} Td ({_esc(text)}) Tj ET")
             x += cols[c]
         y -= line
     return " ".join(parts).encode("latin-1", "replace")

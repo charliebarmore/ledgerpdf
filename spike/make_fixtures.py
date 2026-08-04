@@ -288,6 +288,38 @@ def make_workbook_fixtures(book: Path, register: Path) -> None:
     wb2.save(register)
 
 
+def make_tb_columns_fixture(path: Path) -> None:
+    """A trial balance shaped the way a real one is: a title block above the
+    header, account numbers, and sparse debit/credit column PAIRS.
+
+    This is the shape that showed the rendered page is not enough for an agent.
+    Flattened to a line, "1001 Cash 7,412.68 5,310.40 4,982.15 7,740.93" loses
+    which figure is a beginning balance and which is an ending one, because the
+    blank cells disappear — and on a trial balance that is the whole meaning.
+    """
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Trial Balance 6-30-26"
+    for row in [
+        ["TRILAND PARTNERS LLC"],
+        ["Trial Balance"],
+        ["As of June 30, 2026"],
+        [],
+        ["Acct #", "Account Name", "Beg Dr", "Beg Cr", "Activity Dr", "Activity Cr",
+         "Ending Dr", "Ending Cr"],
+        [None, "BALANCE SHEET ACCOUNTS"],
+        [1001, "Cash - Operating #1010", 7412.68, None, 5310.40, 4982.15, 7740.93, None],
+        [1002, "Cash - Payroll #1020", 41.07, None, None, None, 41.07, None],
+        [1500, "Accumulated Depreciation", None, 1734, None, None, None, 1734],
+        [2000, "Credit Card Payable", None, 9.20, 4655.85, 5102.30, None, 455.65],
+        [3000, "Retained Earnings", None, 5210.44, None, None, None, 5210.44],
+    ]:
+        ws.append(row)
+    wb.save(path)
+
+
 def make_memo_fixture(path: Path) -> None:
     """A memo of the shape an agent actually writes for an engagement.
 
@@ -349,6 +381,8 @@ def main() -> dict[str, str]:
     book = FIXTURES / "trial_balance.xlsx"
     register = FIXTURES / "long_register.xlsx"
     make_workbook_fixtures(book, register)
+    columns = FIXTURES / "tb_columns.xlsx"
+    make_tb_columns_fixture(columns)
     memo = FIXTURES / "review_memo.md"
     make_memo_fixture(memo)
     return {
@@ -361,6 +395,7 @@ def main() -> dict[str, str]:
         "BOOK": str(book),
         "REGISTER": str(register),
         "MEMO": str(memo),
+        "TB_COLUMNS": str(columns),
     }
 
 

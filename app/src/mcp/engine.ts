@@ -47,6 +47,7 @@ export interface EngineResult {
   error?: string
   probe?: unknown
   text?: unknown
+  cells?: unknown
   result?: unknown
 }
 

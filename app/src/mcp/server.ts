@@ -904,6 +904,60 @@ registerTool(
 )
 
 registerTool(
+  'binder_read_cells',
+  {
+    title: 'Read a spreadsheet as data',
+    description:
+      "A spreadsheet page's actual CELLS, by column, rather than the flattened line the page renders to. Use this for anything that depends on which column a figure sits in — reconciling, footing, comparing periods. On a trial balance the rendered page cannot tell you whether 7,412.68 is a beginning or an ending balance; this can. Blank cells are shown as empty between delimiters, because \"this column is blank for this account\" is a fact a reconciliation needs.",
+    inputSchema: {
+      pageId: z.string().describe('Any page from the spreadsheet you want to read'),
+      sheet: z.string().optional().describe('Restrict to one worksheet by name'),
+      maxRows: z.number().min(1).max(2000).optional()
+    }
+  },
+  async ({ pageId, sheet, maxRows }) => {
+    const page = session.pages.find((p) => p.id === pageId)
+    if (!page) return fail(`unknown page id: ${pageId}`)
+    const src = session.sources.find((x) => x.id === page.source)
+    if (!src) return fail(`page ${pageId} has no source in this session`)
+    if (!/\.(xlsx|xlsm|csv)$/i.test(src.path)) {
+      return fail(`${pageId} is not a spreadsheet — use binder_read_page for ${baseName(src.path)}`)
+    }
+    const res = await runEngine({ cmd: 'cells', path: src.path })
+    if (!res.ok) return fail(`could not read cells: ${String(res.error)}`)
+    const data = res.cells as {
+      sheets: Array<{
+        name: string
+        header_row: number | null
+        headers: string[]
+        rows: Array<{ row: number; cells: Record<string, string> }>
+        truncated?: boolean
+      }>
+      warnings?: string[]
+    }
+    const wanted = sheet
+      ? data.sheets.filter((s) => s.name.toLowerCase() === sheet.toLowerCase())
+      : data.sheets
+    if (!wanted.length) {
+      return fail(`no sheet named "${sheet}" — found: ${data.sheets.map((s) => s.name).join(', ')}`)
+    }
+    const cap = maxRows ?? 400
+    const out = wanted.map((s) => {
+      const rows = s.rows.slice(0, cap)
+      const lines = [
+        `## ${s.name}   (header on row ${s.header_row ?? '?'})`,
+        `row | ${s.headers.join(' | ')}`,
+        ...rows.map((r) => `${r.row} | ${s.headers.map((h) => r.cells[h] ?? '').join(' | ')}`)
+      ]
+      if (s.rows.length > rows.length) lines.push(`… ${s.rows.length - rows.length} more rows`)
+      return lines.join('\n')
+    })
+    const warn = data.warnings?.length ? `\n\n${data.warnings.join('\n')}` : ''
+    return text(`${baseName(src.path)}\n\n${out.join('\n\n')}${warn}`)
+  }
+)
+
+registerTool(
   'binder_find',
   {
     title: 'Find text in the binder',

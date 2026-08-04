@@ -21,6 +21,7 @@ import traceback
 from . import __version__
 from .binder import export_binder
 from .probe import probe_pdf
+from .sheets import read_cells
 from .sources import materialize_source
 from .text import extract_text
 
@@ -33,6 +34,10 @@ def handle(command: dict) -> dict:
         return {"ok": True, "probe": probe_pdf(command["path"])}
     if cmd == "text":
         return {"ok": True, "text": extract_text(command)}
+    if cmd == "cells":
+        # A spreadsheet as DATA. The rendered page loses which column a figure
+        # sits in, which on a trial balance is the whole meaning.
+        return {"ok": True, "cells": read_cells(command["path"])}
     if cmd == "materialize":
         # The pages a non-PDF source BECOMES, as PDF bytes. The renderer shows a
         # spreadsheet by displaying exactly the pages that will be exported,
