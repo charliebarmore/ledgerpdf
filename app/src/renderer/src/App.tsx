@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookmarkPanel } from './components/BookmarkPanel'
+import { HistoryPanel } from './components/HistoryPanel'
 import { MarkInspector } from './components/MarkInspector'
 import { ShapeInspector } from './components/ShapeInspector'
 import { Keypad } from './components/Keypad'
@@ -43,7 +44,9 @@ import {
   moveShape,
   removeShapes,
   removeStamp,
+  record,
   removeTapes,
+  revertRun,
   rotatePages,
   setBookmarkTitle,
   setPageStatus,
@@ -104,6 +107,7 @@ export default function App(): React.JSX.Element {
   const [addingStamp, setAddingStamp] = useState(false)
   const [shapeColor, setShapeColor] = useState<ShapeColor>('red')
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const shapeArmed = !!armed && isShapeKind(armed.kind)
   const activeTape = useMemo(
     () => (session.tapes ?? []).find((t) => t.id === activeTapeId) ?? null,
@@ -171,6 +175,24 @@ export default function App(): React.JSX.Element {
     })
     setStatus('Redo.')
   }, [])
+
+  /**
+   * Undo an agent run from the UI. Goes through `apply` like every other
+   * mutation, so the revert itself is on the undo stack — a reviewer who
+   * removes the AI's work and changes their mind is not stranded.
+   */
+  const revertAgentRun = useCallback(
+    (run: string) => {
+      const res = revertRun(session, run)
+      const note =
+        `Removed ${res.removed} annotation(s) the AI added.` +
+        (res.structural.length
+          ? ` ${res.structural.length} change(s) to page order or rotation could not be undone.`
+          : '')
+      apply(res.session, note)
+    },
+    [session, apply]
+  )
 
   // ------------------------------------------------------------------ import
 
@@ -881,7 +903,13 @@ export default function App(): React.JSX.Element {
         // asserted colour per page" rule the conformance harness follows.
         {
           const run = beginRun(imported)
-          const agent = addMark(run.session, {
+          // Journal it as the MCP server does, so the smoke exercises the
+          // stamp AND the action log rather than only the stamp.
+          const logged = record(run.session, {
+            action: 'place_mark',
+            what: 'Ticked the wages figure on page 2'
+          })
+          const agent = addMark(logged, {
             page: imported.pages[1].id,
             kind: 'tick',
             nx: 0.28,
@@ -916,6 +944,7 @@ export default function App(): React.JSX.Element {
       }
       // Report what loaded, not merely that we got here — an import that threw
       // lands on this line too, with `imported` still undefined.
+      if (seedMarks) setHistoryOpen(true)
       window.wpt.devRendered({
         pages: imported?.pages.length ?? 0,
         sources: imported?.sources.length ?? 0,
@@ -1358,6 +1387,13 @@ export default function App(): React.JSX.Element {
                   setSelected(new Set([id]))
                 }}
               />
+              {historyOpen && (
+                <HistoryPanel
+                  session={session}
+                  onClose={() => setHistoryOpen(false)}
+                  onRevert={revertAgentRun}
+                />
+              )}
               {selectedMark && (
                 <MarkInspector mark={selectedMark} onChange={editMark} onDelete={deleteMark} />
               )}
@@ -1451,9 +1487,13 @@ export default function App(): React.JSX.Element {
           {aiCount ? (
             <>
               {' '}·{' '}
-              <b className="ai-count" title="Annotations placed by an agent, not by you">
+              <button
+                className="ai-count link"
+                onClick={() => setHistoryOpen((v) => !v)}
+                title="Show what the AI changed, and undo it"
+              >
                 {aiCount} by AI
-              </b>
+              </button>
             </>
           ) : null}
         </span>

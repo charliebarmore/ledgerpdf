@@ -1703,3 +1703,68 @@ button.link {
   height: 8px;
   border-radius: 2px;
 }
+
+/* ------------------------------------------------------------ AI history */
+
+.hist-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sm);
+}
+
+.hist-run {
+  padding: 0 var(--md);
+}
+
+.hist-run-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  padding-bottom: 2px;
+}
+
+.hist-row {
+  display: flex;
+  gap: var(--sm);
+  padding: 2px 0;
+  align-items: baseline;
+}
+
+.hist-when {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  flex: none;
+}
+
+.hist-what {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  /* Wrapped, not truncated: the sentence IS the record, and an ellipsis in an
+     audit trail hides exactly what a reviewer came to read. */
+  overflow-wrap: anywhere;
+}
+
+.hist-structural {
+  color: var(--warning);
+  font-style: normal;
+  font-size: 11px;
+}
+
+/* The status-bar count is the way in, so it has to read as a control. */
+button.ai-count {
+  font: inherit;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
