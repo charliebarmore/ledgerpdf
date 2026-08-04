@@ -33,6 +33,26 @@ import { toSaved, type Session } from '../renderer/src/session'
  *  - no telemetry, no network calls, nothing leaves the machine
  */
 
+/**
+ * A closed pipe must never take the app down.
+ *
+ * Launched from a terminal, stdout and stderr are pipes owned by the parent.
+ * When that parent goes away — the shell closes, `npm run dev` is interrupted —
+ * the next write fails with EPIPE. Node emits that on the stream, and an
+ * unhandled stream error in the main process is an uncaught exception, which
+ * Electron reports as "A JavaScript error occurred in the main process" over a
+ * running app with unsaved work in it.
+ *
+ * Diagnostics are not worth a crash. Only EPIPE is swallowed; anything else
+ * still surfaces, so this cannot hide a real fault.
+ */
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on('error', (error: NodeJS.ErrnoException) => {
+    if (error?.code === 'EPIPE') return
+    throw error
+  })
+}
+
 const isDev = !app.isPackaged
 const packageUiSmoke = !isDev && process.argv.includes('--wpt-package-ui-smoke')
 
@@ -822,6 +842,11 @@ app.on('window-all-closed', () => {
  * synchronous-ish: a crash can still strand one, which is why opening a binder
  * overwrites any working copy already sitting beside it.
  */
-app.on('before-quit', async () => {
-  await Promise.all([...openWorkingCopies.keys()].map((binder) => releaseBinder(binder)))
+app.on('before-quit', () => {
+  // Not an async handler: a rejection from one has nothing to catch it, which
+  // surfaces as an unhandled-rejection warning and, with a dead stderr, as a
+  // crash dialog. Failing to tidy up is not worth interrupting a quit.
+  void Promise.all([...openWorkingCopies.keys()].map((binder) => releaseBinder(binder))).catch(
+    () => {}
+  )
 })

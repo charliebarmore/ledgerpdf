@@ -80,6 +80,7 @@ if (!existsSync(a) || !existsSync(b) || !existsSync(img) || !existsSync(book)) {
 rmSync(OUT_PDF, { force: true })
 rmSync(SHOT, { force: true })
 
+
 console.log('launching app…')
 const app = await run('npm', ['run', 'dev'], {
   cwd: APP,
@@ -194,6 +195,37 @@ if (existsSync(OUT_PDF)) {
 }
 
 console.log('\n=== Phase 1 GUI smoke ===')
+// ---------------------------------------------------- a dead parent pipe
+// Launched from a terminal, stdout and stderr belong to the parent. Close that
+// terminal and the next write fails with EPIPE — which, unhandled in the main
+// process, is an uncaught exception and a "A JavaScript error occurred" dialog
+// over a running app with unsaved work in it. Diagnostics are not worth a crash.
+const orphan = spawn('npm', ['run', 'dev'], {
+  cwd: APP,
+  shell: process.platform === 'win32',
+  stdio: ['ignore', 'pipe', 'pipe'],
+  // Its own shot path: the earlier checks already asserted on SHOT and this
+  // run must not overwrite what they looked at.
+  env: {
+    ...process.env,
+    WPT_DEV_SHOT: path.join(REPO, 'spike', 'out', 'app_orphan_window.png'),
+    WPT_DEV_EXIT: '1'
+  }
+})
+orphan.stdout.on('data', () => {})
+orphan.stderr.on('data', () => {})
+// Take the reader away while it is still starting up and still writing.
+setTimeout(() => {
+  orphan.stdout.destroy()
+  orphan.stderr.destroy()
+}, 2500)
+const orphanCode = await new Promise((resolve) => orphan.on('close', resolve))
+check(
+  'the app survives its parent closing the pipe it logs to',
+  orphanCode === 0,
+  `exit=${orphanCode}`
+)
+
 let fails = 0
 for (const [name, ok, detail] of checks) {
   if (!ok) fails++
