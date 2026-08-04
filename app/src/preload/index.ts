@@ -57,6 +57,23 @@ const api = {
 
   reveal: (filePath: string): Promise<void> => ipcRenderer.invoke('shell:reveal', filePath),
 
+  /**
+   * Live agent access. The renderer answers pull/push so an agent works on the
+   * SAME binder a person is looking at.
+   */
+  setLive: (on: boolean): Promise<{ on: boolean; socketPath?: string }> =>
+    ipcRenderer.invoke('live:set', on),
+  onLiveRequest: (
+    cb: (req: { id: number; kind: 'pull' | 'push'; payload?: unknown }) => void
+  ): void => {
+    ipcRenderer.on('live:request', (_e, req) => cb(req))
+  },
+  liveReply: (id: number, payload: unknown): void => ipcRenderer.send('live:reply', id, payload),
+  /** Main announces every change, so the indicator cannot drift from reality. */
+  onLiveState: (cb: (state: { on: boolean; socketPath?: string }) => void): void => {
+    ipcRenderer.on('live:state', (_e, state) => cb(state))
+  },
+
   /** Dev seam (WPT_DEV_OPEN) — preload a binder without clicking dialogs. */
   onDevOpen: (
     cb: (arg: { paths: string[]; exportTo?: string; seedMarks?: boolean }) => void

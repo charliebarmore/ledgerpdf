@@ -108,6 +108,7 @@ export default function App(): React.JSX.Element {
   const [shapeColor, setShapeColor] = useState<ShapeColor>('red')
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [liveOn, setLiveOn] = useState(false)
   const shapeArmed = !!armed && isShapeKind(armed.kind)
   const activeTape = useMemo(
     () => (session.tapes ?? []).find((t) => t.id === activeTapeId) ?? null,
@@ -193,6 +194,33 @@ export default function App(): React.JSX.Element {
     },
     [session, apply]
   )
+
+  /**
+   * Live agent access. An agent asks for the binder and hands changes back;
+   * both go through the same state a person's clicks do.
+   *
+   * Read through a ref so this subscribes once — resubscribing on every session
+   * change would drop requests already in flight.
+   */
+  const liveRefs = useRef({ session, sessionPath, apply })
+  liveRefs.current = { session, sessionPath, apply }
+  useEffect(() => {
+    window.wpt.onLiveState((state) => setLiveOn(state.on))
+    window.wpt.onLiveRequest((req) => {
+      if (req.kind === 'pull') {
+        window.wpt.liveReply(req.id, {
+          session: liveRefs.current.session,
+          path: liveRefs.current.sessionPath
+        })
+        return
+      }
+      // `apply`, not setSession: an agent's change lands on the undo stack and
+      // autosaves exactly like a click, so a person can take it back with the
+      // undo they already know and never sees a change they cannot reverse.
+      liveRefs.current.apply(req.payload as Session, 'The agent changed this binder.')
+      window.wpt.liveReply(req.id, { ok: true })
+    })
+  }, [])
 
   // ------------------------------------------------------------------ import
 
@@ -1497,6 +1525,24 @@ export default function App(): React.JSX.Element {
             </>
           ) : null}
         </span>
+        <button
+          className={liveOn ? 'live-toggle is-on' : 'live-toggle'}
+          onClick={async () => {
+            const res = await window.wpt.setLive(!liveOn)
+            setStatus(
+              res.on
+                ? 'Live agent access ON — an agent can now read and change this binder.'
+                : 'Live agent access off.'
+            )
+          }}
+          title={
+            liveOn
+              ? 'An agent can read and change this binder right now. Click to stop.'
+              : 'Let an agent work on this binder while you have it open. Off by default.'
+          }
+        >
+          {liveOn ? 'Live agent access: ON' : 'Live agent access: off'}
+        </button>
         <span className="muted">
           {sessionPath ? baseName(sessionPath) : 'unsaved session'}
           {dirty ? ' · unsaved changes' : sessionPath ? ' · autosaved' : ''} · drag to reorder · [ ] rotate ·

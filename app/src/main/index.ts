@@ -140,7 +140,81 @@ function isSourcePath(p: string): boolean {
 
 // --------------------------------------------------------------------- IPC
 
+
+// ------------------------------------------------------- live agent access
+
+/**
+ * The renderer owns the binder — the undo stack, the autosave timer, and the
+ * window someone is looking at. So live access asks it for the session and
+ * hands changes back, rather than keeping a second copy that would fight the
+ * first.
+ *
+ * Electron has no main->renderer invoke, so requests carry an id and the
+ * renderer replies on one channel.
+ */
+let liveWindow: BrowserWindow | null = null
+let liveSeq = 0
+const livePending = new Map<number, (payload: unknown) => void>()
+
+function askRenderer(kind: 'pull' | 'push', payload?: unknown): Promise<unknown> {
+  const win = liveWindow
+  if (!win || win.isDestroyed()) return Promise.reject(new Error('no open binder window'))
+  const id = ++liveSeq
+  return new Promise((resolve, reject) => {
+    // A renderer that never answers must not wedge the agent forever.
+    const timer = setTimeout(() => {
+      livePending.delete(id)
+      reject(new Error('the binder window did not respond'))
+    }, 15_000)
+    livePending.set(id, (value) => {
+      clearTimeout(timer)
+      resolve(value)
+    })
+    win.webContents.send('live:request', { id, kind, payload })
+  })
+}
+
+/** Turn live agent access on or off. Off is the default and the safe state. */
+async function setLiveAccess(on: boolean): Promise<{ on: boolean; socketPath?: string }> {
+  const { startLive, stopLive, liveStatus } = await import('./live-host')
+  // Main is the authority on this state and announces every change. The
+  // indicator is security-relevant, so it must never be able to say "off"
+  // while the socket is open — which it did when a path other than the button
+  // enabled it.
+  const announce = (state: { on: boolean; socketPath?: string }): typeof state => {
+    if (liveWindow && !liveWindow.isDestroyed()) liveWindow.webContents.send('live:state', state)
+    return state
+  }
+  if (!on) {
+    await stopLive()
+    return announce({ on: false })
+  }
+  const already = liveStatus()
+  if (already) return announce({ on: true, socketPath: already.socketPath })
+  const started = await startLive({
+    pull: async () => (await askRenderer('pull')) as { session: unknown; path: string | null },
+    push: async (session) => {
+      await askRenderer('push', session)
+    }
+  })
+  return announce({ on: true, socketPath: started.socketPath })
+}
+
 function registerIpc(): void {
+  ipcMain.on('live:reply', (e, id: unknown, payload: unknown) => {
+    assertTrustedIpc(e)
+    const resolve = typeof id === 'number' ? livePending.get(id) : undefined
+    if (resolve) {
+      livePending.delete(id as number)
+      resolve(payload)
+    }
+  })
+
+  ipcMain.handle('live:set', async (e, on: unknown) => {
+    assertTrustedIpc(e)
+    return setLiveAccess(on === true)
+  })
+
   ipcMain.handle('engine:ping', (event) => {
     assertTrustedIpc(event)
     return runEngine({ cmd: 'ping' })
@@ -319,6 +393,18 @@ function registerIpc(): void {
    */
   ipcMain.on('dev:rendered', async (e, loaded: unknown) => {
     assertTrustedIpc(e)
+    // Dev seam: bring live access up once a binder is loaded, so the live check
+    // can drive the running app for real. Main does this rather than the
+    // renderer because a sandboxed preload has no process.env, and because
+    // main's stdout is what a test can actually read.
+    if (isDev && process.env.WPT_DEV_LIVE === '1') {
+      try {
+        const live = await setLiveAccess(true)
+        console.log(`[dev] live agent access at ${live.socketPath}`)
+      } catch (error) {
+        console.error(`[dev] live agent access failed: ${String(error)}`)
+      }
+    }
     // A screenshot only proves the window painted. Report the binder the
     // renderer actually holds, so the packaged check can fail on an empty one.
     if (packageUiSmoke) {
@@ -370,6 +456,7 @@ function createWindow(): void {
     }
   })
   trustedWebContents.add(win.webContents.id)
+  liveWindow = win
   win.webContents.once('destroyed', () => trustedWebContents.delete(win.webContents.id))
 
   // This application never needs browser permissions, webviews, or navigation.
@@ -477,6 +564,11 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+// Never leave a live socket or its token behind for the next process to find.
+app.on('before-quit', () => {
+  void import('./live-host').then(({ stopLive }) => stopLive()).catch(() => {})
 })
 
 app.on('window-all-closed', () => {

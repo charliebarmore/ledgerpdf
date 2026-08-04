@@ -36,6 +36,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
 | `verify:model` | 181 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
 | `verify:text` | 17 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
+| `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
 | `verify:mcp` | 49 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs and a receipt photo → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, renders a synthetic PDF under `file://`, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
@@ -165,6 +166,40 @@ quietly: a build predating attribution would open a v2 session, ignore the
 journal, and drop it on the next save — silently destroying an audit trail. The
 guard makes such a build refuse the file instead, which is the right failure for
 a record.
+
+## Live agent access
+
+Off by default. Turn it on from the status bar and an agent works on the binder
+you have open, instead of its own copy.
+
+Before this, the MCP server kept its own session and the file was the handoff —
+so with the app open, its autosave silently overwrote whatever the agent wrote.
+A lost update on an engagement record is not an acceptable failure mode.
+
+- **The protocol stays on stdio.** MCP already works there and is fully tested;
+  moving it gains nothing. Only the session crosses, which makes this channel
+  **two verbs — pull and push** — rather than an endpoint speaking arbitrary
+  MCP. Far less to get wrong, and far less to attack.
+- **A unix socket (POSIX) or named pipe (Windows), never a TCP port.** There is
+  no network surface at all, not even loopback. The socket and the endpoint
+  file carrying its token are both `0600`.
+- **A 32-byte per-launch token** must be the first line a client sends;
+  anything else and the connection ends.
+- **The same `mcp-server.cjs`** an MCP client already spawns becomes live
+  automatically when the app is listening, and falls back to its own binder
+  when it is not. `binder_status` says which — **LIVE** or **Standalone** —
+  because editing a private copy while believing you are editing the open
+  window is the confusion this exists to remove.
+- **Changes arrive through the same `apply` a click does**, so an agent's edit
+  lands on the undo stack and autosaves like any other: nothing appears that a
+  person cannot take back with the undo they already know.
+- The endpoint lives in a **product-name-independent** directory
+  (`src/shared/live-endpoint.ts`). Electron's userData is named after the
+  display name, which is still a working title — a rename would have silently
+  stopped the agent finding the app and left it working on a copy.
+
+The status-bar indicator is driven by the main process, not by the button, so
+it cannot read "off" while the socket is open.
 
 ## Session durability
 

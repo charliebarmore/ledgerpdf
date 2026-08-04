@@ -26,9 +26,10 @@
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --outfile=out/mcp-server.cjs --log-level=warning",
     "mcp": "npm run build:mcp && node out/mcp-server.cjs",
     "verify:mcp": "npm run build:mcp && node scripts/mcp-check.mjs",
-    "verify": "npm run typecheck && npm run verify:persistence && npm run verify:model && npm run verify:text && npm run verify:mcp && npm run smoke",
+    "verify": "npm run typecheck && npm run verify:persistence && npm run verify:model && npm run verify:text && npm run verify:mcp && npm run smoke && npm run verify:live",
     "verify:viewers": "node scripts/verify-viewers.mjs",
-    "verify:text": "node scripts/verify-text.mjs"
+    "verify:text": "node scripts/verify-text.mjs",
+    "verify:live": "npm run build:mcp && node scripts/live-check.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

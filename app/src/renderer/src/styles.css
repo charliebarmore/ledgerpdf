@@ -1768,3 +1768,24 @@ button.ai-count {
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
+
+/* Live agent access is a security-relevant mode, so it reads as a state in the
+   status bar rather than hiding in a menu. Off is quiet; on is unmissable. */
+.live-toggle {
+  font-size: 11px;
+  padding: 1px 7px;
+  color: var(--muted);
+  flex: none;
+}
+
+.live-toggle.is-on {
+  color: #fff;
+  background: var(--warning);
+  border-color: var(--warning);
+  font-weight: 600;
+}
+
+.live-toggle.is-on:hover:not(:disabled) {
+  background: var(--warning);
+  filter: brightness(1.08);
+}

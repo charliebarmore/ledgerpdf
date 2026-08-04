@@ -292,12 +292,19 @@ registerTool(
       'The current binder: totals plus every page with its permanent page id, source file, source page number, rotation, and how many marks/tapes it carries.',
     inputSchema: {}
   },
-  async () =>
-    text(
+  async () => {
+    // Which binder this is must never be left to inference: editing a private
+    // copy while believing you are editing the open window is the whole failure
+    // this feature exists to remove.
+    const where = owner
+      ? 'LIVE — this is the binder open in Workpaper Binder; changes appear there as you make them.'
+      : 'Standalone — your own working binder. Save it and open it in the app to review.'
+    return text(
       session.pages.length === 0
-        ? `Empty binder. ${summary(session)}`
-        : `${summary(session)}\n\n${pageTable(session)}`
+        ? `Empty binder. ${summary(session)}\n${where}`
+        : `${summary(session)}\n${where}\n\n${pageTable(session)}`
     )
+  }
 )
 
 registerTool(
@@ -900,6 +907,13 @@ registerTool(
 // --------------------------------------------------------------------- boot
 
 async function main(): Promise<void> {
+  // Attach to a running Workpaper Binder if one is offering live access, so an
+  // agent and the person at the keyboard work on the SAME binder. Falls back to
+  // this process owning its own binder — the behaviour before live access
+  // existed — when the app is shut or has it turned off.
+  const { attachToRunningApp } = await import('./live-client')
+  const live = await attachToRunningApp()
+  if (live) setSessionOwner(live)
   await server.connect(new StdioServerTransport())
 }
 
