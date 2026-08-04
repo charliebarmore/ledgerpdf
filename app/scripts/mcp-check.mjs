@@ -64,7 +64,10 @@ rmSync(OUT_SESSION, { force: true })
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [SERVER],
-  env: { ...process.env, WPT_MCP_ROOTS: path.join(REPO, 'spike') }
+  // WPT_NO_LIVE keeps this harness on its own binder. Without it, running the
+  // suite while the app is open with live access redirects every check at the
+  // app's binder and they fail in ways that look like model bugs.
+  env: { ...process.env, WPT_MCP_ROOTS: path.join(REPO, 'spike'), WPT_NO_LIVE: '1' }
 })
 const client = new Client({ name: 'wpt-mcp-check', version: '1.0.0' })
 await client.connect(transport)

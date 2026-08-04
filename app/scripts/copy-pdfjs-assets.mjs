@@ -21,10 +21,23 @@ const from = path.join(app, 'node_modules', 'pdfjs-dist')
 const to = path.join(app, 'src', 'renderer', 'public', 'pdfjs')
 
 const DIRS = ['wasm', 'cmaps', 'standard_fonts', 'iccs']
+/**
+ * The worker travels with them. Imported straight from node_modules it
+ * resolved, in dev only, to a `http://localhost:PORT/@fs/...` URL that dies
+ * with the dev server — restart it, or run two, and PDF.js fails with "Setting
+ * up fake worker failed" and renders nothing. Copying it here makes dev and a
+ * packaged file:// load resolve the worker the same way.
+ */
+const FILES = [['build/pdf.worker.min.mjs', 'pdf.worker.min.mjs']]
 
 await rm(to, { recursive: true, force: true })
 await mkdir(to, { recursive: true })
 for (const dir of DIRS) {
   await cp(path.join(from, dir), path.join(to, dir), { recursive: true })
 }
-console.log(`pdfjs assets -> ${path.relative(app, to)} (${DIRS.join(', ')})`)
+for (const [src, dest] of FILES) {
+  await cp(path.join(from, src), path.join(to, dest))
+}
+console.log(
+  `pdfjs assets -> ${path.relative(app, to)} (${DIRS.join(', ')}, ${FILES.map((f) => f[1]).join(', ')})`
+)

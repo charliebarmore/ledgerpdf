@@ -567,9 +567,21 @@ app.whenReady().then(async () => {
 })
 
 // Never leave a live socket or its token behind for the next process to find.
-app.on('before-quit', () => {
-  void import('./live-host').then(({ stopLive }) => stopLive()).catch(() => {})
-})
+// `before-quit` misses a signalled shutdown, which is exactly how a socket
+// survived a killed dev run — so the signals are handled too. SIGKILL cannot
+// be caught; a client that dials a dead socket falls back to standalone.
+const stopLiveQuietly = (): void => {
+  void import('./live-host')
+    .then(({ stopLive }) => stopLive())
+    .catch(() => {})
+}
+app.on('before-quit', stopLiveQuietly)
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    stopLiveQuietly()
+    app.quit()
+  })
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

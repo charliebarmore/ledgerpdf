@@ -4,17 +4,21 @@
  */
 
 import * as pdfjs from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { imageLayout, type SourceKind } from './session'
-
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
 /**
  * Runtime-relative asset base so it resolves under both the dev server and a
  * packaged file:// load. Copied in by scripts/copy-pdfjs-assets.mjs.
  */
 const ASSETS = new URL('./pdfjs/', document.baseURI).href
+
+// The worker comes from that same tree rather than from node_modules. A
+// `?url` import of it resolved in dev to a localhost/@fs URL tied to one dev
+// server: kill or restart that server and PDF.js reports "Setting up fake
+// worker failed" and renders nothing, while the packaged build was fine —
+// a dev/prod divergence that hid the failure until someone hit it.
+pdfjs.GlobalWorkerOptions.workerSrc = `${ASSETS}pdf.worker.min.mjs`
 
 /** Decoders and font data that real (scanned) tax PDFs need. */
 const DOC_OPTS = {

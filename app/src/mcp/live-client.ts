@@ -89,6 +89,10 @@ class LiveLink {
  * Never throws: an agent must still be able to build a binder with the app shut.
  */
 export async function attachToRunningApp(): Promise<SessionOwner | null> {
+  // Explicit opt-out. Harnesses must be deterministic: without this, spawning
+  // the server while any app happens to be running live silently redirects the
+  // checks at that app's binder instead of their own.
+  if (process.env.WPT_NO_LIVE === '1') return null
   let endpoint: { socketPath: string; token: string }
   try {
     endpoint = JSON.parse(await readFile(liveEndpointFile(), 'utf8'))

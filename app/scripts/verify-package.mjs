@@ -32,7 +32,10 @@ for (const required of [
   '/out/main/index.js',
   '/out/preload/index.js',
   '/out/renderer/index.html',
-  '/out/renderer/pdfjs/wasm/openjpeg.wasm'
+  '/out/renderer/pdfjs/wasm/openjpeg.wasm',
+  // Without the worker PDF.js falls back to a main-thread "fake worker" that
+  // needs the same file, so a missing one renders nothing at all.
+  '/out/renderer/pdfjs/pdf.worker.min.mjs'
 ]) {
   if (!entries.has(required)) throw new Error(`Packaged app is missing ${required}`)
 }
