@@ -117,6 +117,9 @@ const fail = (
 /** Keep in step with main/index.ts SOURCE_EXTS and engine images.IMAGE_SUFFIXES. */
 const SOURCE_EXTS = [
   '.pdf',
+  '.xlsx',
+  '.xlsm',
+  '.csv',
   '.png',
   '.jpg',
   '.jpeg',
@@ -394,7 +397,7 @@ registerTool(
 registerTool(
   'binder_add_pdfs',
   {
-    title: 'Add PDFs or images to the binder',
+    title: 'Add PDFs, spreadsheets or images to the binder',
     description:
       'Probe each file and append its pages to the end of the binder, in the order given. PDFs contribute all their pages; an image (png, jpg, tif, ...) contributes one Letter page, auto-oriented, with the picture centred. The same file may be added twice; each import is a distinct source.',
     inputSchema: { paths: z.array(z.string()).min(1).describe('Paths to .pdf or image files') }
@@ -797,7 +800,10 @@ async function pageText(
   if (!src) throw new Error(`page ${page.id} has no source in this session`)
   // Images are scans by definition — no text layer, and the engine's PDF
   // reader would simply fail to open one.
-  if (!src.path.toLowerCase().endsWith('.pdf')) {
+  // A spreadsheet's cells are really drawn into its pages, so its text is
+  // exact — only a picture genuinely has nothing to read.
+  const readable = ['.pdf', '.xlsx', '.xlsm', '.csv']
+  if (!readable.some((e) => src.path.toLowerCase().endsWith(e))) {
     return { text: '', words: [], hasText: false, source: 'none' }
   }
   const res = await runEngine({

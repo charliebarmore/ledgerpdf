@@ -32,7 +32,7 @@ from uuid import uuid4
 import pikepdf
 from pikepdf import Array, Name, OutlineItem
 
-from . import appearance, images, shapes, status
+from . import appearance, images, sheets, shapes, status
 from .geometry import PageGeom, page_geom
 from .probe import fingerprint_file, sanitize_text
 
@@ -126,12 +126,16 @@ def export_binder(spec: dict) -> dict:
 
     try:
         with ExitStack() as stack:
-            # An image source is wrapped into a one-page PDF in memory here and is
-            # then indistinguishable from any other source for the rest of export.
-            # The file on disk is never touched.
+            # An image or spreadsheet source is turned into pages in memory here
+            # and is then indistinguishable from any other source for the rest of
+            # export. The file on disk is never touched.
             sources: dict[str, pikepdf.Pdf] = {
                 key: stack.enter_context(
-                    images.image_to_pdf(path) if images.is_image(path) else pikepdf.open(path)
+                    sheets.sheet_to_pdf(path)
+                    if sheets.is_sheet(path)
+                    else images.image_to_pdf(path)
+                    if images.is_image(path)
+                    else pikepdf.open(path)
                 )
                 for key, path in spec["sources"].items()
             }

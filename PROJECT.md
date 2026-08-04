@@ -3,9 +3,9 @@
 ## One-sentence summary
 
 ```text
-This product helps tax preparers and reviewers assemble, mark up, and tie out PDF workpaper
-binders (tick marks, calculator tapes, bookmarks, hyperlinks) so they can drop both Adobe
-Acrobat and TicTie Calculate — locally, with client data never leaving the machine.
+This product lets tax preparers and reviewers — and the AI agents working alongside them —
+assemble, read, mark up, and tie out workpaper binders from the documents a firm actually
+has (PDFs, Excel, scans), locally, with client data never leaving the machine.
 ```
 
 ## Product context
@@ -20,18 +20,35 @@ Acrobat and TicTie Calculate — locally, with client data never leaving the mac
 
 ## Problem statement
 
-Firms pay twice for workpaper markup: Adobe Acrobat (subscription, ~$240/user/yr) plus TicTie Calculate (~$150/user/yr) — and TTC *requires* Acrobat to run. The actual daily workflow is narrow: combine source PDFs into a binder, keep bookmarks attached to pages, place tick marks, run calculator tapes, hyperlink supporting docs. Cheaper PDF editors miss the tax-specific pieces; TTC locks you into Adobe. Cost of not solving: every seat pays ~$400/yr for two tools to do one bounded job, and the market's cloud alternatives raise data-custody questions a local tool avoids entirely.
+Two problems, and the second is the bigger one.
+
+**The tooling tax.** Firms pay twice for workpaper markup: Adobe Acrobat (~$240/user/yr) plus TicTie Calculate (~$150/user/yr) — and TTC *requires* Acrobat to run. Cheaper PDF editors miss the tax-specific pieces; TTC locks you into Adobe. Every seat pays ~$400/yr for two tools to do one bounded job, and the market's cloud alternatives raise data-custody questions a local tool avoids entirely.
+
+**The labour.** Assembling a binder is hours of work a competent agent could do — ordering pages, naming schedules, finding a figure and ticking it, footing a column — but no workpaper tool is built for an agent to drive. Bolting a chat box onto a GUI does not count: an agent needs to *read* the documents (including the scans and the spreadsheets), address a figure by name, and act on the same binder the human has open. And because a workpaper is evidence, everything it does has to be attributable and reversible, or no CPA can sign the file.
+
+That second problem is what this product is now organized around. The first is the wedge.
 
 ## Core user workflows
 
 ```text
-1. Preparer drags source PDFs (tax-software output, client docs) into the app.
+BY HAND
+1. Preparer drags in the sources they have — PDFs (tax-software output, client docs),
+   Excel/CSV (trial balances, lead sheets), and scans or phone photos.
 2. App shows a thumbnail rail; preparer reorders/rotates/deletes pages; bookmarks are
    generated from filenames and stay attached to their pages as they move.
 3. Preparer/reviewer places tick marks and stamps, drops calculator tapes tied to figures,
    and links numbers to supporting pages.
 4. App exports ONE portable PDF binder — marks, tapes, bookmarks, and links all render as
    standard annotations in Acrobat, Edge, Chrome, and macOS Preview. Source files untouched.
+
+BY AGENT (same binder, same model, no second-class path)
+5. Preparer turns on live agent access and says what they want in plain language.
+6. Agent reads the pages — embedded text, exact cell values from a workbook, OCR for a
+   scan — finds a figure by name, and gets back coordinates it can mark.
+7. Agent organizes, bookmarks, marks, and foots; the preparer watches it happen in the
+   window they already have open.
+8. Every agent action is stamped, journaled, and revertible; the exported PDF attributes
+   its marks to "(AI)" so a reviewer can tell automated work from their own.
 ```
 
 ## User roles
@@ -40,21 +57,27 @@ Firms pay twice for workpaper markup: Adobe Acrobat (subscription, ~$240/user/yr
 | --- | --- | --- |
 | Preparer (primary) | Assemble binder, organize pages, place marks/tapes/links, export | n/a — local single-user app |
 | Reviewer | Same surface + reviewer initials/timestamps on marks (Phase 2) | n/a |
+| Agent (Claude or any MCP client) | Read pages, organize, bookmark, mark, foot, export — through the same model the UI drives | NO filesystem access by default; only folders explicitly named in `WPT_MCP_ROOTS`. Reading page text/OCR puts client *content* in a model's context — an IRC §7216 disclosure decision the tool does not make for the user |
 | Design partner (beta) | Run signed builds on Windows, report friction | Never receives builds containing Charlie's client data; fixtures only |
 
 ## Goals
 
 - Phase 0 spike proves portable annotations on real tax-software PDFs (the stage gate) within 2–4 days of part-time work
 - Phase 1 delivers a binder organizer Charlie uses on his own real workpapers (dogfooding = the success test)
+- An agent can build a real binder end to end — read the sources, order them, name them, mark them — with the preparer supervising rather than typing coordinates
+- Agent work is defensible in a file review: attributed, journaled, and revertible, with automated marks distinguishable from a person's in the exported PDF
 - Bookmarks/marks provably follow pages through any reorder — the headline feature vs. GUI tools
 - Exported binders pass `qpdf --check` and render identically in 4 viewers (Acrobat, Edge, Chrome, Preview)
 - Total spend through Phase 1 stays part-time (~2 weeks) — does NOT raid August income-replacement work
 
 ## Non-goals
 
-- NOT an Acrobat replacement — no text/image editing, OCR, redaction, forms, signatures, comparison
-- No cloud, no collaboration, no accounts, no telemetry that touches document content — local-only is a *feature* (§7216/Safeguards story)
-- No AI tie-out in MVP — the internal model is built as the seam for it, but the layer itself is a post-gate bet
+- NOT an Acrobat replacement — no text/image editing, redaction, forms, signatures, comparison
+- **OCR is read-only, and only so an agent can see a scan.** It is not a document-production feature: nothing writes a searchable text layer into an exported binder, and OCR output is always labelled a machine reading with confidence, never presented as the document's own text
+- **Spreadsheets are rendered for data, not for fidelity** — a clean legible grid, not Excel's print layout. No merged-cell art, conditional formatting, or charts; print those to PDF first
+- No cloud, no collaboration, no accounts, no telemetry that touches document content — local-only is a *feature* (§7216/Safeguards story). Live agent access is a LOCAL socket, off by default, never a network port
+- **The AI tie-out layer itself is still not built** — matching figures across workpapers and flagging what does not foot. Everything it needs now exists (structured tapes, addressable figures, attribution), but the layer is a post-gate bet
+- No Word, email, or scanned-to-searchable ingestion yet
 - No commercial packaging/pricing decisions until the Phase 1 business gate
 
 ## MVP scope
@@ -62,6 +85,7 @@ Firms pay twice for workpaper markup: Adobe Acrobat (subscription, ~$240/user/yr
 - **Phase 0 (committed):** compatibility spike per `references/source-materials.md` — appearance streams, already-annotated imports, sidecar-survives-AV, 4-viewer matrix, `qpdf --check`
 - **Phase 1 (committed):** import/drag-drop → thumbnail rail → reorder/rotate/delete → filename bookmarks (nested under file-level bookmarks) → stable page IDs → session save/reopen → export merged binder
 - Vertical-slice checkpoint: two real PDFs in, reorder, one tick mark + one tape, export, verify in all viewers — on both platforms from the same source
+- **Built past the original scope, at Charlie's direction (see `ROADMAP.md` for dates and detail):** review marks · calculator tape · drawn annotations · page status/numbering · images as pages · **spreadsheets as pages** · MCP agent access · **page text + OCR so an agent can read** · **agent attribution, journal and revert** · **live agent access to the open binder**
 
 ## Out of scope for now
 

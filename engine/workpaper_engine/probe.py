@@ -16,6 +16,7 @@ import pikepdf
 from pikepdf import Name
 
 from .images import is_image, probe_image
+from .sheets import is_sheet, probe_sheet
 
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
@@ -117,6 +118,12 @@ def probe_pdf(path: str) -> dict:
     # An image is a page too. Dispatching here means every caller — the app's
     # import, the MCP server, the verification harness — gets one probe API and
     # never has to care which kind of file it pointed at.
+    if is_sheet(path):
+        result = probe_sheet(path)
+        # Same integrity contract as every other source: marks placed on a
+        # spreadsheet page must not silently reattach to a different workbook.
+        result["fingerprint"] = fingerprint_file(path)
+        return result
     if is_image(path):
         result = probe_image(path)
         result["fingerprint"] = fingerprint_file(path)

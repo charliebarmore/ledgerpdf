@@ -217,6 +217,45 @@ else:
                     ", ".join(f"{k}=({v[0]:.4f},{v[1]:.4f})" for k, v in spots.items()),
                 )
 
+# ------------------------------------------------------------------- sheets
+# Excel is the format most workpapers actually arrive in. Because the cells are
+# really DRAWN into the page, the ordinary extraction reads them exactly - no
+# OCR, no guessing - so a figure off a trial balance is addressable.
+book = FIXTURES / "trial_balance.xlsx"
+if not book.exists():
+    check("trial_balance.xlsx present", False, "run spike/make_fixtures.py")
+else:
+    sheet = extract_text({"path": str(book), "pages": [0]})["pages"][0]
+    check(
+        "a spreadsheet reads as exact text, not as a picture",
+        sheet["source"] == "pdf" and sheet["has_text"],
+        f"source={sheet['source']}",
+    )
+    check(
+        "cell values survive with their row intact",
+        "1200 Accounts receivable 41,850.25" in sheet["text"],
+        sheet["text"].replace(chr(10), " | "),
+    )
+    check(
+        "an uncalculated formula is shown rather than left blank",
+        "=SUM(" in sheet["text"],
+        [ln for ln in sheet["text"].split(chr(10)) if "TOTAL" in ln],
+    )
+    figure = next((w for w in sheet["words"] if w["t"] == "41,850.25"), None)
+    check(
+        "a figure on a sheet is located, not just read",
+        figure is not None and 0 < figure["nx"] < 1 and 0 < figure["ny"] < 1,
+        f"nx={figure['nx']} ny={figure['ny']}" if figure else "missing",
+    )
+    # Both sheets in the workbook become pages, so nothing is silently dropped.
+    both = extract_text({"path": str(book)})
+    check(
+        "every worksheet becomes pages",
+        len(both["pages"]) == 2
+        and "Depreciation" in both["pages"][1]["text"],
+        f"{len(both['pages'])} page(s)",
+    )
+
 # --------------------------------------------------------------- scanned pages
 # An image-only page has no text layer. Reporting that plainly is the whole
 # point: it tells an agent OCR is missing rather than that the page is blank.

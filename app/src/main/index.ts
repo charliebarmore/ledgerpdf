@@ -131,7 +131,9 @@ function runEngine(command: unknown): Promise<EngineOk | EngineErr> {
  * with IMAGE_SUFFIXES there.
  */
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'jpe', 'gif', 'bmp', 'tif', 'tiff', 'webp'] as const
-const SOURCE_EXTS = ['pdf', ...IMAGE_EXTS] as const
+/** Excel IS the workpaper format — see engine/sheets.py for what it becomes. */
+const SHEET_EXTS = ['xlsx', 'xlsm', 'csv'] as const
+const SOURCE_EXTS = ['pdf', ...SHEET_EXTS, ...IMAGE_EXTS] as const
 
 function isSourcePath(p: string): boolean {
   const ext = path.extname(p).slice(1).toLowerCase()
@@ -226,8 +228,9 @@ function registerIpc(): void {
       title: 'Add files to binder',
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: 'PDFs and images', extensions: [...SOURCE_EXTS] },
+        { name: 'Workpaper sources', extensions: [...SOURCE_EXTS] },
         { name: 'PDF', extensions: ['pdf'] },
+        { name: 'Spreadsheets', extensions: [...SHEET_EXTS] },
         { name: 'Images', extensions: [...IMAGE_EXTS] }
       ]
     })

@@ -26,7 +26,10 @@ from __future__ import annotations
 import pikepdf
 import pypdfium2 as pdfium
 
+import io
+
 from . import ocr as ocr_backend
+from . import sheets
 from .geometry import page_geom, user_to_visual
 from .probe import sanitize_text
 
@@ -123,12 +126,17 @@ def _lines_from_words(words: list[dict]) -> str:
     median_h = heights[len(heights) // 2]
     tol = max(median_h * 0.6, 1.0)  # user-space points
 
-    # y descends down the page in user space, so descending y is reading order.
-    ordered = sorted(words, key=lambda w: (-w["_u"][1], w["_u"][0]))
+    # Grouped by the box TOP, not its bottom. A descender drops the bottom of
+    # "operating" ~2.6pt below its neighbours — past the tolerance — so a single
+    # spreadsheet row split into two lines and read as two records. Ascenders
+    # move the top by only ~1.2pt, comfortably inside it.
+    #
+    # y increases upward in user space, so descending top is reading order.
+    ordered = sorted(words, key=lambda w: (-w["_u"][3], w["_u"][0]))
     lines: list[list[dict]] = []
     anchor = None
     for w in ordered:
-        y = w["_u"][1]
+        y = w["_u"][3]
         if anchor is None or abs(y - anchor) > tol:
             lines.append([w])
             anchor = y
@@ -155,7 +163,18 @@ def extract_text(spec: dict) -> dict:
     out_pages: list[dict] = []
     budget = MAX_WORDS_TOTAL
 
-    with pikepdf.open(path) as pdf:
+    # A spreadsheet has no PDF until export, so build its pages in memory and
+    # read those. Because the cells are really DRAWN with a font, the ordinary
+    # extraction finds them with exact positions — a figure off a trial balance
+    # is addressable and tickable with no OCR anywhere in the path.
+    source: object = path
+    if sheets.is_sheet(path):
+        buffer = io.BytesIO()
+        with sheets.sheet_to_pdf(path) as made:
+            made.save(buffer)
+        source = buffer.getvalue()
+
+    with pikepdf.open(io.BytesIO(source) if isinstance(source, bytes) else source) as pdf:
         n_pages = len(pdf.pages)
         indices = (
             [i for i in wanted if 0 <= i < n_pages]
@@ -164,7 +183,7 @@ def extract_text(spec: dict) -> dict:
         )
         geoms = {i: page_geom(pdf.pages[i].obj) for i in indices}
 
-    doc = pdfium.PdfDocument(path)
+    doc = pdfium.PdfDocument(source)
     try:
         for i in indices:
             page = doc[i]

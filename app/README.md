@@ -35,7 +35,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
 | `verify:model` | 181 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
-| `verify:text` | 27 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
+| `verify:text` | 32 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
 | `verify:mcp` | 55 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs and a receipt photo → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
@@ -131,6 +131,34 @@ This app holds client tax documents, so the boundaries are deliberate:
 - Packaged builds run that engine as a frozen, platform-native executable from
   the app's sealed resources; they never discover or invoke a workstation's
   ambient Python installation.
+
+## Spreadsheets as pages
+
+Excel is the format most workpapers actually arrive in — trial balances, lead
+sheets, depreciation schedules. `.xlsx`, `.xlsm` and `.csv` import like any
+other source: the session keeps pointing at the untouched workbook and the
+pages are built in memory at export, exactly as images are.
+
+- **We lay the grid out ourselves** rather than shelling out to LibreOffice or
+  Excel. A 500 MB office suite cannot be bundled, and requiring an install
+  repeats the problem OCR has. The honest cost: this renders the **data**, not
+  Excel's print layout — no merged-cell art, conditional formatting or charts.
+  For a trial balance that is fine and arguably more legible; print a formatted
+  client-facing schedule to PDF first.
+- **Courier, not Helvetica.** Standard-14 so nothing is embedded, and every
+  glyph is exactly 0.6 em — column fitting becomes exact arithmetic instead of
+  a font-metrics table, and figures line up the way an accountant reads them.
+- **Uncalculated formulas are shown, not hidden.** `data_only` gives the value
+  Excel last *calculated*; a workbook written by a tool that never calculated
+  has none, and a blank where a number belongs is the worst outcome in a
+  workpaper. Those cells render as their formula and the import warns.
+- Columns too wide for a page split onto continuation pages rather than being
+  truncated — a binder that silently drops a column is worse than one that runs
+  on.
+
+Because the cells are really drawn into the page, the ordinary text extraction
+reads them **exactly** — no OCR anywhere in the path — so a figure off a trial
+balance is addressable and tickable like any other.
 
 ## Reading scanned pages (OCR)
 

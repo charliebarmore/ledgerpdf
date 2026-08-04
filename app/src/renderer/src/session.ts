@@ -32,7 +32,7 @@ export interface OutlineNode {
  * the engine's images.py owns that — but it renders differently in the app, so
  * the distinction has to survive save/reopen.
  */
-export type SourceKind = 'pdf' | 'image'
+export type SourceKind = 'pdf' | 'image' | 'sheet'
 
 export interface SourceFingerprint {
   sha256: string
@@ -572,7 +572,7 @@ export function addSource(session: Session, probe: ProbeWire): Session {
     path: probe.path,
     name: baseName(probe.path),
     nPages: probe.n_pages,
-    kind: probe.kind === 'image' ? 'image' : 'pdf',
+    kind: probe.kind === 'image' ? 'image' : probe.kind === 'sheet' ? 'sheet' : 'pdf',
     ...(probe.fingerprint ? { fingerprint: probe.fingerprint } : {}),
     outline: normalizeOutline(probe.outline)
   }
@@ -1934,7 +1934,10 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
     session: {
       formatVersion: SESSION_FORMAT_VERSION,
       // Sessions written before image support have no `kind`; they were all PDFs.
-      sources: s.sources.map((x) => ({ ...x, kind: x.kind === 'image' ? 'image' : 'pdf' })),
+      sources: s.sources.map((x) => ({
+        ...x,
+        kind: x.kind === 'image' ? 'image' : x.kind === 'sheet' ? 'sheet' : 'pdf'
+      })),
       pages: s.pages.map((p) => ({ ...p, rotate: p.rotate ?? 0 })),
       seq,
       ...(s.titles && typeof s.titles === 'object' ? { titles: s.titles } : {}),

@@ -80,7 +80,8 @@ const MOD = window.wpt.platform === 'darwin' ? '⌘' : 'Ctrl'
 
 function sourceMatches(source: SourceDoc, probe: ProbeWire): boolean {
   if (source.nPages !== probe.n_pages) return false
-  if (source.kind !== (probe.kind === 'image' ? 'image' : 'pdf')) return false
+  const probed = probe.kind === 'image' ? 'image' : probe.kind === 'sheet' ? 'sheet' : 'pdf'
+  if (source.kind !== probed) return false
   if (!source.fingerprint) return true // Legacy session: establish identity on this open.
   return source.fingerprint.sha256 === probe.fingerprint?.sha256
 }
