@@ -75,6 +75,8 @@ Only after the gate passes. Sequenced, with review amendments baked in.
   - **#3 open question 4 is still unmeasured**: the cost of an explicit Save on a several-hundred-page binder has not been timed. Do it during dogfooding, before design partners see it.
   - Older `.wptsession.json` files open once and convert on save. **The MCP server still reads and writes that format** and was left alone deliberately — converting it is separate work.
   - 179 model checks (16 new round-trip) · 34 MCP · 13 GUI smoke · 6 persistence · 30 engine round-trip · 24 engine spike. All green.
+  - **Cost of the dual carrier, measured:** +22.6 KB on a 400-page / 2,000-mark binder, 63 ms to embed and 127 ms to extract.
+  - **Acrobat Pro is a data point, not a gate.** `spike/carrier_survival.py --manual-kit` builds a folder any tester with Pro can process and `--manual-verify` grades it — synthetic fixtures only, so it can go to a design partner with no §7216 question attached. Worth doing now that there is a Windows machine. If Pro turns out to be destructive the recommendation does not change: the chosen carrier already survives that case.
 
 ## Later
 
