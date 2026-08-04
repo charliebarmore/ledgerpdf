@@ -40,7 +40,7 @@ const api = {
    *   legacy — the older two-file format
    *   error  — the engine could not read it
    */
-  openBinder: (): Promise<
+  openBinder: (devPath?: string): Promise<
     | {
         kind: 'binder'
         path: string
@@ -61,7 +61,7 @@ const api = {
       }
     | { kind: 'error'; path: string; error: string }
     | null
-  > => ipcRenderer.invoke('binder:open'),
+  > => ipcRenderer.invoke('binder:open', devPath),
 
   /** Autosave to the invisible sibling. Never rewrites the binder itself. */
   autosaveBinder: (binderPath: string, session: unknown): Promise<string> =>
@@ -99,7 +99,7 @@ const api = {
 
   /** Dev seam (WPT_DEV_OPEN) — preload a binder without clicking dialogs. */
   onDevOpen: (
-    cb: (arg: { paths: string[]; exportTo?: string; seedMarks?: boolean }) => void
+    cb: (arg: { paths: string[]; exportTo?: string; seedMarks?: boolean; reopen?: string }) => void
   ): void => {
     ipcRenderer.on('dev:open', (_e, arg) => cb(arg))
   },

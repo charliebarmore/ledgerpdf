@@ -203,6 +203,36 @@ function askRenderer(kind: 'pull' | 'push', payload?: unknown): Promise<unknown>
   })
 }
 
+/**
+ * Authorize the source files a session names.
+ *
+ * The renderer has no generic read capability — it may only read paths a user
+ * action authorized. A session arriving from a live agent names files this
+ * process never opened a dialog for, so drawing them was refused and the page
+ * showed "file not user-authorized this session" while the agent reported
+ * success.
+ *
+ * Only paths that exist and are source types are authorized, and only from a
+ * session that came through the authenticated live socket the user turned on
+ * deliberately. Same rule the older session-open path already used: opening a
+ * session authorizes the files it names, never a path string on its own.
+ */
+function authorizeSessionSources(session: unknown): number {
+  if (typeof session !== 'object' || session === null) return 0
+  const sources = (session as { sources?: unknown }).sources
+  if (!Array.isArray(sources)) return 0
+  let added = 0
+  for (const source of sources) {
+    const candidate = (source as { path?: unknown })?.path
+    if (typeof candidate !== 'string' || !isSourcePath(candidate)) continue
+    const abs = path.resolve(candidate)
+    if (!existsSync(abs) || allowedInputs.has(abs)) continue
+    allowedInputs.add(abs)
+    added += 1
+  }
+  return added
+}
+
 /** Turn live agent access on or off. Off is the default and the safe state. */
 async function setLiveAccess(on: boolean): Promise<{ on: boolean; socketPath?: string }> {
   const { startLive, stopLive, liveStatus } = await import('./live-host')
@@ -228,10 +258,91 @@ async function setLiveAccess(on: boolean): Promise<{ on: boolean; socketPath?: s
         currentPage?: string | null
       },
     push: async (session) => {
+      // Before the renderer is asked to draw it.
+      authorizeSessionSources(session)
       await askRenderer('push', session)
     }
   })
   return announce({ on: true, socketPath: started.socketPath })
+}
+
+async function openBinderAt(target: string): Promise<unknown> {
+
+    // ---- the older two-file format: read it so the user can convert it once
+    if (path.extname(target).toLowerCase() === '.json') {
+      allowedSessions.add(target)
+      const read = await readSessionWithRecovery(target)
+      // Opening a session authorizes only the PDF/image paths it explicitly
+      // references. The renderer never gets a generic string-to-file capability.
+      for (const raw of [read.session, read.recoverySession]) {
+        if (typeof raw !== 'object' || raw === null) continue
+        const sources = (raw as { sources?: unknown }).sources
+        if (!Array.isArray(sources)) continue
+        for (const source of sources) {
+          const candidate = (source as { path?: unknown })?.path
+          if (typeof candidate === 'string' && isSourcePath(candidate)) {
+            allowedInputs.add(path.resolve(candidate))
+          }
+        }
+      }
+      return { kind: 'legacy' as const, path: target, ...read }
+    }
+
+    // ---- a binder
+    allowedInputs.add(target)
+    // Saving writes back over this same file, so it is an authorized output too.
+    allowedOutputs.add(target)
+
+    const opened = await runEngine({ cmd: 'open_binder', path: target })
+    if (!opened.ok) {
+      return { kind: 'error' as const, path: target, error: (opened as EngineErr).error }
+    }
+    const info = (opened as EngineOk).binder as {
+      found: boolean
+      reason?: string
+      payload_intact?: boolean
+      geometry_matches?: boolean
+      session?: unknown
+    }
+
+    // A PDF with no session is an ordinary file someone wants to work on, which
+    // is the normal way a binder starts. Hand it back for import, not an error.
+    if (!info.found) {
+      return { kind: 'plain' as const, path: target, reason: info.reason }
+    }
+
+    const working = workingCopyPathFor(target)
+    const cleaned = await runEngine({ cmd: 'clean_copy', path: target, output: working })
+    if (!cleaned.ok) {
+      return { kind: 'error' as const, path: target, error: (cleaned as EngineErr).error }
+    }
+    await hideFromUser(working)
+    allowedInputs.add(working)
+    openWorkingCopies.set(target, working)
+
+    // An autosave sibling newer than the binder means the app closed without a
+    // save. Hand both to the renderer and let the user choose; never silently
+    // prefer one over the other.
+    let pendingAutosave: unknown
+    try {
+      const recoveryPath = binderRecoveryPathFor(target)
+      const [recoveryStat, binderStat] = await Promise.all([stat(recoveryPath), stat(target)])
+      if (recoveryStat.mtimeMs > binderStat.mtimeMs) {
+        pendingAutosave = JSON.parse(await readFile(recoveryPath, 'utf8'))
+      }
+    } catch {
+      // No autosave sibling is the normal case.
+    }
+
+    return {
+      kind: 'binder' as const,
+      path: target,
+      workingPath: working,
+      session: info.session,
+      payloadIntact: info.payload_intact === true,
+      geometryMatches: info.geometry_matches === true,
+      ...(pendingAutosave !== undefined ? { pendingAutosave } : {})
+    }
 }
 
 function registerIpc(): void {
@@ -372,8 +483,13 @@ function registerIpc(): void {
    * embedded session, writes the de-marked working copy the app renders from,
    * and reports whether the pages moved since the session was written.
    */
-  ipcMain.handle('binder:open', async (event) => {
+  ipcMain.handle('binder:open', async (event, devPath: unknown) => {
     assertTrustedIpc(event)
+    // Dev seam: open a binder without the dialog, so the single-file reopen
+    // path — the primary flow now — can be driven headlessly. Dev builds only.
+    if (isDev && typeof devPath === 'string' && devPath) {
+      return openBinderAt(path.resolve(devPath))
+    }
     const res = await dialog.showOpenDialog({
       title: 'Open binder',
       properties: ['openFile'],
@@ -383,83 +499,7 @@ function registerIpc(): void {
       ]
     })
     if (res.canceled || !res.filePaths[0]) return null
-    const target = path.resolve(res.filePaths[0])
-
-    // ---- the older two-file format: read it so the user can convert it once
-    if (path.extname(target).toLowerCase() === '.json') {
-      allowedSessions.add(target)
-      const read = await readSessionWithRecovery(target)
-      // Opening a session authorizes only the PDF/image paths it explicitly
-      // references. The renderer never gets a generic string-to-file capability.
-      for (const raw of [read.session, read.recoverySession]) {
-        if (typeof raw !== 'object' || raw === null) continue
-        const sources = (raw as { sources?: unknown }).sources
-        if (!Array.isArray(sources)) continue
-        for (const source of sources) {
-          const candidate = (source as { path?: unknown })?.path
-          if (typeof candidate === 'string' && isSourcePath(candidate)) {
-            allowedInputs.add(path.resolve(candidate))
-          }
-        }
-      }
-      return { kind: 'legacy' as const, path: target, ...read }
-    }
-
-    // ---- a binder
-    allowedInputs.add(target)
-    // Saving writes back over this same file, so it is an authorized output too.
-    allowedOutputs.add(target)
-
-    const opened = await runEngine({ cmd: 'open_binder', path: target })
-    if (!opened.ok) {
-      return { kind: 'error' as const, path: target, error: (opened as EngineErr).error }
-    }
-    const info = (opened as EngineOk).binder as {
-      found: boolean
-      reason?: string
-      payload_intact?: boolean
-      geometry_matches?: boolean
-      session?: unknown
-    }
-
-    // A PDF with no session is an ordinary file someone wants to work on, which
-    // is the normal way a binder starts. Hand it back for import, not an error.
-    if (!info.found) {
-      return { kind: 'plain' as const, path: target, reason: info.reason }
-    }
-
-    const working = workingCopyPathFor(target)
-    const cleaned = await runEngine({ cmd: 'clean_copy', path: target, output: working })
-    if (!cleaned.ok) {
-      return { kind: 'error' as const, path: target, error: (cleaned as EngineErr).error }
-    }
-    await hideFromUser(working)
-    allowedInputs.add(working)
-    openWorkingCopies.set(target, working)
-
-    // An autosave sibling newer than the binder means the app closed without a
-    // save. Hand both to the renderer and let the user choose; never silently
-    // prefer one over the other.
-    let pendingAutosave: unknown
-    try {
-      const recoveryPath = binderRecoveryPathFor(target)
-      const [recoveryStat, binderStat] = await Promise.all([stat(recoveryPath), stat(target)])
-      if (recoveryStat.mtimeMs > binderStat.mtimeMs) {
-        pendingAutosave = JSON.parse(await readFile(recoveryPath, 'utf8'))
-      }
-    } catch {
-      // No autosave sibling is the normal case.
-    }
-
-    return {
-      kind: 'binder' as const,
-      path: target,
-      workingPath: working,
-      session: info.session,
-      payloadIntact: info.payload_intact === true,
-      geometryMatches: info.geometry_matches === true,
-      ...(pendingAutosave !== undefined ? { pendingAutosave } : {})
-    }
+    return openBinderAt(path.resolve(res.filePaths[0]))
   })
 
   ipcMain.handle('dialog:relinkSource', async (_e, sourceName: unknown) => {
@@ -621,7 +661,8 @@ function createWindow(): void {
       win.webContents.send('dev:open', {
         paths,
         exportTo,
-        seedMarks: isDev && !!process.env.WPT_DEV_MARKS
+        seedMarks: isDev && !!process.env.WPT_DEV_MARKS,
+        reopen: isDev ? process.env.WPT_DEV_REOPEN : undefined
       })
     }
   })

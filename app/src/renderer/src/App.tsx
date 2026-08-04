@@ -851,10 +851,10 @@ export default function App(): React.JSX.Element {
     []
   )
 
-  const openBinder = useCallback(async () => {
-    if (dirty && !(await window.wpt.confirmDiscard())) return
+  const openBinder = useCallback(async (devPath?: string) => {
+    if (!devPath && dirty && !(await window.wpt.confirmDiscard())) return
 
-    const res = await window.wpt.openBinder()
+    const res = await window.wpt.openBinder(devPath)
     if (!res) return
 
     if (res.kind === 'error') {
@@ -984,10 +984,10 @@ export default function App(): React.JSX.Element {
   // import, then optionally a real export through IPC + engine — with no
   // dialogs, so it can be smoke-tested automatically. Handlers are read through
   // refs so this subscribes exactly once.
-  const devRefs = useRef({ importPaths, writeBinder })
-  devRefs.current = { importPaths, writeBinder }
+  const devRefs = useRef({ importPaths, writeBinder, openBinderAt: openBinder })
+  devRefs.current = { importPaths, writeBinder, openBinderAt: openBinder }
   useEffect(() => {
-    window.wpt.onDevOpen(async ({ paths, exportTo, seedMarks }) => {
+    window.wpt.onDevOpen(async ({ paths, exportTo, seedMarks, reopen }) => {
       let imported = await devRefs.current.importPaths(paths)
       if (imported && seedMarks) {
         // Exercise the same model the palette uses, so the smoke test covers
@@ -1070,6 +1070,12 @@ export default function App(): React.JSX.Element {
       // Report what loaded, not merely that we got here — an import that threw
       // lands on this line too, with `imported` still undefined.
       if (seedMarks) setHistoryOpen(true)
+      // Dev seam: reopen what was just written. The single-file reopen path is
+      // the primary flow now and had no headless coverage, which is how a
+      // refused readSource reached a person before a check did.
+      if (reopen) {
+        await devRefs.current.openBinderAt(reopen)
+      }
       window.wpt.devRendered({
         pages: imported?.pages.length ?? 0,
         sources: imported?.sources.length ?? 0,
@@ -1445,7 +1451,7 @@ export default function App(): React.JSX.Element {
         >
           Add
         </button>
-        <button onClick={openBinder} title={`Open a binder  ${MOD}O`}>
+        <button onClick={() => void openBinder()} title={`Open a binder  ${MOD}O`}>
           Open
         </button>
         <ExportMenu

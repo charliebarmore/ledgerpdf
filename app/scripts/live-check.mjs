@@ -134,6 +134,21 @@ try {
     after.text.split('\n')[0]
   )
 
+  // The agent adding a file it can reach is not the same as the WINDOW being
+  // able to draw it. The renderer may only read paths a user action authorized,
+  // and a session arriving from an agent names files this app never opened a
+  // dialog for — which showed up as "file not user-authorized this session" on
+  // the page while the agent reported success.
+  const second = path.join(FIXTURES, 'fixture_b.pdf')
+  const grew = await call('binder_add_pdfs', { paths: [second] })
+  check('the agent can add a file the app never opened itself', !grew.isError, grew.text.split('\n')[0])
+  const drew = await call('binder_current_page')
+  check(
+    'and the window can actually draw it',
+    !drew.isError && !/not user-authorized/i.test(drew.text + grew.text),
+    drew.text.split('\n')[0]
+  )
+
   const saved = await call('binder_save', { path: OUT })
   check('the shared binder saves as one file', !saved.isError && existsSync(OUT), saved.text.split('\n')[0])
   if (existsSync(OUT)) {
@@ -143,7 +158,8 @@ try {
     const back = await call('binder_open', { path: OUT })
     check(
       'the saved binder holds the page the APP opened and the mark the AGENT made',
-      back.text.includes('3 page(s)') && back.text.includes('1 mark(s)'),
+      // Six now: the three the APP opened plus the three the AGENT added.
+      back.text.includes('6 page(s)') && back.text.includes('1 mark(s)'),
       back.text.split('\n')[0]
     )
   }
