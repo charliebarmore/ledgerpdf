@@ -196,7 +196,12 @@ async function setLiveAccess(on: boolean): Promise<{ on: boolean; socketPath?: s
   const already = liveStatus()
   if (already) return announce({ on: true, socketPath: already.socketPath })
   const started = await startLive({
-    pull: async () => (await askRenderer('pull')) as { session: unknown; path: string | null },
+    pull: async () =>
+      (await askRenderer('pull')) as {
+        session: unknown
+        path: string | null
+        currentPage?: string | null
+      },
     push: async (session) => {
       await askRenderer('push', session)
     }

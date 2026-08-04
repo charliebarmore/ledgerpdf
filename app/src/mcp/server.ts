@@ -27,6 +27,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { existsSync, realpathSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import { runEngine } from './engine'
@@ -86,11 +87,13 @@ let sessionPath: string | null = null
  * only find in front of a client.
  */
 export interface SessionOwner {
-  pull: () => Promise<{ session: Session; path: string | null }>
+  pull: () => Promise<{ session: Session; path: string | null; currentPage?: string | null }>
   push: (session: Session) => Promise<void>
 }
 
 let owner: SessionOwner | null = null
+/** The page the person is looking at, when the app is live. */
+let currentPage: string | null = null
 
 export function setSessionOwner(next: SessionOwner): void {
   owner = next
@@ -261,6 +264,7 @@ const registerTool: typeof server.registerTool = (name, config, handler) =>
       const pulled = await owner.pull()
       session = pulled.session
       sessionPath = pulled.path
+      currentPage = pulled.currentPage ?? null
     }
     const before = session
     try {
@@ -309,7 +313,8 @@ registerTool(
     // copy while believing you are editing the open window is the whole failure
     // this feature exists to remove.
     const where = owner
-      ? 'LIVE — this is the binder open in Workpaper Binder; changes appear there as you make them.'
+      ? `LIVE — this is the binder open in Workpaper Binder; changes appear there as you make them.` +
+        (currentPage ? ` The reviewer is looking at ${currentPage} (binder_current_page).` : '')
       : 'Standalone — your own working binder. Save it and open it in the app to review.'
     return text(
       session.pages.length === 0
@@ -973,6 +978,239 @@ registerTool(
       ? setPageStatus(session, [pageId], status, session.reviewer ?? '')
       : clearPageStatus(session, [pageId])
     return text(`${pageId}: ${label}.`)
+  }
+)
+
+/**
+ * The binder's own account of itself, in markdown.
+ *
+ * Every fact here is READ FROM THE BINDER, never supplied by the agent: what
+ * was ingested, how it is organized, what was marked, what is outstanding, and
+ * which runs did it. A reviewer who did not do the work should not have to take
+ * the worker's word for what the work was — same reason a tape shows its
+ * addends rather than just its total.
+ */
+function summaryMarkdown(narrative?: string, coverPages = 0): string {
+  // Inserting the cover at the front shifts every page number in it. Numbers a
+  // reviewer cannot trust are worse than no numbers, so they are computed
+  // against the binder AS DELIVERED, cover included.
+  const pageOf = new Map(session.pages.map((p, i) => [p.id, i + 1 + coverPages]))
+  const marks = session.marks ?? []
+  const tapes = session.tapes ?? []
+  const byKind = (k: string): number => marks.filter((m) => m.kind === k).length
+  const agentMade = marks.filter((m) => m.by === 'agent').length + tapes.filter((t) => t.by === 'agent').length
+
+  const sources = session.sources.map((src) => {
+    const pages = session.pages.filter((p) => p.source === src.id).length
+    return `| ${src.name} | ${src.kind} | ${pages} |`
+  })
+
+  const outstanding: string[] = []
+  session.pages.forEach((p, i) => {
+    const st = statusOf(session, p.id)
+    const notes = marks.filter((m) => m.page === p.id && m.kind === 'note')
+    const crosses = marks.filter((m) => m.page === p.id && m.kind === 'cross')
+    if (st?.id === 'reviewed' && !notes.length && !crosses.length) return
+    if (!st && !notes.length && !crosses.length) return
+    outstanding.push(
+      `- **p.${i + 1 + coverPages}**${st ? ` — ${st.label}` : ''}` +
+        (crosses.length ? ` · ${crosses.length} cross(es)` : '') +
+        notes.map((n) => `\n  - ${n.note ?? ''}`).join('')
+    )
+  })
+
+  const journal = session.journal ?? []
+  const runs = [...new Set(journal.map((e) => e.run).filter(Boolean))] as string[]
+  const runLines = runs.map((run) => {
+    const entries = journal.filter((e) => e.run === run)
+    const first = entries[0]?.at?.slice(0, 16).replace('T', ' ') ?? ''
+    const last = entries[entries.length - 1]?.at?.slice(11, 16) ?? ''
+    return (
+      `**Run ${runs.indexOf(run) + 1}** — ${first}${last ? `–${last}` : ''}, ${entries.length} action(s)\n` +
+      entries.map((e) => `- ${e.what}${e.structural ? ' *(not undoable)*' : ''}`).join('\n')
+    )
+  })
+
+  const tapeLines = tapes.map(
+    (t) =>
+      `| p.${pageOf.get(t.page) ?? '?'} | ${t.title ?? '—'} | ${t.entries.length} | ${formatAmount(tapeTotal(t.entries))} |`
+  )
+
+  return [
+    `# Binder summary`,
+    ``,
+    narrative?.trim() ? `${narrative.trim()}\n` : '',
+    `## What is in this binder`,
+    ``,
+    `${session.pages.length} pages of support from ${session.sources.length} source(s)` +
+      `${coverPages ? `, plus this ${coverPages}-page summary` : ''}.`,
+    ``,
+    `| Source | Kind | Pages |`,
+    `| --- | --- | --- |`,
+    ...sources,
+    ``,
+    `## How it is organized`,
+    ``,
+    ...flatBookmarks(buildBookmarks(session, { pageCounts: true })).map(
+      (line) => `- ${line.replace(/\s+\[key .*$/, '')}`
+    ),
+    ``,
+    `## What was marked`,
+    ``,
+    `- ${byKind('tick')} tick(s) — agreed`,
+    `- ${byKind('cross')} cross(es) — does not agree`,
+    `- ${byKind('text')} lettered stamp(s)`,
+    `- ${byKind('note')} review note(s)`,
+    `- ${tapes.length} calculator tape(s)`,
+    ``,
+    `**${agentMade} of these were placed by an agent.** Every one is attributed in`,
+    `the exported PDF and can be removed with binder_revert_run.`,
+    ``,
+    ...(tapeLines.length
+      ? [`| Page | Tape | Lines | Total |`, `| --- | --- | --- | --- |`, ...tapeLines, ``]
+      : []),
+    `## Still needs you`,
+    ``,
+    ...(outstanding.length ? outstanding : ['- Nothing outstanding.']),
+    ``,
+    `## What the agent did`,
+    ``,
+    ...(runLines.length ? runLines : ['No agent actions recorded.']),
+    ``,
+    `---`,
+    ``,
+    `Every figure above is read from the binder itself, not written by the agent.`
+  ]
+    // NOT filtered for empties: those blank lines are what separate markdown
+    // blocks. Dropping them merged the tape table into the preceding bullet.
+    // Runs of three or more collapse instead.
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+}
+
+registerTool(
+  'binder_summary',
+  {
+    title: "The binder's account of itself",
+    description:
+      "A brief for whoever reviews this binder without having done the work: what was ingested, how it is organized, what was marked and by whom, what is still outstanding, and every agent action in order. All of it is READ FROM THE BINDER — pass a narrative to explain your reasoning on top, but the facts are not yours to state. Use binder_add_cover to put it in the binder as page 1.",
+    inputSchema: {
+      narrative: z
+        .string()
+        .optional()
+        .describe('Your account of what you did and why — the context a reviewer does not have')
+    }
+  },
+  async ({ narrative }) => text(summaryMarkdown(narrative))
+)
+
+registerTool(
+  'binder_add_cover',
+  {
+    title: 'Put the summary in the binder as page 1',
+    description:
+      "Write the binder's summary to a real markdown file and insert it as the first page, typeset. A reviewer who did not do the work then meets the context before the evidence, in the binder itself rather than in a chat window they will not have later. Re-running replaces the previous cover rather than stacking another one.",
+    inputSchema: {
+      path: z
+        .string()
+        .describe('Where to write the memo (.md). It becomes a real source file the binder points at.'),
+      narrative: z
+        .string()
+        .optional()
+        .describe('Your account of what you did and why — the facts are generated, this is the reasoning')
+    }
+  },
+  async ({ path: out, narrative }) => {
+    try {
+      const target = resolveAllowedPath(out, { mustExist: false, purpose: 'writing the cover memo' })
+      if (!/\.(md|markdown)$/i.test(target)) return fail('the cover must be a .md file')
+      if (!session.pages.length) return fail('nothing to summarize — this binder is empty')
+
+      // Replace rather than stack: a binder with three covers has none.
+      const existing = session.sources.find((x) => path.resolve(x.path) === target)
+      if (existing) {
+        const ids = session.pages.filter((p) => p.source === existing.id).map((p) => p.id)
+        if (ids.length) {
+          mutating('replace_cover', `Replaced the cover memo (${ids.length} page(s))`, true)
+          session = deletePages(session, ids)
+        }
+      }
+
+      // Two passes: the first learns how long the cover is, the second numbers
+      // the pages knowing that. A third would only matter if adding the offset
+      // changed the page count again, which the loop catches.
+      let probe = await runEngine({ cmd: 'probe', path: target })
+      let coverPages = 0
+      for (let pass = 0; pass < 3; pass++) {
+        await writeFile(target, `${summaryMarkdown(narrative, coverPages)}\n`, 'utf8')
+        probe = await runEngine({ cmd: 'probe', path: target })
+        if (!probe.ok) return fail(`could not typeset the cover: ${String(probe.error)}`)
+        const made = (probe.probe as ProbeWire).n_pages
+        if (made === coverPages) break
+        coverPages = made
+      }
+
+      mutating('add_cover', `Added a cover memo summarizing the binder`, true)
+      session = addSource(session, probe.probe as ProbeWire)
+      const added = session.pages.filter((p) => {
+        const src = session.sources.find((x) => x.id === p.source)
+        return src ? path.resolve(src.path) === target : false
+      })
+      session = movePages(
+        session,
+        added.map((p) => p.id),
+        0
+      )
+      return text(
+        `Cover memo written to ${baseName(target)} and placed as page 1 ` +
+          `(${added.length} page(s)).\n\n${summary(session)}`
+      )
+    } catch (e) {
+      return fail(String((e as Error).message))
+    }
+  }
+)
+
+registerTool(
+  'binder_current_page',
+  {
+    title: 'What the person is looking at',
+    description:
+      'The page open in the binder window right now, with everything on it — marks, notes, its status and bookmark. Use this to answer "why did you flag this one?" without making the reviewer read a page id off the screen. Only meaningful with live agent access on; standalone there is no window to look at.',
+    inputSchema: {}
+  },
+  async () => {
+    if (!owner) {
+      return text(
+        'Standalone — there is no open window. Turn on live agent access in the app to see what the reviewer is looking at.'
+      )
+    }
+    if (!currentPage) return text('The binder window has no page open.')
+    const at = session.pages.findIndex((p) => p.id === currentPage)
+    if (at < 0) return text(`The window is showing ${currentPage}, which is no longer in the binder.`)
+    const page = session.pages[at]
+    const src = session.sources.find((x) => x.id === page.source)
+    const st = statusOf(session, page.id)
+    const marks = (session.marks ?? []).filter((m) => m.page === page.id)
+    const tapes = (session.tapes ?? []).filter((t) => t.page === page.id)
+    const bookmark = flatBookmarks(buildBookmarks(session)).find((line) => line.includes(page.id))
+    const lines = [
+      `Binder page ${at + 1} of ${session.pages.length} — ${page.id}`,
+      `source: ${src?.name ?? page.source} p.${page.index + 1}${page.rotate ? ` · rotated ${page.rotate}°` : ''}`,
+      st ? `status: ${st.label}` : '',
+      bookmark ? `bookmark: ${bookmark.trim()}` : '',
+      marks.length
+        ? `marks:\n${marks
+            .map(
+              (m) =>
+                `  ${m.kind}${m.text ? ` "${m.text}"` : ''} at (${m.nx}, ${m.ny})` +
+                `${m.by === 'agent' ? '  (AI)' : ''}${m.note ? `\n    ${m.note}` : ''}`
+            )
+            .join('\n')}`
+        : 'marks: none',
+      tapes.length ? `tapes: ${tapes.length}` : ''
+    ].filter(Boolean)
+    return text(lines.join('\n'))
   }
 )
 

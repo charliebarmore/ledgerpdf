@@ -38,7 +38,7 @@ export interface LiveHandle {
 }
 
 export interface LiveHooks {
-  pull: () => Promise<{ session: unknown; path: string | null }>
+  pull: () => Promise<{ session: unknown; path: string | null; currentPage?: string | null }>
   push: (session: unknown) => Promise<void>
 }
 
@@ -115,7 +115,13 @@ export async function startLive(hooks: LiveHooks): Promise<LiveHandle> {
           try {
             if (msg.verb === 'pull') {
               const got = await hooks.pull()
-              reply({ id: msg.id, ok: true, session: got.session, path: got.path })
+              reply({
+                id: msg.id,
+                ok: true,
+                session: got.session,
+                path: got.path,
+                currentPage: got.currentPage ?? null
+              })
             } else if (msg.verb === 'push') {
               await hooks.push(msg.session)
               reply({ id: msg.id, ok: true })

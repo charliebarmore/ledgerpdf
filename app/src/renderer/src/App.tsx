@@ -212,15 +212,18 @@ export default function App(): React.JSX.Element {
    * Read through a ref so this subscribes once — resubscribing on every session
    * change would drop requests already in flight.
    */
-  const liveRefs = useRef({ session, sessionPath, apply })
-  liveRefs.current = { session, sessionPath, apply }
+  const liveRefs = useRef({ session, sessionPath, apply, currentId })
+  liveRefs.current = { session, sessionPath, apply, currentId }
   useEffect(() => {
     window.wpt.onLiveState((state) => setLiveOn(state.on))
     window.wpt.onLiveRequest((req) => {
       if (req.kind === 'pull') {
         window.wpt.liveReply(req.id, {
           session: liveRefs.current.session,
-          path: liveRefs.current.sessionPath
+          path: liveRefs.current.sessionPath,
+          // What the person is actually looking at, so "why did you flag this
+          // one?" resolves without them reading a page id off the screen.
+          currentPage: liveRefs.current.currentId
         })
         return
       }

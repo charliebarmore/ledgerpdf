@@ -26,6 +26,7 @@ interface Reply {
   error?: string
   session?: unknown
   path?: string | null
+  currentPage?: string | null
 }
 
 class LiveLink {
@@ -130,7 +131,11 @@ export async function attachToRunningApp(): Promise<SessionOwner | null> {
     pull: async () => {
       const reply = await link.send('pull')
       if (!reply.ok) throw new Error(reply.error ?? 'pull failed')
-      return { session: reply.session as Session, path: reply.path ?? null }
+      return {
+        session: reply.session as Session,
+        path: reply.path ?? null,
+        currentPage: reply.currentPage ?? null
+      }
     },
     push: async (session) => {
       const reply = await link.send('push', { session })

@@ -37,7 +37,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `verify:model` | 194 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
 | `verify:text` | 53 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
-| `verify:mcp` | 64 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
+| `verify:mcp` | 74 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, renders a synthetic PDF under `file://`, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
 
@@ -268,6 +268,35 @@ conformance runs pdfium *and* poppler.
 > Windows ends up on tesseract rather than `Windows.Media.Ocr`, that build has
 > to bundle it (~15–40 MB plus signing a second native binary) or require an
 > install. Tracked in `../ROADMAP.md`.
+
+## The binder's own account of itself
+
+A reviewer who did not do the work needs the context the worker had. The
+journal answers *what changed*; this answers *what happened and why*.
+
+`binder_summary` produces a brief, and `binder_add_cover` writes it to a real
+markdown file and inserts it typeset as **page 1** — so the context arrives in
+the binder, ahead of the evidence, rather than in a chat window the reviewer
+will not have later.
+
+**The split is deliberate: the facts are read from the binder, the narrative is
+the agent's.** What was ingested, how it is organized, marks by kind, tapes with
+their totals, what is still outstanding, and every agent action in order — none
+of that is the agent's to assert. Same principle as the tape: the conclusion
+arrives carrying its evidence.
+
+Two things that are easy to get wrong and are checked:
+
+- **Page references count the cover.** Inserting it at the front shifts every
+  page number in it; references a reviewer cannot follow are worse than none. The
+  cover is typeset first to learn its own length, then renumbered against the
+  binder as delivered.
+- **Re-running replaces the cover**, rather than stacking another. A binder with
+  three covers has none.
+
+`binder_current_page` tells an agent which page the reviewer is looking at, so
+"why did you flag this one?" resolves without reading a page id off the screen.
+It needs live agent access; standalone there is no window to look at.
 
 ## Review notes and flagging
 

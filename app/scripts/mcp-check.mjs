@@ -11,7 +11,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { spawn } from 'node:child_process'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -292,6 +292,83 @@ check(
     'outside WPT_MCP_ROOTS'
   )
 )
+
+// ------------------------------------------------- the binder's own account
+// A reviewer who did not do the work should not have to take the worker's word
+// for what the work was, so every figure in the summary is read from the binder.
+{
+  const ENG = path.join(REPO, 'spike', 'out', 'cover')
+  rmSync(ENG, { recursive: true, force: true })
+  mkdirSync(ENG, { recursive: true })
+
+  await call('binder_new')
+  await call('binder_add_pdfs', { paths: [a, path.join(FIXTURES, 'trial_balance.xlsx')] })
+  await call('binder_set_reviewer', { initials: 'CJB' })
+  const ids = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+  await call('binder_place_mark', { pageId: ids[0], kind: 'tick', nx: 0.75, ny: 0.13 })
+  await call('binder_add_tape', { pageId: ids[0], nx: 0.5, ny: 0.6, entries: [10, 20], title: 'Income' })
+  await call('binder_add_note', { pageId: ids[3], nx: 0.5, ny: 0.3, flag: true, note: 'Confirm the renewal.' })
+
+  const brief = await call('binder_summary', { narrative: 'Assembled from the engagement folder.' })
+  check(
+    'the summary carries the narrative AND facts read from the binder',
+    brief.text.includes('Assembled from the engagement folder.') &&
+      brief.text.includes('trial_balance.xlsx') &&
+      brief.text.includes('1 review note(s)'),
+    brief.text.split('\n').slice(0, 3).join(' | ')
+  )
+  check(
+    'the summary says how much of the work was the agent\'s',
+    /\d+ of these were placed by an agent/.test(brief.text),
+    brief.text.split('\n').find((l) => l.includes('placed by an agent')) ?? ''
+  )
+  check(
+    'the summary lists what is still outstanding, with the note',
+    brief.text.includes('Still needs you') && brief.text.includes('Confirm the renewal.'),
+    brief.text.split('Still needs you')[1]?.split('##')[0]?.trim().slice(0, 80)
+  )
+  check(
+    'the summary replays what the agent did, in order',
+    brief.text.includes('What the agent did') && brief.text.includes('Placed tick'),
+    brief.text.split('What the agent did')[1]?.trim().split('\n')[0]
+  )
+
+  const coverPath = path.join(ENG, 'summary.md')
+  const cover = await call('binder_add_cover', { path: coverPath, narrative: 'Assembled.' })
+  check('the cover lands as page 1', !cover.isError && cover.text.includes('page 1'), cover.text.split('\n')[0])
+  check('the cover is a real file the binder points at', existsSync(coverPath))
+
+  const after = await call('binder_status')
+  const order = [...after.text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+  check(
+    'the cover sits ahead of the evidence',
+    after.text.split('\n').find((l) => l.includes(order[0]))?.includes('summary.md') === true,
+    after.text.split('\n').slice(2, 4).join(' | ')
+  )
+
+  // Page numbers inside the cover must count the cover itself, or every
+  // reference a reviewer follows is off by its length.
+  const written = readFileSync(coverPath, 'utf8')
+  check(
+    'page references count the cover, so they match the delivered binder',
+    written.includes('plus this') && /- \*\*p\.(6|7)\*\*/.test(written),
+    written.split('\n').filter((l) => l.startsWith('- **p.')).join(' | ')
+  )
+  check(
+    'markdown blocks stay separated, so the tables render as tables',
+    written.includes('\n\n| Page | Tape'),
+    written.split('| Page | Tape')[0]?.slice(-30)
+  )
+
+  const before = order.length
+  await call('binder_add_cover', { path: coverPath, narrative: 'Assembled again.' })
+  const again = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+  check(
+    're-running replaces the cover rather than stacking another',
+    again.length === before,
+    `${before} -> ${again.length}`
+  )
+}
 
 // ------------------------------------------------------- notes and flagging
 // An agent that finds a problem needs somewhere to put it that a human will
