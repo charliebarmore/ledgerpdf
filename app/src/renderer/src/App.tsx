@@ -1163,10 +1163,6 @@ export default function App(): React.JSX.Element {
     >
       <header className="toolbar">
         <div className="toolbar-row">
-        <button onClick={addViaDialog} disabled={busy} title={`Add PDFs or images  ${MOD}I`}>
-          Add
-        </button>
-        <span className="sep" />
         <button onClick={() => rotate(-90)} disabled={!count} title="Rotate left  [">
           ⟲
         </button>
@@ -1356,6 +1352,15 @@ export default function App(): React.JSX.Element {
           ↷
         </button>
         <span className="spacer" />
+        {/* Add sits with Open and Save: they are the file verbs, and it was
+            stranded at the far left away from the two it belongs with. */}
+        <button
+          onClick={addViaDialog}
+          disabled={busy}
+          title={`Add PDFs, spreadsheets, memos or images  ${MOD}I`}
+        >
+          Add
+        </button>
         <button onClick={openSession} title={`Open a saved .wptsession.json  ${MOD}O`}>
           Open
         </button>

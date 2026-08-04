@@ -490,6 +490,15 @@ export interface Session {
    * artifacts are stamped with it. Absent means a person is at the keyboard.
    */
   activeRun?: string
+  /**
+   * The cover memo, if one was generated.
+   *
+   * `pages` is the binder's page order at the moment it was written. A printed
+   * summary is a SNAPSHOT — reorder the binder afterwards and its page
+   * references are wrong — so this is what lets the app say so rather than let
+   * a reviewer follow a reference to the wrong page.
+   */
+  cover?: { path: string; narrative?: string; pages: string }
 }
 
 export interface BookmarkNode {
@@ -1603,6 +1612,18 @@ function stripSourceExt(name: string): string {
  * why moving a section carries its nested bookmarks with it — their pages went
  * along.
  */
+/**
+ * Has the binder moved since its cover was written?
+ *
+ * The live inventory is always right because it reads page ids. A PRINTED
+ * summary cannot be — it is ink — so the honest thing is to notice and say so
+ * rather than let a reviewer follow "p.6" to the wrong page.
+ */
+export function coverIsStale(session: Session): boolean {
+  if (!session.cover) return false
+  return session.cover.pages !== session.pages.map((p) => p.id).join(',')
+}
+
 export function bookmarkSection(session: Session, key: string): string[] {
   const flat = flattenTree(buildBookmarks(session, { pageCounts: false }))
   const indexOf = new Map(session.pages.map((p, i) => [p.id, i]))
@@ -2098,6 +2119,9 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
           }
         : {}),
       ...(typeof s.reviewer === 'string' ? { reviewer: s.reviewer } : {}),
+      ...(s.cover && typeof s.cover === 'object' && typeof s.cover.path === 'string'
+        ? { cover: s.cover }
+        : {}),
       // The audit trail survives reopen intact. `activeRun` deliberately does
       // NOT: a run belongs to the agent process that opened it, and reviving
       // one would silently stamp a person's later edits as the AI's work.

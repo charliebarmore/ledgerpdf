@@ -360,6 +360,36 @@ check(
     written.split('| Page | Tape')[0]?.slice(-30)
   )
 
+  // The live inventory tracks pages by id, so it survives a reorder. The
+  // PRINTED cover cannot — it is ink — so it has to say when it has gone stale
+  // rather than send a reviewer to the wrong page.
+  const inv = await call('binder_inventory')
+  check(
+    'the inventory says where each source ended up',
+    inv.text.includes('trial_balance.xlsx') && /at p\.\d/.test(inv.text),
+    inv.text.split('\n').slice(2, 5).join(' | ')
+  )
+  const moved2 = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+  await call('binder_move_pages', { pageIds: [moved2[moved2.length - 1]], beforeIndex: 0 })
+  const inv2 = await call('binder_inventory')
+  check(
+    'the inventory follows the pages when they move',
+    inv2.text !== inv.text && /at p\.\d/.test(inv2.text),
+    inv2.text.split('\n').slice(2, 5).join(' | ')
+  )
+  check(
+    'a printed cover admits when it has gone stale',
+    (await call('binder_status')).text.includes('OUT OF DATE'),
+    (await call('binder_status')).text.split('\n').slice(0, 3).join(' | ')
+  )
+  await call('binder_add_cover', { path: coverPath })
+  check(
+    'refreshing the cover clears the warning without retyping the reasoning',
+    !(await call('binder_status')).text.includes('OUT OF DATE') &&
+      readFileSync(coverPath, 'utf8').includes('Assembled.'),
+    (await call('binder_status')).text.split('\n')[1]
+  )
+
   const before = order.length
   await call('binder_add_cover', { path: coverPath, narrative: 'Assembled again.' })
   const again = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])

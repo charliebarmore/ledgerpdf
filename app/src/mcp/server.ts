@@ -55,6 +55,7 @@ import {
   setBookmarkTitle,
   setPageStatus,
   clearPageStatus,
+  coverIsStale,
   statusDefs,
   statusOf,
   tapeTotal,
@@ -312,14 +313,17 @@ registerTool(
     // Which binder this is must never be left to inference: editing a private
     // copy while believing you are editing the open window is the whole failure
     // this feature exists to remove.
+    const stale = coverIsStale(session)
+      ? '\nThe cover memo is OUT OF DATE — pages moved since it was written. Re-run binder_add_cover with the same path.'
+      : ''
     const where = owner
       ? `LIVE — this is the binder open in Workpaper Binder; changes appear there as you make them.` +
         (currentPage ? ` The reviewer is looking at ${currentPage} (binder_current_page).` : '')
       : 'Standalone — your own working binder. Save it and open it in the app to review.'
     return text(
       session.pages.length === 0
-        ? `Empty binder. ${summary(session)}\n${where}`
-        : `${summary(session)}\n${where}\n\n${pageTable(session)}`
+        ? `Empty binder. ${summary(session)}\n${where}${stale}`
+        : `${summary(session)}\n${where}${stale}\n\n${pageTable(session)}`
     )
   }
 )
@@ -1049,6 +1053,24 @@ function summaryMarkdown(narrative?: string, coverPages = 0): string {
     `| --- | --- | --- |`,
     ...sources,
     ``,
+    `## Where each document ended up`,
+    ``,
+    `| Source | Pages in binder | At | Marked |`,
+    `| --- | --- | --- | --- |`,
+    ...session.sources.map((src) => {
+      const pages = session.pages.filter((p) => p.source === src.id)
+      const nums = pages.map((p) => (session.pages.findIndex((x) => x.id === p.id) + 1 + coverPages))
+      const ids = new Set(pages.map((p) => p.id))
+      const on = marks.filter((m) => ids.has(m.page))
+      const dropped = src.nPages - pages.length
+      const marked = [
+        on.filter((m) => m.kind === 'tick').length ? `${on.filter((m) => m.kind === 'tick').length} tick` : '',
+        on.filter((m) => m.kind === 'note').length ? `${on.filter((m) => m.kind === 'note').length} note` : '',
+        tapes.filter((t) => ids.has(t.page)).length ? `${tapes.filter((t) => ids.has(t.page)).length} tape` : ''
+      ].filter(Boolean).join(', ')
+      return `| ${src.name} | ${pages.length} of ${src.nPages}${dropped > 0 ? ` (${dropped} left out)` : ''} | ${pageRanges(nums)} | ${marked || '—'} |`
+    }),
+    ``,
     `## How it is organized`,
     ``,
     ...flatBookmarks(buildBookmarks(session, { pageCounts: true })).map(
@@ -1088,6 +1110,71 @@ function summaryMarkdown(narrative?: string, coverPages = 0): string {
     .replace(/\n{3,}/g, '\n\n')
 }
 
+/** Contiguous binder-page runs, as "p.4-6" — how a person refers to a section. */
+function pageRanges(numbers: number[]): string {
+  if (!numbers.length) return '—'
+  const sorted = [...numbers].sort((x, y) => x - y)
+  const runs: Array<[number, number]> = [[sorted[0], sorted[0]]]
+  for (const n of sorted.slice(1)) {
+    const last = runs[runs.length - 1]
+    if (n === last[1] + 1) last[1] = n
+    else runs.push([n, n])
+  }
+  return runs.map(([a, b]) => (a === b ? `p.${a}` : `p.${a}-${b}`)).join(', ')
+}
+
+registerTool(
+  'binder_inventory',
+  {
+    title: 'What happened to every document',
+    description:
+      "One row per source file: what it was, how many of its pages made it in, where they sit in the binder RIGHT NOW, and what is marked on them. Answers 'I pointed you at a folder — what did you do with it all?'. Computed from the binder every time it is called, so it is never out of date: pages are tracked by permanent id, not page number, and a run that reads p.4-6 today will read p.9-11 after you reorder.",
+    inputSchema: {}
+  },
+  async () => {
+    if (!session.sources.length) return text('This binder is empty.')
+    const numberOf = new Map(session.pages.map((p, i) => [p.id, i + 1]))
+    const marks = session.marks ?? []
+    const tapes = session.tapes ?? []
+
+    const rows = session.sources.map((src) => {
+      const pages = session.pages.filter((p) => p.source === src.id)
+      const numbers = pages.map((p) => numberOf.get(p.id) ?? 0)
+      const ids = new Set(pages.map((p) => p.id))
+      const on = marks.filter((m) => ids.has(m.page))
+      const count = (k: string): number => on.filter((m) => m.kind === k).length
+      const flagged = pages.filter((p) => statusOf(session, p.id)?.id === 'open').length
+      const notes = count('note')
+      const bits = [
+        count('tick') ? `${count('tick')} tick` : '',
+        count('cross') ? `${count('cross')} cross` : '',
+        notes ? `${notes} note` : '',
+        tapes.filter((t) => ids.has(t.page)).length
+          ? `${tapes.filter((t) => ids.has(t.page)).length} tape`
+          : '',
+        flagged ? `${flagged} flagged` : ''
+      ].filter(Boolean)
+      // A source whose pages were partly deleted is the thing a reviewer most
+      // needs to notice: "you pointed me at this and I left some of it out."
+      const dropped = src.nPages - pages.length
+      return (
+        `${src.name}\n` +
+        `    ${src.kind} · ${pages.length} of ${src.nPages} page(s) in the binder` +
+        `${dropped > 0 ? `  ⚠ ${dropped} NOT included` : ''}\n` +
+        `    at ${pageRanges(numbers)}${bits.length ? `  ·  ${bits.join(', ')}` : ''}`
+      )
+    })
+
+    const orphaned = session.pages.filter((p) => !session.sources.some((x) => x.id === p.source))
+    return text(
+      `${session.sources.length} source(s) → ${session.pages.length} page(s)\n\n` +
+        rows.join('\n\n') +
+        (orphaned.length ? `\n\n⚠ ${orphaned.length} page(s) reference a missing source.` : '') +
+        `\n\nPositions are read from the binder now — reorder the pages and they move with them.`
+    )
+  }
+)
+
 registerTool(
   'binder_summary',
   {
@@ -1123,6 +1210,8 @@ registerTool(
   async ({ path: out, narrative }) => {
     try {
       const target = resolveAllowedPath(out, { mustExist: false, purpose: 'writing the cover memo' })
+      // Refreshing after a reorder should not need the reasoning retyped.
+      const story = narrative ?? (session.cover?.path === target ? session.cover.narrative : undefined)
       if (!/\.(md|markdown)$/i.test(target)) return fail('the cover must be a .md file')
       if (!session.pages.length) return fail('nothing to summarize — this binder is empty')
 
@@ -1142,7 +1231,7 @@ registerTool(
       let probe = await runEngine({ cmd: 'probe', path: target })
       let coverPages = 0
       for (let pass = 0; pass < 3; pass++) {
-        await writeFile(target, `${summaryMarkdown(narrative, coverPages)}\n`, 'utf8')
+        await writeFile(target, `${summaryMarkdown(story, coverPages)}\n`, 'utf8')
         probe = await runEngine({ cmd: 'probe', path: target })
         if (!probe.ok) return fail(`could not typeset the cover: ${String(probe.error)}`)
         const made = (probe.probe as ProbeWire).n_pages
@@ -1161,6 +1250,14 @@ registerTool(
         added.map((p) => p.id),
         0
       )
+      session = {
+        ...session,
+        cover: {
+          path: target,
+          ...(story?.trim() ? { narrative: story.trim() } : {}),
+          pages: session.pages.map((p) => p.id).join(',')
+        }
+      }
       return text(
         `Cover memo written to ${baseName(target)} and placed as page 1 ` +
           `(${added.length} page(s)).\n\n${summary(session)}`

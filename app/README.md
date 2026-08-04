@@ -37,7 +37,7 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `verify:model` | 194 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
 | `verify:text` | 53 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
 | `verify:live` | 9 checks that an agent and the running app share ONE binder — the app is launched with a binder open, the real stdio MCP server is driven as a real MCP client, and the mark it makes is asserted in the app's own session; plus socket perms and token refusal |
-| `verify:mcp` | 74 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
+| `verify:mcp` | 78 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, renders a synthetic PDF under `file://`, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
 
@@ -268,6 +268,28 @@ conformance runs pdfium *and* poppler.
 > Windows ends up on tesseract rather than `Windows.Media.Ocr`, that build has
 > to bundle it (~15–40 MB plus signing a second native binary) or require an
 > install. Tracked in `../ROADMAP.md`.
+
+## Where every document ended up
+
+`binder_inventory` answers "I pointed you at a folder — what did you do with it
+all?": one row per source, what it was, **how many of its pages made it in**,
+where they sit in the binder right now, and what is marked on them.
+
+A source that lost pages says so — `2 of 3 page(s) in the binder ⚠ 1 NOT
+included` — because a document quietly left out is the thing a reviewer most
+needs to notice.
+
+**It never goes stale.** Pages are tracked by permanent id, not page number, so
+a run that reads `p.4-6` today reads `p.9-11` after you reorder, with no linking
+to maintain. That is the same mechanism that already keeps bookmarks and marks
+attached to their pages.
+
+The **printed** copy in the cover memo is a different matter: it is ink, and a
+snapshot cannot follow a reorder. So the session records the page order at the
+moment the cover was written, and `binder_status` says **"the cover memo is OUT
+OF DATE"** when they diverge. Re-running `binder_add_cover` with the same path
+refreshes it and reuses the narrative, so the reasoning does not have to be
+retyped.
 
 ## The binder's own account of itself
 
