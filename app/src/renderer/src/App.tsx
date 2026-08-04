@@ -1479,20 +1479,9 @@ export default function App(): React.JSX.Element {
         <button onClick={() => void openBinder()} title={`Open a binder  ${MOD}O`}>
           Open
         </button>
-        <ExportMenu
-          numbering={numberCfg}
-          onNumbering={(patch) =>
-            apply({ ...session, numbering: { ...numberCfg, ...patch } }, 'Binder options updated.')
-          }
-          pageCount={pages.length}
-        />
-        <button
-          onClick={() => void saveCopyToSendOut()}
-          disabled={busy || !pages.length}
-          title={`Save a copy for a client or a file room. Marks are printed on permanently and it cannot be reopened for editing.  ${MOD}E`}
-        >
-          Save a copy to send out
-        </button>
+        {/* Save sits with Add and Open — it is the one done constantly, and it
+            was last in the row behind the widest label here, so on a narrower
+            window it was the button that got pushed off the edge. */}
         <button
           className="primary"
           onClick={() => void saveBinder(false)}
@@ -1500,6 +1489,24 @@ export default function App(): React.JSX.Element {
           title={`Save this binder  ${MOD}S    (${MOD}⇧S to save it under a new name)`}
         >
           Save
+        </button>
+        <ExportMenu
+          numbering={numberCfg}
+          onNumbering={(patch) =>
+            apply({ ...session, numbering: { ...numberCfg, ...patch } }, 'Binder options updated.')
+          }
+          pageCount={pages.length}
+        />
+        {/* Kept as words rather than "Export": it is a different DESTINATION,
+            not a variant of Save, and the difference — permanent marks, cannot
+            be reopened — is the whole reason it is a separate button. Last in
+            the row because it happens once an engagement, not once a minute. */}
+        <button
+          onClick={() => void saveCopyToSendOut()}
+          disabled={busy || !pages.length}
+          title={`Save a copy for a client or a file room. Marks are printed on permanently and it cannot be reopened for editing.  ${MOD}E`}
+        >
+          Save a copy to send out
         </button>
         </div>
       </header>
