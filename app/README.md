@@ -35,7 +35,8 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 6 checks proving atomic session replacement, private POSIX permissions, previous-generation recovery, and cleanup of temporary files |
 | `verify:model` | 106 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity and atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
-| `verify:mcp` | 34 checks driving the **MCP server** as a real MCP client through a whole binder build, including default-deny and out-of-root file-access checks |
+| `verify:text` | 17 checks that extracted text lands where the text actually is — against the fixtures' own draw coordinates *and* against rendered pixels, on a CropBox≠MediaBox page and a `/Rotate 90` page |
+| `verify:mcp` | 41 checks driving the **MCP server** as a real MCP client through a whole binder build, including reading a page, finding a figure and marking it, the rotation transform, and default-deny and out-of-root file-access checks |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs and a receipt photo → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, renders a synthetic PDF under `file://`, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
 
@@ -586,16 +587,28 @@ agent reads them once from `binder_status` and they stay valid across reordering
 This matters more here than anywhere else in the app, so it is stated plainly.
 
 **Does cross:** file paths, file names, page counts, page order and rotation,
-bookmark titles, and mark/tape metadata (positions, letters, notes, totals).
+bookmark titles, mark/tape metadata (positions, letters, notes, totals), **and
+the page text itself** via `binder_read_page` and `binder_find`.
 
-**Does not cross:** page text. The engine probes *structure*, not content —
-there is no tool that returns what a page says or what numbers are on it. This
-server cannot put the figures off a client return into a model's context.
+**Page text crossing is new, and it is the largest disclosure in this app.**
+Until text extraction shipped, the worst case was a model learning a client's
+name from a file name; the engine probed structure and could not report what a
+page said. Now a model can be handed the figures off a return — wages,
+balances, and on a 1040 the taxpayer's SSN. That was a deliberate trade: an
+agent that cannot read a page cannot tie one out, and every mark it places has
+to be positioned by hand, which defeats the point. But it changes the §7216
+question from *metadata* to *content*, and it deserves a fresh decision rather
+than inheriting the old one.
 
-That is still not zero-disclosure. **File names and bookmark titles routinely
-carry client names** — a real 62-page master file had `Revenue – Triland Partners LLC`
-in its outline. Pointing an agent at real client files is therefore an IRC §7216
-disclosure decision. File access is now **disabled by default**. Registration
+Two mitigations, neither of which is a substitute for that decision. Text is
+only readable from folders named in `WPT_MCP_ROOTS`, which is empty by default.
+And **whether the model is local or hosted is the part only you know** — a
+local model keeps this on the machine and is the honest way to have both.
+
+**File names and bookmark titles also routinely carry client names** — a real
+62-page master file had `Revenue – Triland Partners LLC` in its outline. Pointing an
+agent at real client files is therefore an IRC §7216
+disclosure decision. File access is **disabled by default**. Registration
 must set `WPT_MCP_ROOTS` to one or more path-delimited engagement roots; reads,
 session opens/saves, and exports outside those canonical roots are refused,
 including symlink escapes. This limits accidental reach but does not redact

@@ -554,6 +554,24 @@ export function movePages(session: Session, ids: string[], beforeIndex: number):
   return { ...session, pages: [...rest.slice(0, at), ...moving, ...rest.slice(at)] }
 }
 
+/**
+ * Apply a page's user rotation delta to a normalized display-space point.
+ *
+ * The engine reports text positions in the SOURCE page's display space, which
+ * accounts for that page's own /Rotate but knows nothing about a rotation the
+ * user applied inside the binder. Marks live in the binder's display space. On
+ * any page someone straightened after import, the two differ by exactly this
+ * delta — so text coordinates must come through here before they can be handed
+ * to `addMark`, or the tick lands on the wrong edge of the page.
+ */
+export function rotateVisual(nx: number, ny: number, deg: number): { nx: number; ny: number } {
+  const r = ((deg % 360) + 360) % 360
+  if (r === 90) return { nx: 1 - ny, ny: nx }
+  if (r === 180) return { nx: 1 - nx, ny: 1 - ny }
+  if (r === 270) return { nx: ny, ny: 1 - nx }
+  return { nx, ny }
+}
+
 export function rotatePages(session: Session, ids: string[], delta: number): Session {
   const idSet = new Set(ids)
   return {

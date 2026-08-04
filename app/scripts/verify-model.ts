@@ -50,6 +50,7 @@ import {
   shapesOnPage,
   updateShape,
   rotatePages,
+  rotateVisual,
   sanitizeTitle,
   clearPageStatus,
   setBookmarkTitle,
@@ -179,6 +180,38 @@ async function main(): Promise<number> {
   )
   t = rotatePages(s, [aIds[0]], -270)
   check('negative rotation normalizes', t.pages.find((p) => p.id === aIds[0])!.rotate === 270)
+
+  // --- rotateVisual: turns extracted text coordinates into the binder's own
+  // display space. A wrong quadrant here puts an agent's tick on the wrong
+  // edge of every page someone straightened after import.
+  check(
+    'rotateVisual 90° sends the top-left corner to the top-right',
+    JSON.stringify(rotateVisual(0, 0, 90)) === JSON.stringify({ nx: 1, ny: 0 }),
+    JSON.stringify(rotateVisual(0, 0, 90))
+  )
+  check('rotateVisual 0° is identity', rotateVisual(0.3, 0.7, 0).nx === 0.3)
+  {
+    const start = { nx: 0.31, ny: 0.86 }
+    let p = start
+    for (let i = 0; i < 4; i++) p = rotateVisual(p.nx, p.ny, 90)
+    check(
+      'four 90° turns return a point to itself',
+      Math.abs(p.nx - start.nx) < 1e-12 && Math.abs(p.ny - start.ny) < 1e-12,
+      JSON.stringify(p)
+    )
+    const half = rotateVisual(start.nx, start.ny, 180)
+    const once = rotateVisual(start.nx, start.ny, 90)
+    const twice = rotateVisual(once.nx, once.ny, 90)
+    check(
+      '180° equals two 90° turns',
+      Math.abs(half.nx - twice.nx) < 1e-12 && Math.abs(half.ny - twice.ny) < 1e-12,
+      `${JSON.stringify(half)} vs ${JSON.stringify(twice)}`
+    )
+    check(
+      '-90° and 270° agree',
+      JSON.stringify(rotateVisual(0.2, 0.4, -90)) === JSON.stringify(rotateVisual(0.2, 0.4, 270))
+    )
+  }
 
   // --- bookmarks before deletion: file-level + nested imported outline
   const before = buildBookmarks(s)

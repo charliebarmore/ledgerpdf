@@ -2,8 +2,12 @@
 pikepdf>=10.10        # MPL-2.0 — PDF assembly, outlines, annotations (bundles qpdf, Apache-2.0)
 pillow>=10            # HPND — image sources: dimensions, EXIF orientation, decode
                       #   (promoted from test-only when images became binder pages)
+pypdfium2>=4          # BSD-3/Apache-2.0 — pdfium, the Chrome/Edge PDF engine.
+                      #   Promoted from test-only when text extraction shipped:
+                      #   it reads the text layer with per-character boxes, which
+                      #   is what lets an agent address a figure by name. Still
+                      #   also the render engine for the conformance harness.
 # Spike / test harness only (not shipped in the sidecar)
-pypdfium2>=4          # pdfium == Chrome/Edge PDF engine; render verification
 numpy>=1.26           # BSD — pixel comparison of rendered pages. Was always
                       #   imported by the render checks and never declared; a
                       #   Mac with Anaconda supplied it, a clean venv does not.

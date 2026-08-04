@@ -46,6 +46,7 @@ export interface EngineResult {
   ok: boolean
   error?: string
   probe?: unknown
+  text?: unknown
   result?: unknown
 }
 

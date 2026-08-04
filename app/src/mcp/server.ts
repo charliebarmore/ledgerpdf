@@ -8,12 +8,18 @@
  * session file is the handoff.
  *
  * WHAT CROSSES THE BOUNDARY: file paths, file names, page counts, page order,
- * bookmark titles, and mark/tape metadata. Page *text* is never read or
- * returned — the engine probes structure, not content — so this server cannot
- * put the numbers off a return into a model's context. Bookmark titles and file
- * names routinely carry client names, so what does cross is still client-
- * identifying: running this against real client files is a §7216 disclosure
- * decision, and the tool does not make it for you.
+ * bookmark titles, mark/tape metadata — and, since binder_read_page and
+ * binder_find, THE PAGE TEXT ITSELF.
+ *
+ * That last one is a deliberate escalation and worth stating plainly. Before
+ * it, the worst case was that a model learned a client's name from a file name.
+ * Now a model can be handed the figures off a return: wages, balances, and on a
+ * 1040 the taxpayer's SSN. Pointing this at real client documents is an IRC
+ * §7216 disclosure decision about *content*, not just metadata, and the tool
+ * does not make it for you. It stays gated behind WPT_MCP_ROOTS, which is
+ * empty by default, so text can only be read out of folders the user named on
+ * purpose. Whether the model on the other end is local or hosted is the part
+ * only the user knows.
  *
  * Runs on stdio, locally, and talks to nothing but the local engine.
  */
@@ -40,6 +46,7 @@ import {
   removeMarks,
   removeTapes,
   rotatePages,
+  rotateVisual,
   setBookmarkTitle,
   tapeTotal,
   toTapeEntry,
@@ -609,6 +616,147 @@ server.registerTool(
         (r.check_problems.length
           ? `qpdf validation: ${r.check_problems.length} problem(s): ${r.check_problems.join('; ')}`
           : 'qpdf validation: clean')
+    )
+  }
+)
+
+// ------------------------------------------------------------------- text
+
+interface Word {
+  t: string
+  nx: number
+  ny: number
+  box: [number, number, number, number]
+}
+
+/**
+ * A binder page's text, in the binder's own display space.
+ *
+ * Two corrections happen here and both matter. The engine is asked for the
+ * SOURCE page index (a binder page can be any page of any file, in any order),
+ * and every coordinate is then turned by the user's rotation delta so a word's
+ * position means the same thing a mark's position does.
+ */
+async function pageText(page: {
+  id: string
+  source: string
+  index: number
+  rotate: number
+}): Promise<{ text: string; words: Word[]; hasText: boolean }> {
+  const src = session.sources.find((s) => s.id === page.source)
+  if (!src) throw new Error(`page ${page.id} has no source in this session`)
+  // Images are scans by definition — no text layer, and the engine's PDF
+  // reader would simply fail to open one.
+  if (!src.path.toLowerCase().endsWith('.pdf')) {
+    return { text: '', words: [], hasText: false }
+  }
+  const res = await runEngine({ cmd: 'text', path: src.path, pages: [page.index] })
+  if (!res.ok) throw new Error(String(res.error))
+  const wire = (res.text as { pages: Array<{ text: string; has_text: boolean; words?: Word[] }> })
+    .pages[0]
+  if (!wire) return { text: '', words: [], hasText: false }
+  const turn = (w: Word): Word => {
+    if (!page.rotate) return w
+    const c = rotateVisual(w.nx, w.ny, page.rotate)
+    const [x0, y0, x1, y1] = w.box
+    const corners = [
+      rotateVisual(x0, y0, page.rotate),
+      rotateVisual(x1, y0, page.rotate),
+      rotateVisual(x1, y1, page.rotate),
+      rotateVisual(x0, y1, page.rotate)
+    ]
+    const xs = corners.map((p) => p.nx)
+    const ys = corners.map((p) => p.ny)
+    return {
+      t: w.t,
+      nx: Number(c.nx.toFixed(5)),
+      ny: Number(c.ny.toFixed(5)),
+      box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)].map((v) =>
+        Number(v.toFixed(5))
+      ) as [number, number, number, number]
+    }
+  }
+  return {
+    text: wire.text ?? '',
+    words: (wire.words ?? []).map(turn),
+    hasText: wire.has_text === true
+  }
+}
+
+server.registerTool(
+  'binder_read_page',
+  {
+    title: 'Read a page',
+    description:
+      "The text of a binder page, laid out in lines. Use this to find out what a page actually says — which figures are on it, what schedule it is — before bookmarking, naming, or marking it. Returns nothing for a scanned page or a photo: those carry no text layer and would need OCR.",
+    inputSchema: { pageId: z.string() }
+  },
+  async ({ pageId }) => {
+    const page = session.pages.find((p) => p.id === pageId)
+    if (!page) return fail(`unknown page id: ${pageId}`)
+    try {
+      const got = await pageText(page)
+      if (!got.hasText) {
+        return text(
+          `${pageId} has no text layer — it is a scan or a photo. Its content can only be read by eye or with OCR, which this tool does not do.`
+        )
+      }
+      return text(`${pageId}:\n${got.text}`)
+    } catch (e) {
+      return fail(String((e as Error).message))
+    }
+  }
+)
+
+server.registerTool(
+  'binder_find',
+  {
+    title: 'Find text in the binder',
+    description:
+      'Search the binder for a figure or phrase and get back each hit WITH the coordinates to mark it. Pass a hit straight to binder_place_mark: use "beside" to put the mark just right of the figure the way a preparer would, or "nx/ny" to centre it on top. Searches every page unless pageId is given. Case-insensitive substring match.',
+    inputSchema: {
+      query: z.string().min(1).describe('e.g. "84,200.00" or "Taxable interest"'),
+      pageId: z.string().optional().describe('Restrict to one page'),
+      limit: z.number().min(1).max(200).optional().describe('Max hits, default 50')
+    }
+  },
+  async ({ query, pageId, limit }) => {
+    const pages = pageId ? session.pages.filter((p) => p.id === pageId) : session.pages
+    if (pageId && pages.length === 0) return fail(`unknown page id: ${pageId}`)
+    const cap = limit ?? 50
+    const needle = query.toLowerCase()
+    const hits: string[] = []
+    const skipped: string[] = []
+    try {
+      for (const page of pages) {
+        if (hits.length >= cap) break
+        const got = await pageText(page)
+        if (!got.hasText) {
+          skipped.push(page.id)
+          continue
+        }
+        for (const w of got.words) {
+          if (!w.t.toLowerCase().includes(needle)) continue
+          // A tick centred on a figure covers its digits — no preparer ticks
+          // through a number. Offer the position just past the word's right
+          // edge as well, clamped to the page.
+          const beside = Math.min(0.995, w.box[2] + (w.box[3] - w.box[1]) * 0.35)
+          hits.push(
+            `${w.t}   [page ${page.id}  nx ${w.nx}  ny ${w.ny}  beside nx ${Number(beside.toFixed(5))}]`
+          )
+          if (hits.length >= cap) break
+        }
+      }
+    } catch (e) {
+      return fail(String((e as Error).message))
+    }
+    const note = skipped.length
+      ? `\n\n${skipped.length} page(s) have no text layer and were not searched (scans/photos): ${skipped.slice(0, 10).join(', ')}${skipped.length > 10 ? ' …' : ''}`
+      : ''
+    return text(
+      hits.length
+        ? `${hits.length} hit(s) for "${query}":\n${hits.join('\n')}${note}`
+        : `No hits for "${query}".${note}`
     )
   }
 )

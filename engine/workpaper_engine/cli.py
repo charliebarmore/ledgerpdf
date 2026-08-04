@@ -21,6 +21,7 @@ import traceback
 from . import __version__
 from .binder import export_binder
 from .probe import probe_pdf
+from .text import extract_text
 
 
 def handle(command: dict) -> dict:
@@ -29,6 +30,8 @@ def handle(command: dict) -> dict:
         return {"ok": True, "engine": "workpaper_engine", "version": __version__}
     if cmd == "probe":
         return {"ok": True, "probe": probe_pdf(command["path"])}
+    if cmd == "text":
+        return {"ok": True, "text": extract_text(command)}
     if cmd == "export":
         return {"ok": True, "result": export_binder(command["binder"])}
     return {"ok": False, "error": f"unknown cmd: {cmd!r}"}

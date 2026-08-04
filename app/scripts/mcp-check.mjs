@@ -288,6 +288,78 @@ check(
   )
 )
 
+// ---------------------------------------------------------------- reading
+// The point of text extraction: an agent can address a figure by name instead
+// of being handed coordinates. Fresh binder so page ids are deterministic.
+await call('binder_new')
+await call('binder_add_pdfs', { paths: [a] })
+const textIds = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+
+const read = await call('binder_read_page', { pageId: textIds[0] })
+check(
+  'binder_read_page returns the page as readable lines, not run-together text',
+  read.text.includes('1 Wages, salaries, tips 84,200.00') &&
+    read.text.includes('11 Adjusted gross income 88,750.00'),
+  read.text.split('\n').slice(0, 3).join(' | ')
+)
+
+const found = await call('binder_find', { query: '84,200.00' })
+const hit = found.text.match(/\[page (pg_\d+)\s+nx ([\d.]+)\s+ny ([\d.]+)/)
+check('binder_find locates a figure and reports where it is', !!hit, found.text.split('\n')[1] ?? found.text)
+check(
+  'binder_find reports the page that actually holds the figure',
+  hit?.[1] === textIds[0],
+  `${hit?.[1]} vs ${textIds[0]}`
+)
+
+// The whole ergonomic claim — a hit's coordinates go straight into a mark.
+if (hit) {
+  const placed = await call('binder_place_mark', {
+    pageId: hit[1],
+    kind: 'tick',
+    nx: Number(hit[2]),
+    ny: Number(hit[3])
+  })
+  check(
+    "a find hit's coordinates are directly usable as a mark position",
+    !placed.isError && placed.text.includes('Placed tick'),
+    placed.text
+  )
+}
+
+// A page the user straightened after import displays differently from its
+// source. If the rotation delta were not applied, this is where a tick would
+// silently land on the wrong edge — so assert the exact transform.
+const before = hit ? { nx: Number(hit[2]), ny: Number(hit[3]) } : null
+const rotated = await call('binder_rotate_pages', { pageIds: [textIds[0]], degrees: 90 })
+// Assert the precondition. Without this a failed rotate call reads as a
+// coordinate bug, which is exactly how this check first went red.
+check('the page actually rotated before coordinates were re-checked', !rotated.isError, rotated.text)
+const afterFound = await call('binder_find', { query: '84,200.00', pageId: textIds[0] })
+const afterHit = afterFound.text.match(/nx ([\d.]+)\s+ny ([\d.]+)/)
+check(
+  'text coordinates follow a page rotated inside the binder',
+  !!before &&
+    !!afterHit &&
+    Math.abs(Number(afterHit[1]) - (1 - before.ny)) < 0.002 &&
+    Math.abs(Number(afterHit[2]) - before.nx) < 0.002,
+  before && afterHit
+    ? `(${before.nx},${before.ny}) rotated 90° -> (${afterHit[1]},${afterHit[2]}), expected (${(1 - before.ny).toFixed(5)},${before.nx})`
+    : 'no hit'
+)
+
+// A photo has no text layer. Saying so plainly is what tells an agent OCR is
+// the missing piece rather than that the page is blank.
+await call('binder_new')
+await call('binder_add_pdfs', { paths: [path.join(FIXTURES, 'receipt.jpg')] })
+const scanIds = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+const scan = await call('binder_read_page', { pageId: scanIds[0] })
+check(
+  'a scan is reported as having no text layer, not as empty or failed',
+  scan.text.includes('no text layer') && scan.text.toLowerCase().includes('ocr'),
+  scan.text
+)
+
 await call('binder_new')
 check('exporting an empty binder is refused', (await call('binder_export', { output: OUT_PDF })).isError)
 

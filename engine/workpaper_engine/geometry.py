@@ -55,6 +55,19 @@ class PageGeom:
         return (self.crop_w, self.crop_h)
 
 
+def page_geom(page_obj) -> PageGeom:
+    """Geometry of one page, from its PDF dictionary.
+
+    The single definition. Marks, page borders and extracted text all resolve
+    the CropBox and /Rotate through here, so a word's coordinates and a tick's
+    coordinates cannot mean different things.
+    """
+    media = [float(v) for v in page_obj.MediaBox]
+    crop = [float(v) for v in page_obj.CropBox] if "/CropBox" in page_obj else media
+    rotate = int(page_obj.get("/Rotate", 0))
+    return PageGeom(crop=tuple(crop), rotate=rotate)
+
+
 def visual_to_user(geom: PageGeom, nx: float, ny: float) -> tuple[float, float]:
     """Map normalized visual coords (nx right, ny down) to user-space (x, y)."""
     cx0, cy0, cx1, cy1 = geom.crop
@@ -69,6 +82,29 @@ def visual_to_user(geom: PageGeom, nx: float, ny: float) -> tuple[float, float]:
         return (cx1 - nx * w, cy0 + ny * h)
     # r == 270
     return (cx1 - ny * w, cy1 - nx * h)
+
+
+def user_to_visual(geom: PageGeom, ux: float, uy: float) -> tuple[float, float]:
+    """Map user-space (x, y) back to normalized visual coords — the exact
+    inverse of `visual_to_user`.
+
+    Text extraction needs this direction: pdfium reports character boxes in raw
+    user space with the MediaBox origin and **no rotation applied**, while its
+    `get_size` is the rotated display size. Dividing one by the other silently
+    misplaces every word on a rotated or CropBox-offset page, so the mapping
+    goes through the same geometry the marks use.
+    """
+    cx0, cy0, cx1, cy1 = geom.crop
+    w, h = geom.crop_w, geom.crop_h
+    r = geom.rotate
+    if r == 0:
+        return ((ux - cx0) / w, (cy1 - uy) / h)
+    if r == 90:
+        return ((uy - cy0) / h, (ux - cx0) / w)
+    if r == 180:
+        return ((cx1 - ux) / w, (uy - cy0) / h)
+    # r == 270
+    return ((cy1 - uy) / h, (cx1 - ux) / w)
 
 
 def visual_rect_to_user_rect(

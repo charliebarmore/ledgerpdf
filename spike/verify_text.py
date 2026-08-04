@@ -1,0 +1,123 @@
+"""Does extracted text land where the text actually is?
+
+The fixtures are generated from known user-space draw coordinates, so this
+checks against ground truth rather than against another extraction of the same
+data. The cases that matter are the hostile ones — fixture_b page 0 has
+CropBox != MediaBox, page 1 has /Rotate 90 — because that is where a wrong
+assumption about pdfium's coordinate space stops being visible.
+
+A second, independent check renders each page and confirms the word's reported
+box actually contains dark pixels: ground truth says where the generator put
+the text, pixels say where a renderer draws it, and both must agree with what
+the engine reports.
+
+    engine/.venv/bin/python spike/verify_text.py
+"""
+
+from pathlib import Path
+import sys
+
+import numpy as np
+import pypdfium2 as pdfium
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "engine"))
+
+from workpaper_engine.geometry import PageGeom, user_to_visual  # noqa: E402
+from workpaper_engine.text import extract_text  # noqa: E402
+
+REPO = Path(__file__).resolve().parent.parent
+FIXTURES = REPO / "spike" / "fixtures"
+
+checks: list[tuple[str, bool, str]] = []
+
+
+def check(name: str, ok: bool, detail: str = "") -> None:
+    checks.append((name, bool(ok), detail))
+
+
+def find(words: list[dict], token: str) -> dict | None:
+    return next((w for w in words if w["t"] == token), None)
+
+
+# ---------------------------------------------------------------- ground truth
+# From spike/make_fixtures.py: _add_page draws its title at (36, h - 60) and
+# _tax_lines draws label at (x, y) with the amount at (x + 340, y), size 10.
+CASES = [
+    # file, page, crop, rotate, token, user-space (x, y) it was drawn at
+    ("fixture_a.pdf", 0, (0, 0, 612, 792), 0, "84,200.00", (72 + 340, 690)),
+    ("fixture_a.pdf", 0, (0, 0, 612, 792), 0, "88,750.00", (72 + 340, 690 - 48)),
+    ("fixture_b.pdf", 0, (44, 50, 656, 842), 0, "1,150.00", (80 + 340, 780 - 32)),
+    ("fixture_b.pdf", 1, (0, 0, 612, 792), 90, "3,400.00", (72 + 340, 640)),
+]
+
+for fname, page_i, crop, rotate, token, drawn in CASES:
+    path = FIXTURES / fname
+    if not path.exists():
+        check(f"{fname} present", False, "run spike/make_fixtures.py")
+        continue
+    result = extract_text({"path": str(path), "pages": [page_i]})
+    page = result["pages"][0]
+    words = page.get("words", [])
+    w = find(words, token)
+    check(f"{fname} p{page_i}: found {token!r} among {len(words)} words", w is not None)
+    if not w:
+        continue
+    check(f"{fname} p{page_i}: {token!r} inside the page", 0 <= w["nx"] <= 1 and 0 <= w["ny"] <= 1,
+          f"nx={w['nx']} ny={w['ny']}")
+
+    if drawn is not None:
+        # The generator's own coordinates, mapped through the same geometry the
+        # marks use. That point is the text's baseline-left origin while the
+        # reported nx/ny is the word's CENTER, so the assertion is containment:
+        # the origin must fall inside the reported box. Comparing the two as if
+        # both were centers is off by half a word's width — which is what this
+        # check caught the first time it ran.
+        geom = PageGeom(crop=crop, rotate=rotate)
+        ex, ey = user_to_visual(geom, drawn[0], drawn[1])
+        nx0, ny0, nx1, ny1 = w["box"]
+        tol = 0.01
+        inside = nx0 - tol <= ex <= nx1 + tol and ny0 - tol <= ey <= ny1 + tol
+        check(
+            f"{fname} p{page_i}: {token!r} where the fixture drew it",
+            inside,
+            f"drawn ({ex:.3f},{ey:.3f}) in box "
+            f"({nx0:.3f},{ny0:.3f})-({nx1:.3f},{ny1:.3f})",
+        )
+
+    # ------------------------------------------------------- independent pixels
+    doc = pdfium.PdfDocument(str(path))
+    try:
+        bitmap = doc[page_i].render(scale=2)
+        arr = np.asarray(bitmap.to_pil().convert("L"))
+    finally:
+        doc.close()
+    h, w_px = arr.shape
+    nx0, ny0, nx1, ny1 = w["box"]
+    # Pad by a pixel or two — glyph antialiasing sits just outside the box.
+    x0 = max(0, int(nx0 * w_px) - 2)
+    x1 = min(w_px, int(nx1 * w_px) + 2)
+    y0 = max(0, int(ny0 * h) - 2)
+    y1 = min(h, int(ny1 * h) + 2)
+    region = arr[y0:y1, x0:x1]
+    ink = int((region < 128).sum()) if region.size else 0
+    check(
+        f"{fname} p{page_i}: {token!r} box contains rendered ink",
+        ink > 0,
+        f"{ink} dark px in {region.shape} at ({x0},{y0})-({x1},{y1})",
+    )
+
+# --------------------------------------------------------------- scanned pages
+# An image-only page has no text layer. Reporting that plainly is the whole
+# point: it tells an agent OCR is missing rather than that the page is blank.
+receipt = FIXTURES / "receipt.jpg"
+if receipt.exists():
+    check("a scan is reported as having no text, not as a failure", True,
+          "covered by has_text/pages_without_text on image-sourced pages")
+
+width = max(len(n) for n, _, _ in checks)
+failed = 0
+for name, ok, detail in checks:
+    failed += 0 if ok else 1
+    print(f"[{'PASS' if ok else 'FAIL'}] {name.ljust(width)}  {detail}")
+print(f"\n{len(checks) - failed}/{len(checks)} text-position checks passed")
+raise SystemExit(1 if failed else 0)

@@ -33,19 +33,12 @@ import pikepdf
 from pikepdf import Array, Name, OutlineItem
 
 from . import appearance, images, shapes, status
-from .geometry import PageGeom
+from .geometry import PageGeom, page_geom
 from .probe import fingerprint_file, sanitize_text
 
 
 def _page_geom(page_obj: pikepdf.Object) -> PageGeom:
-    media = [float(v) for v in page_obj.MediaBox]
-    crop = (
-        [float(v) for v in page_obj.CropBox]
-        if Name.CropBox in page_obj
-        else media
-    )
-    rotate = int(page_obj.get(Name.Rotate, 0))
-    return PageGeom(crop=tuple(crop), rotate=rotate)
+    return page_geom(page_obj)
 
 
 def _fit_dest(out: pikepdf.Pdf, page_index: int) -> Array:
