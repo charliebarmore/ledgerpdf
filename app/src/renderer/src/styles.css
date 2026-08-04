@@ -539,8 +539,12 @@ button.link {
   position: absolute;
   transform: translate(-50%, -50%);
   pointer-events: auto;
-  background: #fff;
-  border: 0.8px solid rgb(140 89 38);
+  /* Tinted, not white: a white card with a hairline border vanishes against
+     white statement paper. Mirrors engine appearance.TAPE_BG/BORDER exactly —
+     no drop shadow, because the exported PDF cannot draw one and the preview
+     must not promise a look the binder will not have. */
+  background: rgb(231 229 225);
+  border: 1px solid rgb(89 54 20);
   color: rgb(26 26 31);
   font-family: var(--mono);
   white-space: pre;

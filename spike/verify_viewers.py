@@ -45,7 +45,12 @@ def mask_for(img: np.ndarray, color: str) -> np.ndarray:
     if color == "red":
         return (r > 120) & (r > g + 60) & (r > b + 60)
     if color == "brown":
-        return (r > 100) & (r > g + 30) & (g > b + 20)
+        # The tape border is appearance.TAPE_BORDER_COLOR = rgb(89, 54, 20).
+        # The red floor only has to clear page ink and the card's own tint; the
+        # two hue conditions are what actually separate brown from everything
+        # else we mark with, so keep the floor low enough to survive a darker
+        # border rather than pinning it to one exact shade.
+        return (r > 60) & (r > g + 30) & (g > b + 20)
     raise SystemExit(f"unknown colour {color!r}")
 
 

@@ -44,7 +44,14 @@ TAPE_LINE_HEIGHT = 11.0
 TAPE_PAD = 6.0
 TAPE_CHAR_W = TAPE_FONT_SIZE * 0.6  # Courier advance = 0.6 em
 TAPE_TEXT_COLOR = (0.10, 0.10, 0.12)
-TAPE_BORDER_COLOR = (0.55, 0.35, 0.15)
+# A tape sits ON the workpaper — it is not part of the statement under it, and
+# it has to be findable at a glance on a page that is already dense with print.
+# A white card with a hairline border disappears against white statement paper,
+# so the card is tinted and the border carries real weight. Mirrored exactly in
+# styles.css `.tape`: preview and export must not drift.
+TAPE_BG_COLOR = (0.906, 0.898, 0.882)
+TAPE_BORDER_COLOR = (0.35, 0.21, 0.08)
+TAPE_BORDER_W = 1.0
 
 
 def _esc(text: str) -> str:
@@ -162,14 +169,17 @@ def tape_size(lines: list[str]) -> tuple[float, float]:
 def tape_appearance(
     pdf: pikepdf.Pdf, lines: list[str], rotate: int
 ) -> tuple[pikepdf.Stream, float, float]:
-    """Calculator-tape appearance: white card, thin border, Courier lines."""
+    """Calculator-tape appearance: tinted card, bordered, Courier lines."""
     w, h = tape_size(lines)
     tr, tg, tb = TAPE_TEXT_COLOR
     br, bg, bb = TAPE_BORDER_COLOR
+    kr, kg, kb = TAPE_BG_COLOR
+    inset = TAPE_BORDER_W / 2  # stroke straddles the path; keep it inside the BBox
     parts = [
         "q",
-        f"1 1 1 rg 0 0 {_fmt(w)} {_fmt(h)} re f",  # card background
-        f"{br} {bg} {bb} RG 0.8 w 0.4 0.4 {_fmt(w - 0.8)} {_fmt(h - 0.8)} re S",
+        f"{kr} {kg} {kb} rg 0 0 {_fmt(w)} {_fmt(h)} re f",  # card background
+        f"{br} {bg} {bb} RG {_fmt(TAPE_BORDER_W)} w "
+        f"{_fmt(inset)} {_fmt(inset)} {_fmt(w - TAPE_BORDER_W)} {_fmt(h - TAPE_BORDER_W)} re S",
         f"{tr} {tg} {tb} rg",
         "BT",
         f"/F1 {_fmt(TAPE_FONT_SIZE)} Tf {_fmt(TAPE_LINE_HEIGHT)} TL",

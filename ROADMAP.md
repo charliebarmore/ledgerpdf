@@ -92,6 +92,14 @@ Strategic bets — not committed, revisit at each gate.
 
 Useful ideas that should not distract the current build.
 
+- Tape note column reserves 8 characters even when no line has a note, so a
+  bare adding-machine tape carries a wide empty gutter. Tightening it changes
+  the card's geometry, which re-renders every tape in every saved binder —
+  worth doing deliberately, not as a drive-by.
+- `npm run smoke` cannot get a window while another instance is open: the
+  single-instance lock added for double-click reopen makes the second Electron
+  process quit and hand off. Either have smoke opt out of the lock or say so in
+  its output, so it never again looks like a real failure.
 - Cross-file links outside the exported binder
 - Intel Mac + Windows ARM builds
 - Index-sheet / Bates-style numbering generation
