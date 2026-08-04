@@ -81,6 +81,21 @@ import {
 
 const MOD = window.wpt.platform === 'darwin' ? '⌘' : 'Ctrl'
 
+/** "2h ago", "yesterday" — how long since, not a timestamp to decode. */
+function whenShort(iso: string): string {
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return ''
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000))
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round(hours / 24)
+  if (days === 1) return 'yesterday'
+  if (days < 30) return `${days}d ago`
+  return new Date(then).toLocaleDateString()
+}
+
 function sourceMatches(source: SourceDoc, probe: ProbeWire): boolean {
   if (source.nPages !== probe.n_pages) return false
   const probed =
@@ -120,6 +135,9 @@ export default function App(): React.JSX.Element {
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [liveOn, setLiveOn] = useState(false)
+  const [recents, setRecents] = useState<
+    Array<{ path: string; name: string; at: string; pages?: number; present?: boolean }>
+  >([])
   const shapeArmed = !!armed && isShapeKind(armed.kind)
   const activeTape = useMemo(
     () => (session.tapes ?? []).find((t) => t.id === activeTapeId) ?? null,
@@ -213,9 +231,15 @@ export default function App(): React.JSX.Element {
    * Read through a ref so this subscribes once — resubscribing on every session
    * change would drop requests already in flight.
    */
+  const openRef = useRef<(target?: string) => Promise<void>>(async () => {})
   const liveRefs = useRef({ session, binderPath, apply, currentId })
   liveRefs.current = { session, binderPath, apply, currentId }
   useEffect(() => {
+    // Refreshed whenever the binder is put down, so the list is current the
+    // moment it is visible again.
+    void window.wpt.recentBinders().then(setRecents)
+    // Double-clicked in Finder, or dropped on the Dock icon.
+    window.wpt.onOpenPath((target) => void openRef.current(target))
     window.wpt.onLiveState((state) => setLiveOn(state.on))
     window.wpt.onLiveRequest((req) => {
       if (req.kind === 'pull') {
@@ -979,6 +1003,7 @@ export default function App(): React.JSX.Element {
       false
     )
   }, [dirty, adoptSession])
+  openRef.current = openBinder
 
   // Dev seam (WPT_DEV_OPEN / WPT_DEV_EXPORT): drive the whole Phase 1 flow —
   // import, then optionally a real export through IPC + engine — with no
@@ -1488,6 +1513,40 @@ export default function App(): React.JSX.Element {
                 or <button className="link" onClick={addViaDialog}>choose files</button> · nothing
                 leaves this machine
               </p>
+              {recents.length > 0 && (
+                <div className="recents">
+                  <div className="recents-head">
+                    <span>Pick up where you left off</span>
+                    <button
+                      className="link"
+                      title="Forget this list. It holds engagement file paths, which carry client names."
+                      onClick={async () => {
+                        await window.wpt.clearRecentBinders()
+                        setRecents([])
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  {recents.map((r) => (
+                    <button
+                      key={r.path}
+                      className={r.present === false ? 'recent is-missing' : 'recent'}
+                      // A binder that moved is still worth showing — a file
+                      // that vanished off a shared drive is something to
+                      // notice, not something to quietly forget.
+                      disabled={r.present === false}
+                      title={r.present === false ? `${r.path} — no longer there` : r.path}
+                      onClick={() => void openBinder(r.path)}
+                    >
+                      <span className="recent-name">{r.name}</span>
+                      <span className="recent-when">
+                        {r.present === false ? 'missing' : whenShort(r.at)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         ) : (

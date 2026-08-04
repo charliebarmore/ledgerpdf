@@ -25,6 +25,20 @@ const azureSignOptions =
 module.exports = {
   appId: 'com.charliebarmore.workpaperbinder',
   productName: 'Workpaper Binder',
+  // Offered under "Open With" for a PDF, deliberately NOT registered as the
+  // default handler: a workpaper tool has no business becoming the machine's
+  // PDF viewer. `role: 'Editor'` is what puts it in that menu; double-clicking
+  // a binder still needs the user to choose it once, or set it per-file.
+  fileAssociations: [
+    {
+      ext: 'pdf',
+      name: 'Workpaper binder',
+      description: 'Workpaper binder (PDF with an editable session inside)',
+      role: 'Editor',
+      rank: 'Alternate',
+      isPackage: false
+    }
+  ],
   artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
   directories: {
     output: 'release',

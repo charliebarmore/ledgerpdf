@@ -1824,3 +1824,65 @@ button.ai-count {
   padding: 0 4px;
   font-size: 11px;
 }
+
+/* ------------------------------------------------------- recent binders */
+
+.recents {
+  margin-top: var(--lg);
+  border-top: 1px solid var(--border);
+  padding-top: var(--md);
+  text-align: left;
+}
+
+.recents-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding-bottom: var(--xs);
+}
+
+.recent {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--md);
+  width: 100%;
+  border: 0;
+  background: none;
+  border-radius: var(--r-sm);
+  padding: 5px var(--sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent:hover:not(:disabled) {
+  background: #f1efe9;
+}
+
+.recent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--primary);
+}
+
+.recent-when {
+  font-size: 11px;
+  color: var(--muted);
+  flex: none;
+}
+
+/* A binder that moved is shown, not hidden — that is worth noticing. */
+.recent.is-missing .recent-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.recent.is-missing .recent-when {
+  color: var(--warning);
+}

@@ -18,6 +18,7 @@ import {
   workingCopyPathFor
 } from './persistence'
 import { restrictedProcessEnv, runJsonCommand } from '../shared/json-process'
+import { clearRecents, readRecents, rememberBinder } from './recents'
 import { toSaved, type Session } from '../renderer/src/session'
 
 /**
@@ -42,6 +43,41 @@ const packageUiSmoke = !isDev && process.argv.includes('--wpt-package-ui-smoke')
  * by the time the app menu is built.
  */
 app.setName('Workpaper Binder')
+
+/**
+ * A binder opened from Finder or Explorer.
+ *
+ * macOS delivers it through `open-file`, which can fire BEFORE the window
+ * exists, so the path is held until there is somewhere to send it. Windows and
+ * Linux pass it in argv instead. Registered here rather than inside `ready` for
+ * the same reason: the event arrives early.
+ */
+let pendingOpen: string | null = null
+
+function requestOpen(target: string): void {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (!win || win.isDestroyed() || win.webContents.isLoading()) {
+    pendingOpen = target
+    return
+  }
+  win.webContents.send('binder:openPath', target)
+  win.focus()
+}
+
+app.on('open-file', (event, filePath) => {
+  event.preventDefault()
+  requestOpen(path.resolve(filePath))
+})
+
+/** A second launch hands its file to the running instance rather than starting again. */
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', (_e, argv) => {
+    const target = argv.find((a) => a.toLowerCase().endsWith('.pdf'))
+    if (target) requestOpen(path.resolve(target))
+  })
+}
 
 /** Repo root. Dev: out/main -> out -> app -> repo. Packaged: resources/. */
 function repoRoot(): string {
@@ -319,6 +355,7 @@ async function openBinderAt(target: string): Promise<unknown> {
     await hideFromUser(working)
     allowedInputs.add(working)
     openWorkingCopies.set(target, working)
+    void rememberBinder(app.getPath('userData'), target).catch(() => {})
 
     // An autosave sibling newer than the binder means the app closed without a
     // save. Hand both to the renderer and let the user choose; never silently
@@ -446,7 +483,14 @@ function registerIpc(): void {
     // Sources must all be user-authorized inputs.
     const sources = (s.sources ?? {}) as Record<string, unknown>
     for (const v of Object.values(sources)) assertAllowed(allowedInputs, v, 'source file')
-    return runEngine({ cmd: 'export', binder: { ...s, output } })
+    const result = await runEngine({ cmd: 'export', binder: { ...s, output } })
+    // A binder you just saved is one you will want back. A flattened copy is
+    // not — it cannot be reopened for editing, so offering it later would be
+    // offering a dead end.
+    if (result.ok && s.session !== undefined && s.flatten !== true) {
+      void rememberBinder(app.getPath('userData'), output).catch(() => {})
+    }
+    return result
   })
 
   /**
@@ -456,6 +500,16 @@ function registerIpc(): void {
    * several-hundred-page PDF after every edit is not something to do on a timer.
    * The binder is written when the user saves.
    */
+  ipcMain.handle('recents:list', async (e) => {
+    assertTrustedIpc(e)
+    return readRecents(app.getPath('userData'))
+  })
+
+  ipcMain.handle('recents:clear', async (e) => {
+    assertTrustedIpc(e)
+    await clearRecents(app.getPath('userData'))
+  })
+
   ipcMain.handle('binder:autosave', async (_e, binder: unknown, session: unknown) => {
     assertTrustedIpc(_e)
     const target = assertAllowed(allowedOutputs, binder, 'binder path')
@@ -508,8 +562,10 @@ function registerIpc(): void {
       title: `Locate ${typeof sourceName === 'string' ? sourceName : 'missing source'}`,
       properties: ['openFile'],
       filters: [
-        { name: 'PDFs and images', extensions: [...SOURCE_EXTS] },
+        { name: 'Workpaper sources', extensions: [...SOURCE_EXTS] },
         { name: 'PDF', extensions: ['pdf'] },
+        { name: 'Spreadsheets', extensions: [...SHEET_EXTS] },
+        { name: 'Documents', extensions: [...DOC_EXTS] },
         { name: 'Images', extensions: [...IMAGE_EXTS] }
       ]
     })
@@ -630,6 +686,11 @@ function createWindow(): void {
 
   win.once('ready-to-show', () => {
     win.show()
+    if (pendingOpen) {
+      const target = pendingOpen
+      pendingOpen = null
+      win.webContents.send('binder:openPath', target)
+    }
     // Dev seam: WPT_DEV_OPEN="/a.pdf:/b.pdf" preloads a binder so the import →
     // organize → export flow can be exercised without clicking through dialogs.
     // Dev builds only; packaged builds ignore it.
@@ -638,6 +699,12 @@ function createWindow(): void {
       : packageUiSmoke
         ? process.env.WPT_PACKAGE_SMOKE_OPEN
         : undefined
+    // With a shot requested but nothing to open, still hand the renderer an
+    // empty payload so it snapshots and exits. The empty screen carries the
+    // recent-binders list now, and had no headless coverage at all.
+    if (!preopen && isDev && process.env.WPT_DEV_SHOT) {
+      win.webContents.send('dev:open', { paths: [], seedMarks: false })
+    }
     if (preopen) {
       const paths = preopen
         .split(path.delimiter)

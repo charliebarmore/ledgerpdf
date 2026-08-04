@@ -97,6 +97,16 @@ const api = {
     ipcRenderer.on('live:state', (_e, state) => cb(state))
   },
 
+  /** Binders worked on lately, offered on the empty screen. */
+  recentBinders: (): Promise<
+    Array<{ path: string; name: string; at: string; pages?: number; present?: boolean }>
+  > => ipcRenderer.invoke('recents:list'),
+  clearRecentBinders: (): Promise<void> => ipcRenderer.invoke('recents:clear'),
+  /** A binder opened from Finder/Explorer, or handed to a second launch. */
+  onOpenPath: (cb: (target: string) => void): void => {
+    ipcRenderer.on('binder:openPath', (_e, target) => cb(target))
+  },
+
   /** Dev seam (WPT_DEV_OPEN) — preload a binder without clicking dialogs. */
   onDevOpen: (
     cb: (arg: { paths: string[]; exportTo?: string; seedMarks?: boolean; reopen?: string }) => void
