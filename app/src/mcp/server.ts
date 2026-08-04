@@ -69,6 +69,30 @@ let session: Session = newSession()
 let sessionPath: string | null = null
 
 /**
+ * Where the binder actually lives.
+ *
+ * Standalone, this server IS the owner and both hooks are no-ops. Hosted
+ * inside the running app, the owner is the renderer — it holds the undo stack,
+ * the autosave timer and the window a person is looking at — so every tool call
+ * refreshes from it first and publishes back after.
+ *
+ * Wrapping registration rather than threading a store through fifty call sites
+ * keeps ONE definition of the tools. Two copies would drift, and a tool that
+ * behaved differently depending on how it was reached is the kind of bug you
+ * only find in front of a client.
+ */
+export interface SessionOwner {
+  pull: () => Promise<{ session: Session; path: string | null }>
+  push: (session: Session) => Promise<void>
+}
+
+let owner: SessionOwner | null = null
+
+export function setSessionOwner(next: SessionOwner): void {
+  owner = next
+}
+
+/**
  * Everything this server changes is agent work, so a run is opened on the
  * first mutation and every artifact created under it is stamped.
  *
@@ -218,7 +242,26 @@ const server = new McpServer(
   }
 )
 
-server.registerTool(
+/** Register a tool, synchronizing with the owner around it when there is one. */
+const registerTool: typeof server.registerTool = (name, config, handler) =>
+  server.registerTool(name, config, (async (...args: unknown[]) => {
+    if (owner) {
+      const pulled = await owner.pull()
+      session = pulled.session
+      sessionPath = pulled.path
+    }
+    const before = session
+    try {
+      return await (handler as (...a: unknown[]) => unknown)(...args)
+    } finally {
+      // Push only on a real change, so a read-only tool never marks a person's
+      // binder dirty or lands on their undo stack.
+      if (owner && session !== before) await owner.push(session)
+    }
+  }) as never)
+
+
+registerTool(
   'probe_pdf',
   {
     title: 'Probe a PDF',
@@ -241,7 +284,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_status',
   {
     title: 'Binder status',
@@ -257,7 +300,7 @@ server.registerTool(
     )
 )
 
-server.registerTool(
+registerTool(
   'binder_new',
   {
     title: 'Start a new binder',
@@ -271,7 +314,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_open',
   {
     title: 'Open a saved session',
@@ -313,7 +356,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_save',
   {
     title: 'Save the session',
@@ -341,7 +384,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_add_pdfs',
   {
     title: 'Add PDFs or images to the binder',
@@ -372,7 +415,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_move_pages',
   {
     title: 'Reorder pages',
@@ -393,7 +436,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_rotate_pages',
   {
     title: 'Rotate pages',
@@ -412,7 +455,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_delete_pages',
   {
     title: 'Delete pages',
@@ -430,7 +473,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_bookmarks',
   {
     title: 'Show the bookmark tree',
@@ -446,7 +489,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_add_bookmark',
   {
     title: 'Add a bookmark',
@@ -467,7 +510,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_rename_bookmark',
   {
     title: 'Rename a bookmark',
@@ -482,7 +525,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_set_reviewer',
   {
     title: 'Set reviewer initials',
@@ -496,7 +539,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_place_mark',
   {
     title: 'Place a review mark',
@@ -535,7 +578,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_annotations',
   {
     title: 'List marks and tapes',
@@ -568,7 +611,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_remove_marks',
   {
     title: 'Remove marks or tapes',
@@ -588,7 +631,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_add_tape',
   {
     title: 'Add a calculator tape',
@@ -620,7 +663,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_export',
   {
     title: 'Export the binder to PDF',
@@ -669,7 +712,7 @@ function journalLines(entries: JournalEntry[]): string {
     .join('\n')
 }
 
-server.registerTool(
+registerTool(
   'binder_history',
   {
     title: 'What has been done to this binder',
@@ -692,7 +735,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_revert_run',
   {
     title: 'Undo an agent run',
@@ -776,7 +819,7 @@ async function pageText(page: {
   }
 }
 
-server.registerTool(
+registerTool(
   'binder_read_page',
   {
     title: 'Read a page',
@@ -801,7 +844,7 @@ server.registerTool(
   }
 )
 
-server.registerTool(
+registerTool(
   'binder_find',
   {
     title: 'Find text in the binder',
