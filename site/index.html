@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LedgerPDF — the tax workpaper binder built for humans and AI agents</title>
+  <meta name="description" content="Assemble, tick, tie and review tax workpaper binders — locally, with client data never leaving your machine. Open source, built by a practising CPA." />
+  <link rel="canonical" href="https://ledgerpdf.com/" />
+  <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png" />
+  <link rel="apple-touch-icon" href="icon-256.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="LedgerPDF — the tax workpaper binder built for humans and AI agents" />
+  <meta property="og:description" content="Assemble, tick, tie and review workpaper binders locally. No cloud, no telemetry. Open source under GPL-3.0." />
+  <meta property="og:image" content="https://ledgerpdf.com/screenshot.png" />
+  <meta property="og:url" content="https://ledgerpdf.com/" />
+
+  <!-- Ledger Labs brand kit: Playfair Display / Inter / JetBrains Mono.
+       Google Fonts is this page's ONE external dependency — the app itself
+       makes no network calls, and the copy below only claims that of the app. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* Ledger Labs palette — _studio/Ledger Labs Brand Kit/tokens/palette.json */
+    :root {
+      --teal:   #1D434E;  /* primary surface  */
+      --abyss:  #0F2A31;  /* deeper background */
+      --orange: #E8913A;  /* accent            */
+      --cream:  #FDFCEA;  /* body text on dark */
+      --vellum: #F5ECD6;  /* soft surface      */
+      --green:  #2D9148;  /* calls to action   */
+      --ink:    #0B1A1F;  /* max contrast text */
+
+      --display: "Playfair Display", Georgia, serif;
+      --body: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--body);
+      font-size: 16px;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--cream);
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; }
+    img { max-width: 100%; display: block; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+    /* ------------------------------------------------------------- header */
+    header {
+      background: var(--teal);
+      color: var(--cream);
+    }
+    .nav {
+      display: flex; align-items: center; gap: 28px;
+      padding: 18px 0;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; text-decoration: none; }
+    .brand img { width: 28px; height: 28px; border-radius: 6px; }
+    .nav nav { margin-left: auto; display: flex; gap: 22px; }
+    .nav nav a { text-decoration: none; font-size: 14px; opacity: 0.85; }
+    .nav nav a:hover { opacity: 1; }
+
+    /* --------------------------------------------------------------- hero */
+    /* No overflow:hidden here — the screenshot deliberately overhangs into the
+       cream section below via a negative margin, and hiding overflow clips the
+       overhang flat at the section boundary. */
+    .hero {
+      background: var(--teal);
+      color: var(--cream);
+      padding: 56px 0 0;
+    }
+    .hero-inner { max-width: 760px; }
+    .kicker {
+      font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--orange); margin-bottom: 18px;
+    }
+    h1 {
+      font-family: var(--display);
+      font-size: clamp(34px, 5.2vw, 54px);
+      line-height: 1.12;
+      font-weight: 700;
+      margin-bottom: 20px;
+    }
+    .hero p.lede { font-size: 19px; line-height: 1.55; opacity: 0.92; max-width: 640px; }
+    .cta-row { display: flex; gap: 14px; margin: 30px 0 0; flex-wrap: wrap; }
+    .btn {
+      display: inline-block; padding: 12px 22px; border-radius: 8px;
+      font-size: 15px; font-weight: 600; text-decoration: none;
+      border: 1px solid transparent;
+    }
+    .btn-primary { background: var(--green); color: #fff; }
+    .btn-primary:hover { filter: brightness(1.07); }
+    .btn-ghost { border-color: rgb(253 252 234 / 0.4); color: var(--cream); }
+    .btn-ghost:hover { border-color: rgb(253 252 234 / 0.8); }
+    .hero-shot {
+      margin: 52px auto -80px;
+      max-width: 980px;
+      border-radius: 10px 10px 0 0;
+      box-shadow: 0 18px 60px rgb(11 26 31 / 0.45);
+      border: 1px solid rgb(253 252 234 / 0.15);
+      border-bottom: 0;
+    }
+    .under-hero { height: 110px; background: var(--cream); }
+
+    /* ------------------------------------------------------------ sections */
+    section { padding: 72px 0; }
+    .section-title {
+      font-family: var(--display); font-size: clamp(26px, 3.4vw, 36px);
+      font-weight: 600; margin-bottom: 14px;
+    }
+    .section-sub { max-width: 640px; color: rgb(11 26 31 / 0.72); margin-bottom: 40px; }
+
+    /* the "replaces" strip */
+    .replaces {
+      background: var(--vellum);
+      padding: 34px 0;
+      border-top: 1px solid rgb(29 67 78 / 0.1);
+      border-bottom: 1px solid rgb(29 67 78 / 0.1);
+    }
+    .replaces .wrap { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+    .replaces b { font-family: var(--mono); font-size: 15px; }
+    .replaces span { color: rgb(11 26 31 / 0.72); font-size: 15px; }
+
+    /* feature grid */
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 20px; }
+    .card {
+      background: #fff;
+      border: 1px solid rgb(29 67 78 / 0.14);
+      border-radius: 10px;
+      padding: 24px;
+    }
+    .card h3 { font-size: 16.5px; font-weight: 600; margin-bottom: 8px; }
+    .card p { font-size: 14.5px; color: rgb(11 26 31 / 0.75); }
+    .card .tick { color: var(--green); margin-right: 6px; }
+
+    /* agent section */
+    .agent { background: var(--abyss); color: var(--cream); }
+    .agent .section-sub { color: rgb(253 252 234 / 0.75); }
+    .agent-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 44px; align-items: start; }
+    @media (max-width: 800px) { .agent-cols { grid-template-columns: 1fr; } }
+    .agent-cols ul { list-style: none; display: grid; gap: 16px; }
+    .agent-cols li { padding-left: 26px; position: relative; font-size: 15.5px; }
+    .agent-cols li::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+    .journal {
+      font-family: var(--mono); font-size: 12.5px; line-height: 1.75;
+      background: rgb(253 252 234 / 0.06);
+      border: 1px solid rgb(253 252 234 / 0.15);
+      border-radius: 10px; padding: 20px 22px;
+      overflow-x: auto; white-space: pre;
+    }
+    .journal .ai { color: var(--orange); }
+    .journal .ok { color: #6fcf8b; }
+
+    /* data section */
+    .data-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+    @media (max-width: 800px) { .data-cols { grid-template-columns: 1fr; } }
+    .data-cols h3 { font-size: 17px; margin-bottom: 10px; }
+    .data-cols p { font-size: 15px; color: rgb(11 26 31 / 0.78); }
+    .data-cols .honest {
+      border-left: 3px solid var(--orange);
+      padding-left: 18px;
+    }
+
+    /* download */
+    .dl { background: var(--vellum); }
+    .dl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+    .dl-card {
+      background: #fff; border: 1px solid rgb(29 67 78 / 0.14); border-radius: 10px;
+      padding: 28px 24px; text-align: center; display: flex; flex-direction: column; gap: 12px;
+    }
+    .dl-card .os { font-weight: 600; font-size: 17px; }
+    .dl-card .note { font-size: 13.5px; color: rgb(11 26 31 / 0.65); flex: 1; }
+    .pill {
+      font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--teal);
+      border: 1px solid rgb(29 67 78 / 0.3); border-radius: 99px;
+      padding: 6px 14px; align-self: center;
+    }
+    .dl-card .btn-primary { align-self: center; }
+    .dl-fine { margin-top: 26px; font-size: 13.5px; color: rgb(11 26 31 / 0.6); max-width: 720px; }
+
+    /* footer */
+    footer { background: var(--teal); color: var(--cream); padding: 44px 0; font-size: 14px; }
+    footer .wrap { display: flex; gap: 24px; flex-wrap: wrap; align-items: center; }
+    footer a { opacity: 0.85; }
+    footer a:hover { opacity: 1; }
+    footer .spacer { flex: 1; }
+    footer .fine { opacity: 0.6; font-size: 12.5px; width: 100%; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><img src="icon-256.png" alt="" width="28" height="28" />LedgerPDF</a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#agents">Agents</a>
+      <a href="#data">Your data</a>
+      <a href="#download">Download</a>
+      <a href="https://github.com/charliebarmore/workpaper-tool">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="hero-inner">
+      <div class="kicker">Open-source · Local-first · Built by a practising CPA</div>
+      <h1>The tax workpaper binder built for humans and AI&nbsp;agents.</h1>
+      <p class="lede">
+        Drag in what you actually have — tax-software PDFs, Excel trial balances, scans,
+        phone photos — and get one ordered, bookmarked binder. Tick it, tape it, tie it
+        out. Or have an agent do the prep while you review, in the same file.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#download">Get LedgerPDF</a>
+        <a class="btn btn-ghost" href="https://github.com/charliebarmore/workpaper-tool">Read the source</a>
+      </div>
+    </div>
+    <img class="hero-shot" src="screenshot.png" alt="LedgerPDF with a three-page binder open: bookmark tree, page view with a tick mark, thumbnail rail." />
+  </div>
+</div>
+<div class="under-hero"></div>
+
+<div class="replaces">
+  <div class="wrap">
+    <b>Replaces Acrobat + TicTie Calculate.</b>
+    <span>Firms pay ~$400 per seat, per year, for two tools to do one bounded job — and the add-on requires the other to run. This is that job, in one tool you can read the source of.</span>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <h2 class="section-title">A binder, not a project file</h2>
+    <p class="section-sub">The binder PDF <em>is</em> the document. Save overwrites it; an editable
+    session rides inside the file itself. Nothing to lose, nothing to explain to the next preparer.</p>
+    <div class="grid">
+      <div class="card"><h3><span class="tick">✓</span>Marks that survive</h3>
+        <p>Tick marks, stamps, tapes, shapes and notes export as standard PDF annotations and render
+        in Acrobat, Edge, Chrome and macOS Preview. Every mark's position is pixel-verified in two
+        independent render engines.</p></div>
+      <div class="card"><h3><span class="tick">✓</span>Bookmarks that follow pages</h3>
+        <p>Reorder anything; the outline moves with it. Drag a bookmark and its whole section of
+        pages moves. Imported outlines nest and retarget instead of breaking.</p></div>
+      <div class="card"><h3><span class="tick">✓</span>Calculator tapes with addends</h3>
+        <p>A ten-key adding machine on the page. Whole-cent arithmetic, never floating point, and a
+        total always carries the entries behind it — so a reviewer sees the work, not just the answer.</p></div>
+      <div class="card"><h3><span class="tick">✓</span>Real inputs</h3>
+        <p>PDFs, .xlsx / .csv, .md / .docx, and images. A spreadsheet becomes pages whose cells are
+        real text — a figure off a trial balance is read exactly, not OCR'd and guessed.</p></div>
+      <div class="card"><h3><span class="tick">✓</span>Scans, read honestly</h3>
+        <p>On-device OCR gives agents eyes on photographed documents, labelled as a machine reading
+        with per-word confidence — never presented as the document's own text.</p></div>
+      <div class="card"><h3><span class="tick">✓</span>One portable file out</h3>
+        <p>Send a copy with the marks printed on permanently for whoever needs it — the working
+        binder, with its editable session, stays yours.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="agent" id="agents">
+  <div class="wrap">
+    <h2 class="section-title">The agent preps. You review. Same binder.</h2>
+    <p class="section-sub">Not a chat box bolted onto a GUI — an MCP server exposing the same model
+    the app drives, so an agent works in the binder you have open, and you watch it happen.</p>
+    <div class="agent-cols">
+      <ul>
+        <li>An agent reads the actual pages — embedded text, exact cell values, OCR'd scans — finds a figure by name, and marks it where it sits.</li>
+        <li>Every agent action is attributed to the AI, journalled in order, and revertible in one step. Automated marks are distinguishable from yours in the exported PDF.</li>
+        <li>Agent file access is off by default and scoped to folders you name. The tool never decides what an agent may read — you do.</li>
+        <li>Works with Claude and any MCP client, against a live window or headless.</li>
+      </ul>
+      <div class="journal" aria-label="Example agent journal">
+14:32:07  <span class="ai">AI</span>  Imported 12 file(s) from “2025 Binder”
+14:32:19  <span class="ai">AI</span>  Bookmarked 12 sections by document type
+14:32:31  <span class="ai">AI</span>  Tied W-2 wages to the summary — <span class="ok">agrees</span>
+14:32:31  <span class="ai">AI</span>  Placed tick on p.4 at 84,200.00
+14:32:44  <span class="ai">AI</span>  Flagged p.9: interest differs by 80.00
+14:35:02  CJB Reviewed p.9 — adjustment posted
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="data">
+  <div class="wrap">
+    <h2 class="section-title">Where your data goes: nowhere</h2>
+    <div class="data-cols">
+      <div>
+        <h3>The application makes no network calls.</h3>
+        <p>No telemetry, no accounts, no cloud, no auto-update phoning home. Binders and the client
+        documents behind them stay on your machine. Live agent access is a local socket — never a
+        network port — off by default, with a fresh token every launch. And because the source is
+        public, your own IT reviewer can verify every word of this instead of taking ours.</p>
+      </div>
+      <div class="honest">
+        <h3>The one honest caveat</h3>
+        <p>If <em>you</em> point an AI agent at a binder, what that agent reads goes wherever that
+        agent runs. With a hosted model, that is a disclosure of client information — in the US, an
+        IRC §7216 decision that is yours to make, and LedgerPDF deliberately does not make it for
+        you. A locally-run model is the honest way to have both.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="dl" id="download">
+  <div class="wrap">
+    <h2 class="section-title">Get LedgerPDF</h2>
+    <p class="section-sub">Free and open source under GPL-3.0. Signed installers are in progress —
+    and we won't hand an unsigned build to people we're asking to trust us with client data.</p>
+    <div class="dl-grid">
+      <div class="dl-card">
+        <div class="os">Windows</div>
+        <p class="note">x64 installer, signed by Ledger&nbsp;Labs&nbsp;LLC. Code signing is being
+        set up now — this is the primary platform and ships first.</p>
+        <span class="pill">Coming soon</span>
+      </div>
+      <div class="dl-card">
+        <div class="os">macOS</div>
+        <p class="note">Signed and notarized under the Ledger&nbsp;Labs Apple Developer&nbsp;ID.
+        Follows the Windows release.</p>
+        <span class="pill">Coming soon</span>
+      </div>
+      <div class="dl-card">
+        <div class="os">Build from source</div>
+        <p class="note">Available today on macOS and Windows. Clone, install, run — about five
+        minutes on a machine with Node and Python. Instructions in the README.</p>
+        <a class="btn btn-primary" href="https://github.com/charliebarmore/workpaper-tool#build-from-source">GitHub&nbsp;→</a>
+      </div>
+    </div>
+    <p class="dl-fine">Why no download button yet? An unsigned installer trips SmartScreen's
+    “Windows protected your PC” warning, and the first thing a workpaper tool should not do is teach
+    an accountant to click past a security prompt. Releases begin the moment the certificates land.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Ledger Labs LLC</span>
+    <a href="https://ledgerlabs.co">A Ledger Labs product</a>
+    <span class="spacer"></span>
+    <a href="https://github.com/charliebarmore/workpaper-tool">GitHub</a>
+    <a href="https://github.com/charliebarmore/workpaper-tool/blob/main/LICENSE">GPL-3.0</a>
+    <a href="https://cbarmorecpa.com">Built by Charlie Barmore, CPA/CFE</a>
+    <p class="fine">LedgerPDF is not tax software and renders no tax advice. It is a workpaper
+    tool; professional judgment — and the §7216 decisions that come with it — remain with the
+    practitioner.</p>
+  </div>
+</footer>
+
+</body>
+</html>

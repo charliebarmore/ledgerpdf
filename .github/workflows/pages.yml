@@ -1,0 +1,47 @@
+name: Deploy ledgerpdf.com
+
+# Publishes site/ to GitHub Pages. Static files, no build step — what is in the
+# folder is what ships, which is the same no-magic posture as the app itself.
+#
+# Gated on the repo being PUBLIC: Pages is not enabled on this plan while the
+# repo is private, and a workflow that fails on every push until some future
+# settings change reads as a broken pipeline rather than a pending one.
+#
+# One-time setup once the repo is public:
+#   1. Settings → Pages → Source: "GitHub Actions"
+#   2. DNS at the registrar (site/CNAME already names ledgerpdf.com):
+#        A     @    185.199.108.153, 185.199.109.153,
+#                   185.199.110.153, 185.199.111.153
+#        CNAME www  charliebarmore.github.io
+#   3. Settings → Pages → Custom domain: ledgerpdf.com → Enforce HTTPS
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

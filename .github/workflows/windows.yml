@@ -25,6 +25,7 @@ on:
       - 'templates/**'
       - 'LICENSE'
       - '.gitignore'
+      - 'site/**'   # the website cannot break the app build
   pull_request:
     branches: [main]
     paths-ignore:
@@ -34,6 +35,7 @@ on:
       - 'templates/**'
       - 'LICENSE'
       - '.gitignore'
+      - 'site/**'   # the website cannot break the app build
 
 # Pushing three commits in a row should test the third, not all three. The
 # in-flight run for a superseded commit is cancelled rather than finished.
