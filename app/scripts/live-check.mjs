@@ -25,6 +25,16 @@ const FIXTURES = path.join(REPO, 'spike', 'fixtures')
 const SERVER = path.join(APP, 'out', 'mcp-server.cjs')
 const OUT = path.join(REPO, 'spike', 'out', 'live_binder.pdf')
 
+// Pin the endpoint file for this run. Two reasons, and the first is a real bug
+// this replaced: deriving it from the socket's directory only works on POSIX,
+// where the socket happens to live beside it. A Windows named pipe is
+// `\\.\pipe\name`, which is not a directory and cannot hold a file. The app and
+// the MCP server both honour WPT_LIVE_ENDPOINT, so pinning it is the supported
+// seam. Second, it keeps this check off the real endpoint file, so running it
+// can never disturb an app the user has open.
+const ENDPOINT_FILE = path.join(REPO, 'spike', 'out', 'live-endpoint.json')
+process.env.WPT_LIVE_ENDPOINT = ENDPOINT_FILE
+
 const checks = []
 const check = (name, ok, detail = '') => checks.push([name, !!ok, detail])
 
@@ -61,11 +71,18 @@ try {
   if (!endpoint) throw new Error('no endpoint')
 
   // The endpoint file is the only way in, and it is the app's own private file.
-  const endpointFile = path.join(path.dirname(endpoint), 'live-endpoint.json')
+  const endpointFile = ENDPOINT_FILE
   const stat = statSync(endpointFile)
+  // POSIX modes are the mechanism on macOS/Linux. Windows does not have them —
+  // Node reports 0o666 there regardless — and the protection is the per-user
+  // profile ACL on %APPDATA% instead. Asserting 0600 on Windows would only
+  // prove Node's shim, so assert the file exists and is a file, and keep the
+  // real permission assertion where it means something.
   check(
-    'the endpoint file is readable only by its owner',
-    (stat.mode & 0o077) === 0,
+    process.platform === 'win32'
+      ? 'the endpoint file is created (Windows: protected by the per-user ACL)'
+      : 'the endpoint file is readable only by its owner',
+    process.platform === 'win32' ? stat.isFile() : (stat.mode & 0o077) === 0,
     `mode ${(stat.mode & 0o777).toString(8)}`
   )
 

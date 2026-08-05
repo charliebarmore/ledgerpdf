@@ -92,6 +92,12 @@ Strategic bets — not committed, revisit at each gate.
 
 Useful ideas that should not distract the current build.
 
+- The mark-colour masks are duplicated. `verify_viewers.py` and
+  `check_mark_positions.py` each hardcode their own brown/green/blue/red
+  thresholds with no tie to `appearance.MARK_COLORS` / `TAPE_BORDER_COLOR`.
+  Restyling the tape broke both, and fixing one still left the other red on CI.
+  One definition, imported by both — the next restyle should not be able to do
+  this again.
 - Tape note column reserves 8 characters even when no line has a note, so a
   bare adding-machine tape carries a wide empty gutter. Tightening it changes
   the card's geometry, which re-renders every tape in every saved binder —
