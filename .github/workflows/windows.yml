@@ -1,20 +1,59 @@
 name: Windows x64
 
-# Manual only. Nothing runs — and nothing is billed — until you ask for it.
-# Add `push:` triggers later if this becomes routine.
+# Windows is the primary platform, so it is tested on every change to code —
+# not only when someone remembers to ask. Two sessions of manual runs found
+# eight problems invisible from macOS (path separators, named pipes, POSIX file
+# modes, GUI-subsystem stdout), every one of them latent for days.
+#
+# Docs-only pushes are skipped: a README cannot break a build, and a full run
+# bills at 2x for the Windows runner.
 on:
   workflow_dispatch:
     inputs:
       package:
-        description: 'Also build the packaged app and installer (slower)'
+        description: 'Also upload the packaged app and installer as artifacts'
         type: boolean
         default: true
+  # NB: the two lists are duplicated on purpose. GitHub Actions does not support
+  # YAML anchors, so `&docs` / `*docs` is a workflow parse error, not a tidy-up.
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'references/**'
+      - 'templates/**'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'references/**'
+      - 'templates/**'
+      - 'LICENSE'
+      - '.gitignore'
+
+# Pushing three commits in a row should test the third, not all three. The
+# in-flight run for a superseded commit is cancelled rather than finished.
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
     name: Build and verify on Windows
     runs-on: windows-latest
     timeout-minutes: 45
+
+    env:
+      # Packaging runs on EVERY trigger. It is ~2 minutes of the ~6, and it is
+      # where the interesting Windows failures actually live: a GUI-subsystem
+      # binary whose stdout never reaches the parent, a smoke run defeated by
+      # the single-instance lock. Verifying only the unpackaged app would have
+      # caught none of them.
+      PACKAGE: ${{ github.event_name != 'workflow_dispatch' || inputs.package }}
 
     steps:
       - uses: actions/checkout@v4
@@ -65,19 +104,19 @@ jobs:
       # can be produced for SmartScreen and install-experience testing on real
       # hardware, without weakening that guard.
       - name: Build the frozen engine and the app
-        if: inputs.package
+        if: env.PACKAGE == 'true'
         working-directory: app
         run: |
           npm run build:engine
           npm run build
 
       - name: Package (unpacked + unsigned NSIS installer, for TESTING)
-        if: inputs.package
+        if: env.PACKAGE == 'true'
         working-directory: app
         run: npx electron-builder --win nsis --config electron-builder.config.cjs
 
       - name: Verify the packaged app
-        if: inputs.package
+        if: env.PACKAGE == 'true'
         working-directory: app
         run: npm run verify:package
 
@@ -102,8 +141,14 @@ jobs:
       # always(): packaging can succeed while a later check fails, and the whole
       # point of this job for someone with no Windows machine is to come away
       # with something runnable. A red check should not also mean empty hands.
+      #
+      # workflow_dispatch only: these two are ~315 MB a run. Uploading them on
+      # every push would fill the storage quota in days — 2.11 GB had already
+      # accumulated from one afternoon of manual runs. Pushes still BUILD and
+      # verify the package, which is where the bugs are; they just do not keep
+      # the output. Ask for a build when you want one to install.
       - name: Upload the unpacked app (run it directly, no install)
-        if: always() && inputs.package
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.package
         uses: actions/upload-artifact@v4
         with:
           name: ledgerpdf-win-unpacked
@@ -112,7 +157,7 @@ jobs:
           path: app/release/win-unpacked
 
       - name: Upload the UNSIGNED installer (testing only, do not distribute)
-        if: always() && inputs.package
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.package
         uses: actions/upload-artifact@v4
         with:
           name: ledgerpdf-win-installer-UNSIGNED
