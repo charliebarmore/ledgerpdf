@@ -219,18 +219,52 @@ const orphan = spawn('npm', ['run', 'dev'], {
     WPT_DEV_EXIT: '1'
   }
 })
-orphan.stdout.on('data', () => {})
+// Attach the close listener BEFORE waiting for anything. Attaching it after a
+// wait means an app that exits during that wait fires 'close' into a listener
+// that does not exist yet, and the await never settles.
+const orphanClosed = new Promise((resolve) => orphan.on('close', resolve))
+let orphanExited = false
+orphanClosed.then(() => (orphanExited = true))
+
+let orphanOut = ''
+orphan.stdout.on('data', (d) => (orphanOut += d))
 orphan.stderr.on('data', () => {})
-// Take the reader away while it is still starting up and still writing.
-setTimeout(() => {
+
+// WAIT FOR ELECTRON, do not guess with a timer.
+//
+// This used to sever the pipe after a flat 2500ms. `npm run dev` needs roughly
+// fifteen seconds to reach a window, so 2500ms landed mid-Vite-build: the exit
+// code being asserted belonged to the npm/vite chain rather than to the main
+// process whose EPIPE guard is the thing under test. Whether that chain minded
+// having its reader removed came down to what happened to be writing at the
+// time, so the check passed on one runner and failed on the next.
+//
+// electron-vite prints "starting electron app" once it hands off, so wait for
+// that, give main a moment to be writing, and only then take the reader away.
+// The fallback timeout keeps a hung build from hanging the suite — and it
+// cannot silently weaken the check, because the assertion is still exit 0.
+const READY = 'starting electron app'
+const upBy = Date.now() + 90_000
+while (Date.now() < upBy && !orphanOut.includes(READY) && !orphanExited) {
+  await new Promise((r) => setTimeout(r, 200))
+}
+const sawElectron = orphanOut.includes(READY)
+// Take the reader away while Electron is booting and therefore writing. If it
+// has already exited there is nothing left to sever, and the check would pass
+// without having tested anything — so that case is reported, not counted.
+const severedWhileRunning = sawElectron && !orphanExited
+if (severedWhileRunning) {
+  await new Promise((r) => setTimeout(r, 500))
   orphan.stdout.destroy()
   orphan.stderr.destroy()
-}, 2500)
-const orphanCode = await new Promise((resolve) => orphan.on('close', resolve))
+}
+const orphanCode = await orphanClosed
 check(
   'the app survives its parent closing the pipe it logs to',
-  orphanCode === 0,
-  `exit=${orphanCode}`
+  orphanCode === 0 && severedWhileRunning,
+  severedWhileRunning
+    ? `exit=${orphanCode}`
+    : `exit=${orphanCode} — pipe was never severed while running, so EPIPE went untested (electron started: ${sawElectron})`
 )
 
 let fails = 0
