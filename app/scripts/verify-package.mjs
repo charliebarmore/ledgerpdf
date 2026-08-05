@@ -22,6 +22,7 @@ const resources =
 const fixture = path.resolve(appDir, '..', 'spike', 'fixtures', 'fixture_a.pdf')
 const screenshot = path.join(appDir, 'build', 'package-smoke.png')
 const exported = path.join(appDir, 'build', 'package-smoke-binder.pdf')
+const smokeReport = path.join(appDir, 'build', 'package-smoke.txt')
 
 await access(executable, constants.X_OK)
 const asarPath = path.join(resources, 'app.asar')
@@ -71,14 +72,23 @@ function runPackaged(args, env = {}) {
   })
 }
 
-const result = await runPackaged(['--wpt-package-smoke'])
+await rm(smokeReport, { force: true })
+const result = await runPackaged(['--wpt-package-smoke'], {
+  WPT_PACKAGE_SMOKE_REPORT: smokeReport
+})
 
-if (result.code !== 0 || !result.stdout.includes('[package-smoke] engine')) {
+// On Windows the packaged app is a GUI-subsystem binary and its main-process
+// stdout never reaches this pipe — the run exits 0 with both streams empty. The
+// report file is the reliable channel; stdout is kept as the fallback so a
+// POSIX run still reads the same either way.
+const reported = await readFile(smokeReport, 'utf8').catch(() => '')
+const health = reported || result.stdout
+if (result.code !== 0 || !health.includes('[package-smoke] engine')) {
   throw new Error(
-    `Packaged app health check failed (${result.code})\n${result.stdout}\n${result.stderr}`
+    `Packaged app health check failed (${result.code})\nreport: ${reported}\n${result.stdout}\n${result.stderr}`
   )
 }
-console.log(result.stdout.trim())
+console.log(health.trim())
 
 await access(fixture)
 await rm(exported, { force: true })

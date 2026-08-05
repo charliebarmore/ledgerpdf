@@ -99,8 +99,11 @@ jobs:
       # Two artifacts on purpose. The unpacked folder runs with no install and
       # no SmartScreen prompt — use it to test the APP. The installer is the
       # only way to see what a design partner meets, warning and all.
+      # always(): packaging can succeed while a later check fails, and the whole
+      # point of this job for someone with no Windows machine is to come away
+      # with something runnable. A red check should not also mean empty hands.
       - name: Upload the unpacked app (run it directly, no install)
-        if: inputs.package
+        if: always() && inputs.package
         uses: actions/upload-artifact@v4
         with:
           name: workpaper-binder-win-unpacked
@@ -109,7 +112,7 @@ jobs:
           path: app/release/win-unpacked
 
       - name: Upload the UNSIGNED installer (testing only, do not distribute)
-        if: inputs.package
+        if: always() && inputs.package
         uses: actions/upload-artifact@v4
         with:
           name: workpaper-binder-win-installer-UNSIGNED

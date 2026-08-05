@@ -792,13 +792,24 @@ app.whenReady().then(async () => {
   // Release-pipeline health check: exercises the packaged main-process path and
   // bundled native engine without opening client files or exposing dev IPC.
   if (!isDev && process.argv.includes('--wpt-package-smoke')) {
+    // A packaged Windows app is a GUI-subsystem binary, so main-process stdout
+    // never reaches the parent's pipe: the verifier saw exit 0 with both streams
+    // empty and could not tell a healthy engine from silence. Report through a
+    // file when one is named — the same way the UI smoke already hands back its
+    // screenshot and its export.
+    const reportTo = process.env.WPT_PACKAGE_SMOKE_REPORT
+    const report = async (line: string): Promise<void> => {
+      console.log(line)
+      if (reportTo) await writeFile(reportTo, line, 'utf8').catch(() => {})
+    }
     const result = await runEngine({ cmd: 'ping' })
     if (!result.ok) {
       console.error(`[package-smoke] ${result.error}`)
+      await report(`[package-smoke] FAILED ${String(result.error)}`)
       app.exit(1)
       return
     }
-    console.log(`[package-smoke] engine ${String(result.version)} ready`)
+    await report(`[package-smoke] engine ${String(result.version)} ready`)
     app.exit(0)
     return
   }
