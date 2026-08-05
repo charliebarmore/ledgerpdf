@@ -55,6 +55,8 @@ for (const stream of [process.stdout, process.stderr]) {
 
 const isDev = !app.isPackaged
 const packageUiSmoke = !isDev && process.argv.includes('--wpt-package-ui-smoke')
+/** Either headless verification run. Not a person launching the app. */
+const packageSmoke = packageUiSmoke || (!isDev && process.argv.includes('--wpt-package-smoke'))
 
 /**
  * Identity. Without this Electron calls itself "Electron" in the menu bar,
@@ -89,14 +91,25 @@ app.on('open-file', (event, filePath) => {
   requestOpen(path.resolve(filePath))
 })
 
-/** A second launch hands its file to the running instance rather than starting again. */
-if (!app.requestSingleInstanceLock()) {
-  app.quit()
-} else {
-  app.on('second-instance', (_e, argv) => {
-    const target = argv.find((a) => a.toLowerCase().endsWith('.pdf'))
-    if (target) requestOpen(path.resolve(target))
-  })
+/**
+ * A second launch hands its file to the running instance rather than starting
+ * again.
+ *
+ * Skipped for a packaged smoke run. That is headless verification, not somebody
+ * opening a binder, and the lock is claimed here at module load — before
+ * `whenReady`, so before the smoke ever runs. If anything else holds it, this
+ * process calls `app.quit()` and exits 0 having produced no output at all,
+ * which a verifier cannot distinguish from a healthy app that said nothing.
+ */
+if (!packageSmoke) {
+  if (!app.requestSingleInstanceLock()) {
+    app.quit()
+  } else {
+    app.on('second-instance', (_e, argv) => {
+      const target = argv.find((a) => a.toLowerCase().endsWith('.pdf'))
+      if (target) requestOpen(path.resolve(target))
+    })
+  }
 }
 
 /** Repo root. Dev: out/main -> out -> app -> repo. Packaged: resources/. */

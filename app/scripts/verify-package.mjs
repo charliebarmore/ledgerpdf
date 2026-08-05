@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, rm } from 'node:fs/promises'
+import { access, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -88,8 +88,19 @@ const result = await runPackaged(['--wpt-package-smoke'], {
 const reported = await readFile(smokeReport, 'utf8').catch(() => '')
 const health = reported || result.stdout
 if (result.code !== 0 || !health.includes('[package-smoke] engine')) {
+  // Exit 0 with three empty channels means the smoke branch never ran, not that
+  // the engine is unhealthy — so say which channels were empty rather than
+  // leaving the next reader to guess the way the last several runs did.
+  const built = await readdir(path.join(appDir, 'build')).catch((e) => `unreadable: ${e.code}`)
   throw new Error(
-    `Packaged app health check failed (${result.code})\nreport: ${reported}\n${result.stdout}\n${result.stderr}`
+    `Packaged app health check failed (exit ${result.code})\n` +
+      `  report file : ${reported ? JSON.stringify(reported) : '(empty or absent)'}\n` +
+      `  stdout      : ${result.stdout ? JSON.stringify(result.stdout) : '(empty)'}\n` +
+      `  stderr      : ${result.stderr ? JSON.stringify(result.stderr) : '(empty)'}\n` +
+      `  build/      : ${JSON.stringify(built)}\n` +
+      `  exe         : ${executable}\n` +
+      `  All three empty with exit 0 means main quit before the smoke branch —\n` +
+      `  the single-instance lock is claimed at module load and does exactly that.`
   )
 }
 console.log(health.trim())
