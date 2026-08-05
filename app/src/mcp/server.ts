@@ -1,5 +1,5 @@
 /**
- * Workpaper Binder MCP server — lets Claude (or any MCP client) build binders.
+ * LedgerPDF MCP server — lets Claude (or any MCP client) build binders.
  *
  * WHAT THIS IS: a second front door onto the same session model and the same
  * Python engine the Electron app drives. The agent assembles a binder — import,
@@ -241,7 +241,7 @@ function summary(s: Session): string {
 // ------------------------------------------------------------------- server
 
 const server = new McpServer(
-  { name: 'workpaper-binder', version: '0.1.0' },
+  { name: 'ledgerpdf', version: '0.1.0' },
   {
     instructions: [
       'Build tax workpaper binders: import PDFs, order pages, bookmark, place review',
@@ -320,7 +320,7 @@ registerTool(
       ? '\nThe cover memo is OUT OF DATE — pages moved since it was written. Re-run binder_add_cover with the same path.'
       : ''
     const where = owner
-      ? `LIVE — this is the binder open in Workpaper Binder; changes appear there as you make them.` +
+      ? `LIVE — this is the binder open in LedgerPDF; changes appear there as you make them.` +
         (currentPage ? ` The reviewer is looking at ${currentPage} (binder_current_page).` : '')
       : 'Standalone — your own working binder. Save it and open it in the app to review.'
     return text(
@@ -442,7 +442,7 @@ registerTool(
       sessionPath = target
       return text(
         `Saved ${summary(session)}\n→ ${target}\n` +
-          `${r.pages} page(s), editable session inside. Double-click to reopen it in Workpaper Binder.` +
+          `${r.pages} page(s), editable session inside. Double-click to reopen it in LedgerPDF.` +
           (r.check_problems.length
             ? `\nqpdf validation: ${r.check_problems.length} problem(s): ${r.check_problems.join('; ')}`
             : '')
@@ -1821,7 +1821,7 @@ registerTool(
 // --------------------------------------------------------------------- boot
 
 async function main(): Promise<void> {
-  // Attach to a running Workpaper Binder if one is offering live access, so an
+  // Attach to a running LedgerPDF if one is offering live access, so an
   // agent and the person at the keyboard work on the SAME binder. Falls back to
   // this process owning its own binder — the behaviour before live access
   // existed — when the app is shut or has it turned off.
@@ -1833,6 +1833,6 @@ async function main(): Promise<void> {
 
 main().catch((e) => {
   // stdout is the MCP protocol channel — diagnostics go to stderr, never there.
-  process.stderr.write(`workpaper-binder MCP server failed: ${String(e)}\n`)
+  process.stderr.write(`ledgerpdf MCP server failed: ${String(e)}\n`)
   process.exit(1)
 })

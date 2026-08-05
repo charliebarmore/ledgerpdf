@@ -1,4 +1,4 @@
-# Workpaper Binder data flow
+# LedgerPDF data flow
 
 This describes the current desktop beta boundary for a CPA using client tax and
 accounting PDFs. It is a product disclosure, not a claim of regulatory
@@ -69,13 +69,13 @@ bookmark titles, and mark/tape metadata. It cannot request extracted page text
 through the current tools. That is still a disclosure surface: paths, bookmark
 titles, reviewer notes, and tape amounts can identify a taxpayer or reveal tax
 information. Whether the MCP client sends that data to a hosted model depends
-on that client and provider, not Workpaper Binder. Do not enable MCP on client
+on that client and provider, not LedgerPDF. Do not enable MCP on client
 engagements until the firm's IRC §7216, privacy, vendor, and consent analysis
 allows it.
 
 ## Storage, retention, and deletion
 
-Workpaper Binder does not encrypt files itself or enforce a retention schedule.
+LedgerPDF does not encrypt files itself or enforce a retention schedule.
 Use an approved engagement folder on a FileVault/BitLocker-encrypted device
 with firm-managed backup, access control, retention, and secure-disposal
 policies. Deleting an engagement means deleting the sources, session, recovery

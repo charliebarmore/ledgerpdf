@@ -50,7 +50,14 @@ export function liveStatus(): LiveHandle | null {
   return handle
 }
 
-/** Windows has no filesystem socket; a named pipe is the equivalent. */
+/**
+ * Windows has no filesystem socket; a named pipe is the equivalent.
+ *
+ * The prefix stays `workpaper-binder` through the LedgerPDF rename, matching
+ * live-endpoint.ts. Nothing discovers the pipe by name — the endpoint file
+ * carries the exact path — so this is only an identifier, and keeping the pair
+ * in step is worth more than making it read prettily.
+ */
 function socketPathFor(dir: string): string {
   if (process.platform === 'win32') {
     return path.join('\\\\.\\pipe', `workpaper-binder-${randomBytes(8).toString('hex')}`)

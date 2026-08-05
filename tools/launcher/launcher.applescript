@@ -1,4 +1,4 @@
--- Workpaper Binder launcher. A SHORTCUT, not a packaged app: it starts the dev
+-- LedgerPDF launcher. A SHORTCUT, not a packaged app: it starts the dev
 -- build out of the repo, so the repo, node_modules and the engine venv must all
 -- be present. Real packaging is Phase 5 (see ROADMAP.md).
 --
@@ -38,7 +38,7 @@ try
 	set hasModules to do shell script "test -d " & quoted form of (repo & "/app/node_modules") & " && echo yes || echo no"
 end try
 if hasModules is "no" then
-	display alert "Workpaper Binder can't start" message "node_modules is missing." & return & return & "Run:  cd " & repo & "/app && npm install" as critical
+	display alert "LedgerPDF can't start" message "node_modules is missing." & return & return & "Run:  cd " & repo & "/app && npm install" as critical
 	return
 end if
 
@@ -51,5 +51,5 @@ end try
 try
 	do shell script "export PATH=/opt/homebrew/bin:/usr/bin:/bin; cd " & quoted form of (repo & "/app") & " && nohup npm run dev >> " & q & " 2>&1 < /dev/null &"
 on error errMsg
-	display alert "Workpaper Binder can't start" message errMsg as critical
+	display alert "LedgerPDF can't start" message errMsg as critical
 end try

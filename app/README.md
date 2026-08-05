@@ -84,7 +84,7 @@ Azure authentication itself uses its standard `AZURE_TENANT_ID`,
 secret or certificate is stored in the repository.
 
 The bundle identifier is currently `com.charliebarmore.workpaperbinder` and the
-visible product name is still the working name “Workpaper Binder.” Decide the
+visible product name is still the working name “LedgerPDF.” Decide the
 real product name before issuing certificates or giving a build to a design
 partner; changing identity later disrupts OS trust and update continuity.
 
@@ -921,7 +921,7 @@ Registered for Claude Code with:
 ```bash
 claude mcp add --scope user \
   -e WPT_MCP_ROOTS=/absolute/path/to/approved/engagements \
-  workpaper-binder -- node <repo>/app/out/mcp-server.cjs
+  ledgerpdf -- node <repo>/app/out/mcp-server.cjs
 ```
 
 **The session file is the handoff.** There is no live link to a running app

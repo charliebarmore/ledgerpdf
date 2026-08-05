@@ -64,7 +64,7 @@ const packageSmoke = packageUiSmoke || (!isDev && process.argv.includes('--wpt-p
  * binder full of client workpapers. Set before `ready` so the name is in place
  * by the time the app menu is built.
  */
-app.setName('Workpaper Binder')
+app.setName('LedgerPDF')
 
 /**
  * A binder opened from Finder or Explorer.
@@ -697,7 +697,7 @@ function createWindow(): void {
     minWidth: 1100,
     minHeight: 700,
     backgroundColor: '#F7F6F2',
-    title: 'Workpaper Binder',
+    title: 'LedgerPDF',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),

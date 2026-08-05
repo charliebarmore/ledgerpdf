@@ -2,7 +2,7 @@
   "name": "workpaper-tool",
   "version": "0.1.0",
   "private": true,
-  "author": "Charlie Barmore",
+  "author": "Ledger Labs LLC",
   "description": "Tax workpaper binder — organize, mark up, and export PDF binders locally",
   "main": "out/main/index.js",
   "scripts": {

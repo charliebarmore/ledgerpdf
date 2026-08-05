@@ -9,12 +9,12 @@ const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const arch = process.arch === 'arm64' ? 'arm64' : process.arch
 const packagedRoot =
   process.platform === 'darwin'
-    ? path.join(appDir, 'release', `mac-${arch}`, 'Workpaper Binder.app')
+    ? path.join(appDir, 'release', `mac-${arch}`, 'LedgerPDF.app')
     : path.join(appDir, 'release', 'win-unpacked')
 const executable =
   process.platform === 'darwin'
-    ? path.join(packagedRoot, 'Contents', 'MacOS', 'Workpaper Binder')
-    : path.join(packagedRoot, 'Workpaper Binder.exe')
+    ? path.join(packagedRoot, 'Contents', 'MacOS', 'LedgerPDF')
+    : path.join(packagedRoot, 'LedgerPDF.exe')
 const resources =
   process.platform === 'darwin'
     ? path.join(packagedRoot, 'Contents', 'Resources')

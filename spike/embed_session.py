@@ -86,7 +86,7 @@ def make_envelope(session: dict, pdf: pikepdf.Pdf, engine_version: str = "spike"
     session_bytes = json.dumps(session, separators=(",", ":"), sort_keys=True).encode("utf-8")
     envelope = {
         "wpt_session_version": SESSION_FORMAT_VERSION,
-        "written_by": f"workpaper-binder/{engine_version}",
+        "written_by": f"ledgerpdf/{engine_version}",
         "payload_sha256": hashlib.sha256(session_bytes).hexdigest(),
         "binder_fingerprint": {
             "algo": "page-geometry-v1",
@@ -146,7 +146,7 @@ def _write_attachment(pdf: pikepdf.Pdf, data: bytes) -> None:
         pdf,
         data,
         mime_type="application/json",
-        description="Workpaper Binder editable session",
+        description="LedgerPDF editable session",
     )
     pdf.attachments[PAYLOAD_NAME] = spec
     filespec = spec.obj
@@ -221,7 +221,7 @@ def _write_page_af(pdf: pikepdf.Pdf, data: bytes) -> None:
         pdf,
         data,
         mime_type="application/json",
-        description="Workpaper Binder editable session",
+        description="LedgerPDF editable session",
     )
     filespec = spec.obj
     filespec[Name("/AFRelationship")] = Name("/Source")

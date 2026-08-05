@@ -373,7 +373,7 @@ def manual_kit(fixtures: list[Path], dest: Path) -> None:
         json.dumps({"fixture": fixture.name, "files": manifest}, indent=2), encoding="utf-8"
     )
     (dest / "README.txt").write_text(
-        "Workpaper Binder — Acrobat Pro compatibility check\n"
+        "LedgerPDF — Acrobat Pro compatibility check\n"
         "==================================================\n\n"
         "These are synthetic test PDFs. They contain no client or taxpayer data.\n\n"
         "For each PDF in this folder:\n"

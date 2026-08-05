@@ -10,7 +10,7 @@ has (PDFs, Excel, scans), locally, with client data never leaving the machine.
 
 ## Product context
 
-- **Project name**: workpaper-tool (working name — real name TBD, see Open questions)
+- **Project name**: **LedgerPDF** (settled 2026-08-05). Published by **Ledger Labs LLC**; bundle identifier `com.ledgerlabs.ledgerpdf`. `workpaper-tool` remains the repo/folder name — renaming that needs Claude-history relinking (`~/Practice/_meta/WORKSPACE-REORG.md` §3) and buys nothing.
 - **Industry / domain**: Tax & accounting firm software (workpaper preparation/review)
 - **Primary audience**: Charlie's own practice first; then 2–3 TCR design-partner firms (tax preparers/reviewers, mostly Windows)
 - **Secondary audience**: TCR community / small firms broadly, IF the business gate passes
@@ -108,7 +108,7 @@ BY AGENT (same binder, same model, no second-class path)
 
 | Question | Owner | Blocking? | Notes |
 | --- | --- | --- | --- |
-| Real product name | Charlie | **Yes, before publishing** (not before signing) | "Workpaper Binder" is the working name. **Corrected 2026-08-05: a Developer ID certificate is NOT name-bound** — it carries the publisher's identity and signs any app under the account, so signing can be set up before this is settled. What the name actually gates is *publishing*: `appId` is baked into installed builds, so changing it after release makes the next update install a second app instead of upgrading the first. Nobody has installed it yet, so it is free to change today. Full brief for a naming agent: `references/naming-brief.md`. The rename itself is cheap — ~14 code sites plus docs and the launcher, and the live-agent endpoint directory is deliberately product-name-independent so a rename cannot silently stop agents finding the app. Candidates discussed 2026-08-04: **AgentBinder** (instantly clear, on-brand for selling through AI Lab/TCR; risk that "agent" dates, and descriptive-generic is hard to own) vs **Crossfoot** (accounting term for verifying totals tie — names the outcome, ages well, ownable, fits the tick icon, with the agent story in the tagline). Check domain + USPTO before committing. |
+| ~~Real product name~~ | — | **Resolved 2026-08-05** | **LedgerPDF**, published by Ledger Labs LLC, bundle id `com.ledgerlabs.ledgerpdf`. Chosen for instant legibility to a CPA and family fit with the publisher; the accepted trade is that it is descriptive and therefore a weak mark — screen against Ledger SAS's Class 9 registrations before filing. Rejected with evidence in `references/naming-brief.md`: Tickmark (three companies in audit/tax software), Quire (established SaaS), Crossfoot (disliked). The identifier is only free to change until someone installs a build. |
 | Sidecar packaging: PyInstaller vs Nuitka vs qpdf-CLI-only | Phase 5 | No (dev runs from the venv) | Decided by AV/SmartScreen behavior on the real Windows box |
 | ~~Commercial PDF SDK fallback needed?~~ | — | **Resolved 2026-07-27: No** | pikepdf/qpdf produced portable annotations in both pdfium and PDFKit; stage gate passed |
 | Real Windows x64 test hardware | Charlie | No (Phase 1), Yes (beta) | Mini PC vs. a design partner's workstation |

@@ -11,9 +11,9 @@ gh workflow run "Windows x64"        # from the Mac, or use the Actions tab
 
 When it finishes, download from the run's **Artifacts**:
 
-- `workpaper-binder-win-unpacked` — runs directly, no install, no SmartScreen.
+- `ledgerpdf-win-unpacked` — runs directly, no install, no SmartScreen.
   Use this to test **the app**.
-- `workpaper-binder-win-installer-UNSIGNED` — use this to test **the install
+- `ledgerpdf-win-installer-UNSIGNED` — use this to test **the install
   experience**. It is unsigned on purpose; do not give it to anyone.
 - `windows-evidence` — the packaged-app screenshot CI captured, for comparison.
 
@@ -23,7 +23,7 @@ This is the part that has never been tested anywhere. Roughly ten `win32`
 branches — engine path resolution, `workpaper-engine.exe`, the electron-builder
 invocation, a persistence branch — execute for the first time on this machine.
 
-- [ ] `Workpaper Binder.exe` from the unpacked folder starts.
+- [ ] `LedgerPDF.exe` from the unpacked folder starts.
 - [ ] Add a PDF. If the frozen Python engine cannot be found or spawned, this is
       where it fails — the app will report the engine path it tried.
 - [ ] Export a binder. The engine does the writing, so a successful export

@@ -1,5 +1,5 @@
 /**
- * Attaches the stdio MCP server to a running Workpaper Binder, when there is
+ * Attaches the stdio MCP server to a running LedgerPDF, when there is
  * one listening.
  *
  * This is what makes "talk to it while you work" true. Without it the agent

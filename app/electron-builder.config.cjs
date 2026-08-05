@@ -23,8 +23,8 @@ const azureSignOptions =
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
-  appId: 'com.charliebarmore.workpaperbinder',
-  productName: 'Workpaper Binder',
+  appId: 'com.ledgerlabs.ledgerpdf',
+  productName: 'LedgerPDF',
   // Offered under "Open With" for a PDF, deliberately NOT registered as the
   // default handler: a workpaper tool has no business becoming the machine's
   // PDF viewer. `role: 'Editor'` is what puts it in that menu; double-clicking

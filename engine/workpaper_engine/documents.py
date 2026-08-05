@@ -302,7 +302,7 @@ def doc_to_pdf(path: str | Path) -> pikepdf.Pdf:
         topMargin=MARGIN,
         bottomMargin=MARGIN,
         title=Path(path).stem,
-        author="Workpaper Binder",
+        author="LedgerPDF",
     )
     doc.build(_story(blocks, Path(path).stem))
     return pikepdf.open(io.BytesIO(buffer.getvalue()))

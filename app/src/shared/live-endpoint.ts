@@ -3,10 +3,13 @@
  *
  * ONE definition, imported by the app that writes it and the MCP server that
  * reads it. Deliberately NOT Electron's userData: that directory is named after
- * the app's display name, which is still the working title and is expected to
- * change before release. A rename would silently stop the agent finding the
+ * the app's display name, so a rename would silently stop the agent finding the
  * app — it would just quietly work on its own copy, which is the exact failure
  * this feature exists to prevent.
+ *
+ * The product was renamed to LedgerPDF on 2026-08-05 and this constant did NOT
+ * move, which is the whole point: it survived the rename it was written to
+ * survive. It is not stale and it is not a leftover. Leave it alone.
  */
 
 import path from 'node:path'

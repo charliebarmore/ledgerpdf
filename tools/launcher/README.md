@@ -1,6 +1,6 @@
 # Dock launcher (macOS)
 
-A double-clickable `Workpaper Binder.app` that starts the dev build, so the tool
+A double-clickable `LedgerPDF.app` that starts the dev build, so the tool
 can be pinned to the Dock and used day to day.
 
 ```bash
@@ -47,7 +47,7 @@ with a real executable stub and works. That's why this is an applet.
 
 `app.dock.setIcon()` in `app/src/main/index.ts` gives the running app the proper
 Dock icon (from `app/resources/icon.png`) instead of a generic Electron diamond,
-and the window title is "Workpaper Binder".
+and the window title is "LedgerPDF".
 
 **The menu bar and ⌘-Tab still say "Electron", and `app.setName()` does not
 change that.** In a dev build the application-menu title comes from the *bundle*

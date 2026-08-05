@@ -89,7 +89,7 @@ def _envelope_bytes(session: dict, pdf: pikepdf.Pdf) -> bytes:
     body = json.dumps(session, separators=(",", ":"), sort_keys=True).encode("utf-8")
     envelope = {
         "wpt_session_version": SESSION_ENVELOPE_VERSION,
-        "written_by": f"workpaper-binder/{__version__}",
+        "written_by": f"ledgerpdf/{__version__}",
         "payload_sha256": hashlib.sha256(body).hexdigest(),
         "binder_fingerprint": {
             "algo": "page-geometry-v1",
@@ -108,7 +108,7 @@ def _new_spec(pdf: pikepdf.Pdf, data: bytes) -> pikepdf.AttachedFileSpec:
         pdf,
         data,
         mime_type="application/json",
-        description="Workpaper Binder editable session",
+        description="LedgerPDF editable session",
     )
     spec.obj[Name("/AFRelationship")] = Name("/Source")
     spec.obj[Name("/UF")] = String(PAYLOAD_NAME)
