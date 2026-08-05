@@ -56,28 +56,50 @@ def sparkle(d: ImageDraw.ImageDraw, cx: float, cy: float, r: float, fill) -> Non
     )
 
 
+def fit(v: float) -> float:
+    """Old inset-box coordinate -> full-bleed canvas.
+
+    The composition below was tuned against a box running 92..932. Rescaling
+    here keeps that composition exactly and confines the full-bleed change to
+    one place, rather than restating every number and hoping.
+    """
+    return (v - 92) * (S / 840)
+
+
 def main() -> None:
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    # macOS icons sit inset in the canvas with a generous corner radius.
-    m, r = 92, 200
-    d.rounded_rectangle([m, m, S - m, S - m], radius=r, fill=TEAL)
+    # FULL BLEED, deliberately. This used to inset the artwork by 92px and round
+    # it itself, which was right when every macOS app supplied its own squircle.
+    # macOS 26 composites icons into a system container instead, so a
+    # self-inset icon is inset TWICE and the container shows as a pale frame
+    # around it — which is exactly what it looked like.
+    #
+    # So: fill the canvas and let the system mask. The radius here is smaller
+    # than the system's, so the mask trims our corners rather than leaving a
+    # sliver of ours outside it, and Windows — which does not mask at all — gets
+    # a normal rounded tile instead of a hard square.
+    d.rounded_rectangle([0, 0, S, S], radius=200, fill=TEAL)
 
     # A second sheet behind, just enough to read as a binder rather than a page.
-    d.rounded_rectangle([255, 250, 645, 770], radius=22, fill=(255, 255, 255, 150))
-    d.rounded_rectangle([225, 290, 615, 760], radius=22, fill=PAPER)
+    d.rounded_rectangle([fit(255), fit(250), fit(645), fit(770)], radius=27, fill=(255, 255, 255, 150))
+    d.rounded_rectangle([fit(225), fit(290), fit(615), fit(760)], radius=27, fill=PAPER)
 
     for i in range(3):
         y = 372 + i * 64
-        d.rounded_rectangle([282, y, 282 + (250 if i % 2 == 0 else 180), y + 18], radius=9, fill=RULE)
+        d.rounded_rectangle(
+            [fit(282), fit(y), fit(282 + (250 if i % 2 == 0 else 180)), fit(y + 18)],
+            radius=11, fill=RULE,
+        )
 
     # Heavier than a UI tick: at 32px a thin stroke greys out into the page.
-    d.line([(300, 620), (390, 706), (560, 500)], fill=GREEN, width=62, joint="curve")
+    d.line([(fit(300), fit(620)), (fit(390), fit(706)), (fit(560), fit(500))],
+           fill=GREEN, width=76, joint="curve")
 
     # Kept off the sheet and in from the corner — both were crowding at 32px.
-    sparkle(d, 706, 372, 146, ORANGE)
-    sparkle(d, 828, 536, 72, ORANGE)
+    sparkle(d, fit(706), fit(372), 146 * (S / 840), ORANGE)
+    sparkle(d, fit(828), fit(536), 72 * (S / 840), ORANGE)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     img.save(OUT)
