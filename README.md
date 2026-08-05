@@ -55,6 +55,23 @@ installers. Expect rough edges, and do not make it the only copy of anything.
 Builds are produced by CI for Windows x64 and can be built from source on macOS
 and Windows. Signed releases are pending code-signing certificates.
 
+### Getting a build
+
+**There is no download yet, and that is deliberate.** Code signing is the gate.
+An unsigned Windows installer trips SmartScreen's "Windows protected your PC"
+warning, and the first thing this tool should not do is teach an accountant to
+click past a security prompt. Releases start once the certificate is in hand.
+
+Until then there are two ways to run it, in order of effort:
+
+1. **A CI build**, if you have access to this repository. Run the
+   **Windows x64** workflow under the Actions tab — it is manual-dispatch only,
+   so nothing builds or bills until someone asks — and download the artifact it
+   attaches. Artifacts expire after 14 days and are **unsigned: for pilot
+   testing, not for redistribution.**
+2. **From source**, below. Works on macOS and Windows and takes about five
+   minutes on a machine that already has Node and Python.
+
 ## Build from source
 
 Requires Node 20+ (CI builds on 22) and Python 3.12+. Expect roughly 1.3 GB on
