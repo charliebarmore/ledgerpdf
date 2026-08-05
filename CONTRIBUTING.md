@@ -64,6 +64,12 @@ cd app && npm run verify              # typecheck, model, MCP, text, smoke, live
 engine/.venv/bin/python spike/verify_viewers.py   # cross-engine conformance
 ```
 
+`verify_viewers.py` renders in **two** independent engines and compares them, so it needs
+poppler's `pdftoppm` alongside pdfium (`brew install poppler`, or `apt install
+poppler-utils`). It is effectively macOS/Linux only — poppler is not readily available on
+Windows, which is why CI skips this one step there. The pdfium half is covered by
+`npm run verify` on every platform, so a Windows contributor is not flying blind.
+
 **Quit LedgerPDF before running `npm run verify`.** The smoke and live checks
 launch the real app, and a single-instance lock means a second launch hands off to
 the running window and exits instead of opening one. The checks then fail for a
@@ -80,9 +86,26 @@ tidy them.
 See [Build from source](README.md#build-from-source). The short version:
 
 ```bash
+# macOS / Linux
 python3 -m venv engine/.venv && engine/.venv/bin/pip install -r engine/requirements.txt
+engine/.venv/bin/python spike/run_spike.py
 cd app && npm install && npm run dev
 ```
+
+```powershell
+# Windows — the venv is Scripts\ rather than bin/, and Windows PowerShell 5.1
+# has no && operator, so these are separate lines rather than a chain.
+python -m venv engine\.venv
+engine\.venv\Scripts\pip install -r engine\requirements.txt
+engine\.venv\Scripts\python spike\run_spike.py
+cd app
+npm install
+npm run dev
+```
+
+Add `engine/requirements-build.txt` on top of either if you intend to run
+`npm run package:dir` — it carries PyInstaller. The `run_spike.py` line builds
+the gitignored fixtures that `npm run verify` checks against.
 
 Architecture notes live in `DATA-FLOW.md`; scope and non-goals in `PROJECT.md`;
 what is planned, parked, and deliberately excluded in `ROADMAP.md`.
