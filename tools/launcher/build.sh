@@ -45,7 +45,7 @@ osacompile -o "$APP" "$REPO/tools/launcher/launcher.applescript"
 cp "$WORK/AppIcon.icns" "$APP/Contents/Resources/applet.icns"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'LedgerPDF'" \
   "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
-/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.ledgerlabs.ledgerpdf-launcher" \
+/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string co.ledgerlabs.ledgerpdf-launcher" \
   "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
 # The launcher must never claim its own Dock tile — the running app is Electron,
 # and two tiles for one app is just confusing. Pinning this bundle still works.

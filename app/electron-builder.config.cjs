@@ -23,7 +23,11 @@ const azureSignOptions =
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
-  appId: 'com.ledgerlabs.ledgerpdf',
+  // Reverse-DNS of ledgerlabs.co, the publisher's actual domain. NOT
+  // com.ledgerlabs.* — ledgerlabs.com has belonged to someone else since
+  // 2003. Frozen once anyone installs a build: changing it makes the next
+  // update install a second app instead of upgrading the first.
+  appId: 'co.ledgerlabs.ledgerpdf',
   productName: 'LedgerPDF',
   // Offered under "Open With" for a PDF, deliberately NOT registered as the
   // default handler: a workpaper tool has no business becoming the machine's

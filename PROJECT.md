@@ -10,7 +10,7 @@ has (PDFs, Excel, scans), locally, with client data never leaving the machine.
 
 ## Product context
 
-- **Project name**: **LedgerPDF** (settled 2026-08-05). Published by **Ledger Labs LLC**; bundle identifier `com.ledgerlabs.ledgerpdf`. `workpaper-tool` remains the repo/folder name — renaming that needs Claude-history relinking (`~/Practice/_meta/WORKSPACE-REORG.md` §3) and buys nothing.
+- **Project name**: **LedgerPDF** (settled 2026-08-05). Published by **Ledger Labs LLC**; bundle identifier `co.ledgerlabs.ledgerpdf`. `workpaper-tool` remains the repo/folder name — renaming that needs Claude-history relinking (`~/Practice/_meta/WORKSPACE-REORG.md` §3) and buys nothing.
 - **Industry / domain**: Tax & accounting firm software (workpaper preparation/review)
 - **Primary audience**: Charlie's own practice first; then 2–3 TCR design-partner firms (tax preparers/reviewers, mostly Windows)
 - **Secondary audience**: TCR community / small firms broadly, IF the business gate passes
@@ -108,7 +108,7 @@ BY AGENT (same binder, same model, no second-class path)
 
 | Question | Owner | Blocking? | Notes |
 | --- | --- | --- | --- |
-| ~~Real product name~~ | — | **Resolved 2026-08-05** | **LedgerPDF**, published by Ledger Labs LLC, bundle id `com.ledgerlabs.ledgerpdf`. Chosen for instant legibility to a CPA and family fit with the publisher; the accepted trade is that it is descriptive and therefore a weak mark — screen against Ledger SAS's Class 9 registrations before filing. Rejected with evidence in `references/naming-brief.md`: Tickmark (three companies in audit/tax software), Quire (established SaaS), Crossfoot (disliked). The identifier is only free to change until someone installs a build. |
+| ~~Real product name~~ | — | **Resolved 2026-08-05** | **LedgerPDF**, published by Ledger Labs LLC, bundle id `co.ledgerlabs.ledgerpdf`. Chosen for instant legibility to a CPA and family fit with the publisher; the accepted trade is that it is descriptive and therefore a weak mark — screen against Ledger SAS's Class 9 registrations before filing. Rejected with evidence in `references/naming-brief.md`: Tickmark (three companies in audit/tax software), Quire (established SaaS), Crossfoot (disliked). The identifier is only free to change until someone installs a build. |
 | Sidecar packaging: PyInstaller vs Nuitka vs qpdf-CLI-only | Phase 5 | No (dev runs from the venv) | Decided by AV/SmartScreen behavior on the real Windows box |
 | ~~Commercial PDF SDK fallback needed?~~ | — | **Resolved 2026-07-27: No** | pikepdf/qpdf produced portable annotations in both pdfium and PDFKit; stage gate passed |
 | Real Windows x64 test hardware | Charlie | No (Phase 1), Yes (beta) | Mini PC vs. a design partner's workstation |
