@@ -48,9 +48,13 @@ def mask_for(img: np.ndarray, color: str) -> np.ndarray:
         # page under test should carry one or the other, not both.
         return (r > 120) & (r > g + 60) & (r > b + 60)
     if color == "brown":
-        # Tape border (0.55, 0.35, 0.15). Disjoint from the tick's green and the
-        # lettered mark's blue, so tapes and marks can be checked on one page.
-        return (r > 100) & (r > g + 30) & (g > b + 20)
+        # Tape border, appearance.TAPE_BORDER_COLOR = rgb(89, 54, 20). The two
+        # hue conditions are what make this disjoint from the tick's green and
+        # the lettered mark's blue, so tapes and marks can be checked on one
+        # page; the red floor only has to clear page ink and the card's tint.
+        # Keep it low enough to survive a darker border — pinning it to one
+        # exact shade is what broke this when the tape was restyled.
+        return (r > 60) & (r > g + 30) & (g > b + 20)
     raise SystemExit(f"unknown color {color!r}")
 
 
