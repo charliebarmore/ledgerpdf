@@ -11,6 +11,7 @@ has (PDFs, Excel, scans), locally, with client data never leaving the machine.
 ## Product context
 
 - **Project name**: **LedgerPDF** (settled 2026-08-05). Published by **Ledger Labs LLC**; bundle identifier `co.ledgerlabs.ledgerpdf`. `workpaper-tool` remains the repo/folder name — renaming that needs Claude-history relinking (`~/Practice/_meta/WORKSPACE-REORG.md` §3) and buys nothing.
+- **Licence**: **GPL-3.0-or-later**, copyright Ledger Labs LLC (`LICENSE`, rationale and dependency-compatibility check in `COPYRIGHT.md`). Copyleft is deliberate: the local-only claim is only worth what a firm can verify. Ledger Labs holds the copyright undivided and can relicense — until outside contributions are merged.
 - **Industry / domain**: Tax & accounting firm software (workpaper preparation/review)
 - **Primary audience**: Charlie's own practice first; then 2–3 TCR design-partner firms (tax preparers/reviewers, mostly Windows)
 - **Secondary audience**: TCR community / small firms broadly, IF the business gate passes

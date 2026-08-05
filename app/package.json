@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "author": "Ledger Labs LLC",
-  "description": "Tax workpaper binder — organize, mark up, and export PDF binders locally",
+  "description": "Tax workpaper binder \u2014 organize, mark up, and export PDF binders locally",
   "main": "out/main/index.js",
   "scripts": {
     "postinstall": "install-electron",
@@ -48,5 +48,6 @@
     "electron-vite": "^5.0.0",
     "typescript": "^7.0.2",
     "vite": "^7.3.6"
-  }
+  },
+  "license": "GPL-3.0-or-later"
 }
