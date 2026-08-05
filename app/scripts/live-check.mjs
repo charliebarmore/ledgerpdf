@@ -40,7 +40,15 @@ const check = (name, ok, detail = '') => checks.push([name, !!ok, detail])
 
 const fixture = path.join(FIXTURES, 'fixture_a.pdf')
 if (!existsSync(fixture) || !existsSync(SERVER)) {
-  console.error('run: engine/.venv/bin/python spike/run_spike.py && npm run build:mcp')
+  // Two things differ on Windows: the venv is `Scripts\` rather than `bin/`,
+  // and Windows PowerShell 5.1 has no `&&`, so chaining the two commands on
+  // one line is a parse error there. Print them as separate lines instead.
+  if (process.platform === 'win32') {
+    console.error('run: engine\\.venv\\Scripts\\python spike\\run_spike.py')
+    console.error('     npm run build:mcp')
+  } else {
+    console.error('run: engine/.venv/bin/python spike/run_spike.py && npm run build:mcp')
+  }
   process.exit(1)
 }
 rmSync(OUT, { force: true })

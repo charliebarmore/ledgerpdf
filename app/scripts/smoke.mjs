@@ -22,6 +22,13 @@ const APP = path.resolve(here, '..')
 const REPO = path.resolve(APP, '..')
 const ENGINE = path.join(REPO, 'engine')
 const PY = path.join(ENGINE, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
+// The command we tell the reader to run has to be the one their shell accepts.
+// A venv is `bin/` on POSIX and `Scripts\` on Windows, so a hardcoded POSIX
+// hint sends a Windows reader to a path that does not exist.
+const RUN_SPIKE =
+  process.platform === 'win32'
+    ? 'engine\\.venv\\Scripts\\python spike\\run_spike.py'
+    : 'engine/.venv/bin/python spike/run_spike.py'
 const FIXTURES = path.join(REPO, 'spike', 'fixtures')
 const OUT_PDF = path.join(REPO, 'spike', 'out', 'app_smoke_binder.pdf')
 const SHOT = path.join(REPO, 'spike', 'out', 'app_smoke_window.png')
@@ -74,7 +81,7 @@ const img = path.join(FIXTURES, 'receipt.jpg')
 // it, so the real window now covers it.
 const book = path.join(FIXTURES, 'trial_balance.xlsx')
 if (!existsSync(a) || !existsSync(b) || !existsSync(img) || !existsSync(book)) {
-  console.error('fixtures missing — run: engine/.venv/bin/python spike/run_spike.py')
+  console.error(`fixtures missing — run: ${RUN_SPIKE}`)
   process.exit(1)
 }
 rmSync(OUT_PDF, { force: true })

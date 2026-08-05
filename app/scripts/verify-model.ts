@@ -91,6 +91,13 @@ const APP = path.resolve(__dirname, '..')
 const REPO = path.resolve(APP, '..')
 const ENGINE = path.join(REPO, 'engine')
 const PY = path.join(ENGINE, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python')
+// The command we tell the reader to run has to be the one their shell accepts.
+// A venv is `bin/` on POSIX and `Scripts\` on Windows, so a hardcoded POSIX
+// hint sends a Windows reader to a path that does not exist.
+const RUN_SPIKE =
+  process.platform === 'win32'
+    ? 'engine\\.venv\\Scripts\\python spike\\run_spike.py'
+    : 'engine/.venv/bin/python spike/run_spike.py'
 const FIXTURES = path.join(REPO, 'spike', 'fixtures')
 const OUT = path.join(REPO, 'spike', 'out', 'app_binder.pdf')
 const OUT_FLAT = path.join(REPO, 'spike', 'out', 'app_binder_flat.pdf')
@@ -146,7 +153,7 @@ async function main(): Promise<number> {
   const fa = path.join(FIXTURES, 'fixture_a.pdf')
   const fb = path.join(FIXTURES, 'fixture_b.pdf')
   if (!existsSync(fa) || !existsSync(fb)) {
-    console.error('fixtures missing — run: engine/.venv/bin/python spike/run_spike.py')
+    console.error(`fixtures missing — run: ${RUN_SPIKE}`)
     return 1
   }
 

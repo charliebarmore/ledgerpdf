@@ -59,6 +59,13 @@ engine/.venv/bin/python spike/run_spike.py       # fixtures + binder + 20 checks
 engine/.venv/bin/python spike/check_preview.py   # macOS Preview engine, 19 checks
 ```
 
+On Windows the venv is `Scripts\` rather than `bin/`, and `check_preview.py`
+does not apply — it drives the macOS Preview engine:
+
+```powershell
+engine\.venv\Scripts\python spike\run_spike.py
+```
+
 Outputs land in `spike/out/`. Fixtures are synthetic — **no client data, ever**.
 If `check_preview.py` aborts on the hash guard, just re-run `run_spike.py`.
 

@@ -57,7 +57,10 @@ and Windows. Signed releases are pending code-signing certificates.
 
 ## Build from source
 
-Requires Node 20+ and Python 3.12+.
+Requires Node 20+ (CI builds on 22) and Python 3.12+. Expect roughly 1.3 GB on
+disk once `node_modules`, the venv and a packaged build are all present.
+
+**macOS / Linux**
 
 ```bash
 git clone https://github.com/charliebarmore/workpaper-tool.git
@@ -65,13 +68,50 @@ cd workpaper-tool
 
 python3 -m venv engine/.venv
 engine/.venv/bin/pip install -r engine/requirements.txt
+engine/.venv/bin/pip install -r engine/requirements-build.txt   # packaging only
 
+engine/.venv/bin/python spike/run_spike.py                      # build fixtures
+```
+
+**Windows (PowerShell)**
+
+A virtual environment puts its interpreter in `Scripts\` on Windows rather than
+`bin/`, and there is no `python3` on the PATH — `python3` there is a Microsoft
+Store stub that will not create a venv.
+
+```powershell
+git clone https://github.com/charliebarmore/workpaper-tool.git
+cd workpaper-tool
+
+python -m venv engine\.venv
+engine\.venv\Scripts\pip install -r engine\requirements.txt
+engine\.venv\Scripts\pip install -r engine\requirements-build.txt   # packaging only
+
+engine\.venv\Scripts\python spike\run_spike.py                      # build fixtures
+```
+
+**Then, on either platform**
+
+```bash
 cd app
 npm install
 npm run dev            # run it
 npm run verify         # the full check suite
 npm run package:dir    # a packaged app in app/release/
 ```
+
+Two notes on the steps above, both of which otherwise fail on a clean clone:
+
+- **Fixtures are gitignored** — they are synthetic and never committed — so
+  `spike/run_spike.py` has to run once before `npm run verify` has anything to
+  check. CI regenerates them the same way.
+- **`requirements-build.txt` is separate** and holds PyInstaller, which freezes
+  the Python engine into the packaged app. Skip it and `npm run dev` still
+  works; `npm run package:dir` fails with `No module named PyInstaller`.
+
+`npm run dev` takes roughly fifteen seconds to show a window the first time —
+Vite builds the main and renderer bundles before Electron launches. It is not
+hung.
 
 ## How it is built
 

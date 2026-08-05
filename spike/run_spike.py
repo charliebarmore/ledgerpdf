@@ -7,7 +7,8 @@ for two of the four viewers in the matrix. macOS Preview is a manual check
 (sips/CoreGraphics does not draw annotations, so it can't stand in for
 Preview); Acrobat on Windows is deferred to the fixture corpus.
 
-Run:  engine/.venv/bin/python spike/run_spike.py
+Run:  engine/.venv/bin/python spike/run_spike.py     (macOS/Linux)
+      engine\\.venv\\Scripts\\python spike\\run_spike.py  (Windows)
 Exit: 0 = all gating checks pass, 1 = at least one failure.
 """
 
@@ -344,8 +345,15 @@ def report() -> int:
     print(f"\n{len(RESULTS) - failures}/{len(RESULTS)} checks passed")
     if failures == 0:
         print(f"\nBinder: {BINDER_PDF}")
-        print("Next: engine/.venv/bin/python spike/check_preview.py  (macOS Preview engine)")
-        print("Remaining manual: Acrobat Reader on the real Windows x64 box.")
+        # check_preview.py drives the macOS Preview engine, so it is not a step
+        # a Windows reader can take at all — naming it there sends them at a
+        # POSIX path for a script that would refuse to run anyway.
+        if sys.platform == "darwin":
+            print("Next: engine/.venv/bin/python spike/check_preview.py  (macOS Preview engine)")
+            print("Remaining manual: Acrobat Reader on the real Windows x64 box.")
+        else:
+            print("Next: Acrobat Reader on this box — open the binder above and")
+            print("      confirm the marks render. (spike/check_preview.py is macOS-only.)")
         print("NOTE: do not open this binder in the Preview *app* — it rewrites the")
         print("      file in place and invalidates the fixture. See spike/README.md.")
     return 1 if failures else 0
