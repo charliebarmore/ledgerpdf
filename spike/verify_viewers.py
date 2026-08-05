@@ -74,11 +74,26 @@ def render_poppler(path: str, index: int) -> np.ndarray:
     """poppler via pdftoppm. `-r 144` matches pdfium's scale=2.0 (72dpi base)."""
     with tempfile.TemporaryDirectory() as tmp:
         stem = Path(tmp) / "page"
-        subprocess.run(
-            ["pdftoppm", "-png", "-r", "144", "-f", str(index + 1), "-l", str(index + 1),
-             path, str(stem)],
-            check=True, capture_output=True,
-        )
+        try:
+            subprocess.run(
+                ["pdftoppm", "-png", "-r", "144", "-f", str(index + 1), "-l", str(index + 1),
+                 path, str(stem)],
+                check=True, capture_output=True,
+            )
+        except FileNotFoundError:
+            # Second engine missing is a setup gap, not a conformance failure, and
+            # a bare FileNotFoundError traceback reads like the repo is broken.
+            # Say what is missing and how to get it. Still exits non-zero: this
+            # check is worth nothing with only one engine, so it must not look
+            # like it passed. CI skips the step on Windows for the same reason.
+            raise SystemExit(
+                "pdftoppm not found — this check renders in TWO independent engines\n"
+                "and poppler is the second one.\n"
+                "  macOS:   brew install poppler\n"
+                "  Linux:   apt install poppler-utils\n"
+                "  Windows: not readily available; run this check on macOS or Linux.\n"
+                "The pdfium half is exercised by `npm run verify` on every platform."
+            ) from None
         pngs = sorted(Path(tmp).glob("page*.png"))
         if not pngs:
             raise SystemExit("pdftoppm produced no output")

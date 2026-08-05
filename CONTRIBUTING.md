@@ -62,8 +62,13 @@ both pdfium and poppler and assert marks land where they were placed. Run:
 ```bash
 cd app && npm run verify              # typecheck, model, MCP, text, smoke, live
 engine/.venv/bin/python spike/verify_viewers.py   # cross-engine conformance
-#     Windows: engine\.venv\Scripts\python spike\verify_viewers.py
 ```
+
+`verify_viewers.py` renders in **two** independent engines and compares them, so it needs
+poppler's `pdftoppm` alongside pdfium (`brew install poppler`, or `apt install
+poppler-utils`). It is effectively macOS/Linux only — poppler is not readily available on
+Windows, which is why CI skips this one step there. The pdfium half is covered by
+`npm run verify` on every platform, so a Windows contributor is not flying blind.
 
 **Quit LedgerPDF before running `npm run verify`.** The smoke and live checks
 launch the real app, and a single-instance lock means a second launch hands off to
