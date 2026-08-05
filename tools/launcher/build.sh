@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Build "Workpaper Binder.app" — a Dock launcher for the dev build.
+# Build "LedgerPDF.app" — a Dock launcher for the dev build.
 #
 #   tools/launcher/build.sh            -> /Applications
 #   tools/launcher/build.sh ~/Applications
@@ -16,7 +16,7 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEST="${1:-/Applications}"
-APP="$DEST/Workpaper Binder.app"
+APP="$DEST/LedgerPDF.app"
 ICON_PNG="$REPO/app/resources/icon.png"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -43,9 +43,9 @@ osacompile -o "$APP" "$REPO/tools/launcher/launcher.applescript"
 
 # 3. Icon + identity.
 cp "$WORK/AppIcon.icns" "$APP/Contents/Resources/applet.icns"
-/usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'Workpaper Binder'" \
+/usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'LedgerPDF'" \
   "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
-/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.cbarmorecpa.workpaper-binder-launcher" \
+/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.ledgerlabs.ledgerpdf-launcher" \
   "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
 # The launcher must never claim its own Dock tile — the running app is Electron,
 # and two tiles for one app is just confusing. Pinning this bundle still works.

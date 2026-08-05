@@ -83,7 +83,7 @@ Azure authentication itself uses its standard `AZURE_TENANT_ID`,
 `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` environment variables. No signing
 secret or certificate is stored in the repository.
 
-The bundle identifier is currently `com.charliebarmore.workpaperbinder` and the
+The bundle identifier is currently `com.ledgerlabs.ledgerpdf` and the
 visible product name is still the working name “LedgerPDF.” Decide the
 real product name before issuing certificates or giving a build to a design
 partner; changing identity later disrupts OS trust and update continuity.
