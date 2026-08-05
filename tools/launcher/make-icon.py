@@ -9,7 +9,7 @@ icon actually lives:
 
   - **The sheet** says workpaper.
   - **The green review tick** is the domain symbol — a preparer reads it
-    instantly, and it is the same workpaper-green as appearance.MARK_COLORS.
+    instantly, and it is appearance.TICK_COLOR exactly — content, never rebranded.
     Dropping it would cost more recognition than any restyling could win back.
   - **The sparkle cluster** says an agent did it. It sits clear of the sheet in
     the corner rather than on top of it: overlapping versions merged into one
@@ -29,11 +29,18 @@ REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "app" / "resources" / "icon.png"
 S = 1024
 
-TEAL = (1, 105, 111, 255)          # DESIGN.md --primary
-GREEN = (33, 140, 33, 255)         # appearance.MARK_COLORS tick
-GOLD = (245, 197, 66, 255)         # reads as "spark" on teal; clear of the green
-PAPER = (255, 255, 255, 255)
+# Ledger Labs brand kit — _studio/Ledger Labs Brand Kit/tokens/palette.json.
+# The surface and the spark are CHROME and follow the brand.
+TEAL = (29, 67, 78, 255)           # Deep Teal #1D434E — "Primary surface"
+ORANGE = (232, 145, 58, 255)       # Signal Orange #E8913A — "Primary mark / accent"
+PAPER = (253, 252, 234, 255)       # Paper Cream #FDFCEA
 RULE = (190, 195, 195, 255)
+# The tick is CONTENT and does NOT follow the brand. It is appearance.TICK_COLOR
+# exactly — the green a preparer sees on the page and in the exported PDF. Ledger
+# Green (#2D9148) was the obvious brand substitute and is deliberately not used:
+# DESIGN.md holds annotation colours identical on screen and in the PDF, and the
+# icon earns its recognition by showing the same green the marks do.
+GREEN = (33, 140, 33, 255)         # == appearance.TICK_COLOR (0.13, 0.55, 0.13)
 
 
 def sparkle(d: ImageDraw.ImageDraw, cx: float, cy: float, r: float, fill) -> None:
@@ -69,8 +76,8 @@ def main() -> None:
     d.line([(300, 620), (390, 706), (560, 500)], fill=GREEN, width=62, joint="curve")
 
     # Kept off the sheet and in from the corner — both were crowding at 32px.
-    sparkle(d, 706, 372, 146, GOLD)
-    sparkle(d, 828, 536, 72, GOLD)
+    sparkle(d, 706, 372, 146, ORANGE)
+    sparkle(d, 828, 536, 72, ORANGE)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     img.save(OUT)

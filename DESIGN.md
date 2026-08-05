@@ -3,7 +3,7 @@ version: "alpha"
 name: "workpaper-tool-design"
 description: "Provisional visual identity for the workpaper binder desktop app. Functional rules are firm; brand tokens are placeholders until the naming/brand decision (see PROJECT.md open questions)."
 colors:
-  primary: "#01696F"
+  primary: "#1D434E"
   background: "#F7F6F2"
   surface: "#FFFFFF"
   border: "#D4D1CA"
@@ -59,7 +59,7 @@ components:
 
 ## Colors
 
-Muted, low-saturation workspace so the *document* is the loudest thing on screen. One accent (primary teal) for selection and primary actions only. Semantic colors reserved for meaning: success = tie-out/valid, warning = unverified/needs attention, error = broken link/failed export. **Annotation colors (tick marks, tapes) are user-meaningful content, not UI theme** — they must stay identical on screen and in the exported PDF. Brand palette is provisional pending the product-name decision; do not invest in brand polish until then.
+Muted, low-saturation workspace so the *document* is the loudest thing on screen. One accent (primary teal) for selection and primary actions only. Semantic colors reserved for meaning: success = tie-out/valid, warning = unverified/needs attention, error = broken link/failed export. **Annotation colors (tick marks, tapes) are user-meaningful content, not UI theme** — they must stay identical on screen and in the exported PDF. Brand palette is the **Ledger Labs kit** as of 2026-08-05, once the name settled on LedgerPDF: primary surface Deep Teal `#1D434E`, accent Signal Orange `#E8913A`, Paper Cream `#FDFCEA` (`~/LedgerLabs/_studio/Ledger Labs Brand Kit/tokens/palette.json` is the source). **The brand stops at the chrome.** Tick green stays `appearance.TICK_COLOR` and Ledger Green `#2D9148` is deliberately unused, because a mark means the same thing on screen and in the exported PDF and a rebrand must never restate it.
 
 ## Typography
 
