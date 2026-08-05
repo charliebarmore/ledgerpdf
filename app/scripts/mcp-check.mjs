@@ -446,10 +446,14 @@ check(
   await fcall('binder_new')
 
   const dry = await fcall('binder_add_folder', { path: ENG, dryRun: true })
+  // Entries inside a subfolder are the ones that carry a separator — and on
+  // Windows `path.relative` gives backslashes, so matching only '/' selected
+  // nothing there and both ordering checks below failed against an empty list.
+  // The tool is right to print native separators; the check has to read them.
   const order = dry.text
     .split('\n')
-    .filter((l) => l.startsWith('  ') && l.includes('/'))
-    .map((l) => l.trim())
+    .filter((l) => l.startsWith('  ') && /[\\/]/.test(l))
+    .map((l) => l.trim().replace(/\\/g, '/'))
   check(
     'a dry run lists what it would take, without touching the binder',
     dry.text.includes('would be imported') &&
