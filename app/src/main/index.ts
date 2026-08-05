@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   BrowserWindow,
@@ -800,7 +800,12 @@ app.whenReady().then(async () => {
     const reportTo = process.env.WPT_PACKAGE_SMOKE_REPORT
     const report = async (line: string): Promise<void> => {
       console.log(line)
-      if (reportTo) await writeFile(reportTo, line, 'utf8').catch(() => {})
+      if (!reportTo) return
+      // Create the parent: the caller's directory may be gitignored and absent
+      // on a clean checkout, and a swallowed ENOENT here reads downstream as a
+      // dead app rather than a missing folder.
+      await mkdir(path.dirname(reportTo), { recursive: true }).catch(() => {})
+      await writeFile(reportTo, line, 'utf8').catch(() => {})
     }
     const result = await runEngine({ cmd: 'ping' })
     if (!result.ok) {

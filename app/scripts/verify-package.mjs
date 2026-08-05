@@ -1,4 +1,4 @@
-import { access, readFile, rm } from 'node:fs/promises'
+import { access, mkdir, readFile, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -72,6 +72,10 @@ function runPackaged(args, env = {}) {
   })
 }
 
+// build/ is gitignored, so it does not exist on a clean checkout. The report,
+// the screenshot and the exported binder all land here; without this the
+// writes fail silently and a healthy app reads as a broken one.
+await mkdir(path.join(appDir, 'build'), { recursive: true })
 await rm(smokeReport, { force: true })
 const result = await runPackaged(['--wpt-package-smoke'], {
   WPT_PACKAGE_SMOKE_REPORT: smokeReport
