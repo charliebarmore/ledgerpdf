@@ -1,0 +1,13 @@
+# Only site/ is ever deployed (vercel.json sets outputDirectory), but a CLI
+# `vercel deploy` uploads the WORKING DIRECTORY, not the git tree — so without
+# this it ships the Python venv, the packaged Electron build and the frozen
+# engine sidecar. The first deploy was 409 MB and 1,619 files for a page that
+# is under 300 KB.
+#
+# Git-triggered deploys were never affected (they use the repo contents, and
+# all of this is gitignored). This is purely to keep a manual deploy honest.
+
+*
+!site/
+!site/**
+!vercel.json
