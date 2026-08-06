@@ -51,7 +51,74 @@ def is_doc(path: str | Path) -> bool:
 #   ("code", text) ("quote", text) ("rule",) ("table", rows)
 
 
-def _escape(text: str) -> str:
+# ------------------------------------------------------------ glyph safety
+#
+# reportlab's base-14 fonts route any character they cannot draw to
+# ZapfDingbats 'n', which is a SOLID BLACK SQUARE. On a workpaper that is
+# worse than a dropped character, because it is not visibly a failure: on an
+# open-items list `☑` (cleared) and `☐` (outstanding) both arrive as `■`, so a
+# reviewer cannot tell a closed item from an open one — and neither can an
+# agent, since the substitution happens in the text layer too, not just in the
+# rendering. The distinction the checkbox existed to carry is simply gone, on
+# a document somebody signs.
+#
+# So: substitute where the intent is unambiguous, and make anything else
+# visibly wrong rather than quietly square.
+
+#: Private-use codepoint — guaranteed to have no glyph in any real font, so
+#: measuring it tells us the width reportlab uses for "cannot draw this".
+#: Calibrated rather than hard-coded: 9.132pt today, but that is reportlab's
+#: business, not ours.
+_NOTDEF_PROBE = ""
+
+#: Characters an accountant reasonably types whose meaning survives a swap for
+#: something the base-14 fonts can actually draw. Deliberately short: every
+#: entry is a case where the replacement means the SAME thing, not merely
+#: something similar. A `☑` is a tick; a `▪` is not any particular thing, so it
+#: is not in here.
+_GLYPH_SUBS = {
+    "☑": "✔",  # ☑ ballot with check -> ✔ heavy check
+    "✅": "✔",  # ✅ white heavy check -> ✔
+    "☒": "✘",  # ☒ ballot with X     -> ✘ heavy X
+    "❎": "✘",  # ❎ cross mark button -> ✘
+    "☐": "❑",  # ☐ empty ballot      -> ❑ lower-right shadowed box
+    "□": "❑",  # □ white square      -> ❑
+}
+
+
+def _notdef_width(font: str) -> float:
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    return stringWidth(_NOTDEF_PROBE, font, 12)
+
+
+def _renderable(ch: str, font: str) -> bool:
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    return stringWidth(ch, font, 12) != _notdef_width(font)
+
+
+def _safe_text(text: str, font: str = "Times-Roman") -> str:
+    """Substitute what we can, and flag what we cannot.
+
+    An unmapped character that still will not draw becomes `[U+XXXX]`. That is
+    ugly on purpose — it is unmistakably a tooling failure, where a black
+    square reads as deliberate content.
+    """
+    out: list[str] = []
+    for ch in text:
+        if ch in _GLYPH_SUBS:
+            ch = _GLYPH_SUBS[ch]
+        # ASCII always draws; skip the metrics lookup for the common case.
+        if ch < "\x80" or ch in "\r\n\t" or _renderable(ch, font):
+            out.append(ch)
+        else:
+            out.append(f"[U+{ord(ch):04X}]")
+    return "".join(out)
+
+
+def _escape(text: str, font: str = "Times-Roman") -> str:
+    text = _safe_text(text, font)
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
@@ -62,7 +129,9 @@ def _inline(tokens) -> str:
         if t.type == "text":
             out.append(_escape(t.content))
         elif t.type == "code_inline":
-            out.append(f'<font face="Courier">{_escape(t.content)}</font>')
+            # Courier, not Times — a character can draw in one and not the
+            # other, and a code span is measured against the font it is set in.
+            out.append(f'<font face="Courier">{_escape(t.content, "Courier")}</font>')
         elif t.type in ("strong_open",):
             out.append("<b>")
         elif t.type in ("strong_close",):
@@ -251,7 +320,7 @@ def _story(blocks: list[tuple], title: str):
             flow.append(Paragraph(text, style, bulletText=bullet))
         elif kind == "code":
             for line in str(block[1]).split("\n"):
-                flow.append(Paragraph(_escape(line) or "&nbsp;", code))
+                flow.append(Paragraph(_escape(line, "Courier") or "&nbsp;", code))
         elif kind == "quote":
             flow.append(Paragraph(block[1], quote))
         elif kind == "rule":
