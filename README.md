@@ -53,16 +53,18 @@ both.
 installers. Expect rough edges, and do not make it the only copy of anything.
 
 Builds are produced by CI for Windows x64 and can be built from source on macOS
-and Windows. Signed releases are pending code-signing certificates.
+and Windows. Code signing is planned as a follow-up, not a release gate.
 
 ### Getting a build
 
-**There is no download yet, and that is deliberate.** Code signing is the gate.
-An unsigned Windows installer trips SmartScreen's "Windows protected your PC"
-warning, and the first thing this tool should not do is teach an accountant to
-click past a security prompt. Releases start once the certificate is in hand.
+**There is no public download yet.** Builds are currently unsigned, so Windows
+shows SmartScreen's "unknown publisher" warning on first run. That warning is
+accurate — the publisher identity is unverified, not the software unsafe: the
+source is auditable, builds come from CI, and signing lands in an update.
+Install instructions explain what the prompt means rather than just telling
+anyone to click through it.
 
-Until then there are two ways to run it, in order of effort:
+Until public releases start, there are two ways to run it, in order of effort:
 
 1. **A CI build**, if you have access to this repository. The **Windows x64**
    workflow under the Actions tab runs on every non-docs push to `main` and on
