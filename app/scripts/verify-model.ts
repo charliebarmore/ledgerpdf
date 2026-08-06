@@ -2008,6 +2008,72 @@ print(n)`,
       countMarks.out.trim() === '3',
       `${countMarks.out.trim()} marks (expected 3: 2 marks + 1 tape)`
     )
+
+    // --- "Save a copy to send out" must not carry the working record with it.
+    //
+    // This is the claim in DATA-FLOW.md that costs the most if it is ever
+    // quietly wrong: the distribution copy is what leaves the firm, and the
+    // session inside a binder holds reviewer names, review notes, tape addends
+    // and the ORIGINAL FILESYSTEM PATHS every page came from. `back` is a
+    // session recovered from a binder that demonstrably had one embedded
+    // (asserted above), so this is the inherited-session path specifically —
+    // not merely "a fresh session was not added".
+    //
+    // toExportSpec makes flatten and embedSession mutually exclusive, and
+    // binder.py strips any inherited session unconditionally. Two independent
+    // mechanisms, no assertion until now.
+    const SENDOUT = path.join(REPO, 'spike', 'out', 'roundtrip-sendout.pdf')
+    const sent = await runEngine({
+      cmd: 'export',
+      binder: toExportSpec(back, SENDOUT, { flatten: true })
+    })
+    check('send-out copy: exported', sent.ok === true, sent.error ?? '')
+    check(
+      'send-out copy: the engine wrote no session into it',
+      (sent.result?.session_bytes ?? 0) === 0,
+      `${sent.result?.session_bytes ?? 0} bytes`
+    )
+    const sentOpen = await runEngine({ cmd: 'open_binder', path: SENDOUT })
+    check(
+      'send-out copy: reopening it finds NO inherited session',
+      sentOpen.binder?.found === false,
+      `found=${sentOpen.binder?.found}`
+    )
+    // Belt and braces: the session rides at BOTH anchors described in
+    // session_store.py — a document-level attachment and an /AF entry on the
+    // catalog and on page 1 — so look for the anchors themselves rather than
+    // trusting the reader that is supposed to find them.
+    //
+    // Run against the session-carrying binder as well as the send-out copy.
+    // Asserting only "the send-out copy has none" is a check that passes just
+    // as happily when the probe is broken and finds nothing anywhere; the
+    // first assertion is what stops this going quietly vacuous.
+    const anchorProbe = `import pikepdf,sys
+from pikepdf import Name
+P='workpaper.session.json'
+with pikepdf.open(sys.argv[1]) as pdf:
+    hits=[]
+    if P in pdf.attachments: hits.append('attachment')
+    def af(o,l):
+        for s in (o.get(Name('/AF')) or []):
+            try: n=str(s.get(Name('/UF')) or s.get(Name('/F')) or '')
+            except AttributeError: n=''
+            if n==P: hits.append(l)
+    af(pdf.Root,'root-af')
+    for i,pg in enumerate(pdf.pages): af(pg.obj,'page%d-af'%i)
+print(','.join(hits) or 'none')`
+    const anchorsKept = await runPython(['-c', anchorProbe, RT])
+    check(
+      'send-out control: the probe DOES find both anchors on a working binder',
+      anchorsKept.out.trim() === 'attachment,root-af,page0-af',
+      anchorsKept.out.trim() || '(no output)'
+    )
+    const anchorsGone = await runPython(['-c', anchorProbe, SENDOUT])
+    check(
+      'send-out copy: neither session anchor is present in the file',
+      anchorsGone.out.trim() === 'none',
+      anchorsGone.out.trim() || '(no output)'
+    )
   }
 
   // ------------------------------------- cross-page links survive a reorder
