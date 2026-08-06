@@ -9,7 +9,7 @@
  *   npm run verify:live
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { connect } from 'node:net'
 import { statSync } from 'node:fs'
 import { existsSync, rmSync, readFileSync } from 'node:fs'
@@ -37,6 +37,31 @@ process.env.WPT_LIVE_ENDPOINT = ENDPOINT_FILE
 
 const checks = []
 const check = (name, ok, detail = '') => checks.push([name, !!ok, detail])
+
+const report = () => {
+  console.log('\n=== live agent access ===')
+  let failed = 0
+  for (const [name, ok, detail] of checks) {
+    if (!ok) failed++
+    console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name}${detail ? `  — ${detail}` : ''}`)
+  }
+  console.log(`\n${checks.length - failed}/${checks.length} checks passed`)
+  return failed
+}
+
+// Every wait inside this check is individually bounded — the endpoint at 90s,
+// each MCP call at 60s, the socket probe at 3s — so a healthy run finishes in
+// well under two minutes. The watchdog exists for the waits that are NOT
+// bounded, in the MCP client and in teardown: on 2026-08-06 one of those hung
+// on Windows and the job died at its 45-minute timeout having printed nothing
+// at all, which is the worst way to fail. Overrunning now costs five minutes
+// and still prints which check it got to.
+const WATCHDOG_MS = 5 * 60_000
+const watchdog = setTimeout(() => {
+  check('live-check finished inside its time budget', false, `hung past ${WATCHDOG_MS / 1000}s`)
+  report()
+  process.exit(1)
+}, WATCHDOG_MS)
 
 const fixture = path.join(FIXTURES, 'fixture_a.pdf')
 if (!existsSync(fixture) || !existsSync(SERVER)) {
@@ -73,16 +98,33 @@ const stopApp = async () => {
     if (app.exitCode !== null) return resolve()
     app.once('close', resolve)
   })
-  try {
-    if (process.platform === 'win32') app.kill()
-    else process.kill(-app.pid, 'SIGTERM')
-  } catch {}
-  const timeout = new Promise((resolve) => setTimeout(resolve, 8000))
-  if ((await Promise.race([closed.then(() => 'closed'), timeout.then(() => 'timeout')])) === 'timeout') {
+  // Windows has no process group to signal, and that is the whole problem the
+  // POSIX branch below was written to solve. `app.kill()` reaps the cmd.exe
+  // that `shell: true` puts in front of npm and leaves Electron alive beneath
+  // it — still holding the stdio pipes this process inherited to it, so
+  // 'close' never fires and any unbounded wait on it waits forever. That is
+  // how this check sat silent through a 45-minute CI timeout. `taskkill /T`
+  // takes the tree; without /F it is the graceful WM_CLOSE, matching SIGTERM.
+  const killTree = (force) => {
     try {
-      process.kill(-app.pid, 'SIGKILL')
+      if (process.platform === 'win32') {
+        spawnSync('taskkill', ['/pid', String(app.pid), '/T', ...(force ? ['/F'] : [])])
+      } else {
+        process.kill(-app.pid, force ? 'SIGKILL' : 'SIGTERM')
+      }
     } catch {}
-    await closed
+  }
+  const exitedWithin = (ms) =>
+    Promise.race([closed.then(() => true), new Promise((r) => setTimeout(() => r(false), ms))])
+
+  killTree(false)
+  if (await exitedWithin(8000)) return
+  killTree(true)
+  // Bounded on purpose. This is best-effort cleanup on the way out; if the
+  // tree still refuses to die, leaking it is strictly better than hanging the
+  // run, because a hang costs the whole job and reports nothing.
+  if (!(await exitedWithin(8000))) {
+    console.error('warning: the app did not exit; continuing so the results below still print')
   }
 }
 let out = ''
@@ -99,7 +141,6 @@ while (Date.now() < deadline && !endpoint) {
 }
 check('the running app offers live agent access', !!endpoint, endpoint ?? `${out.slice(-300)}${err.slice(-300)}`)
 
-let failed = 0
 let client = null
 try {
   if (!endpoint) throw new Error('no endpoint')
@@ -226,10 +267,5 @@ try {
   await stopApp()
 }
 
-console.log('\n=== live agent access ===')
-for (const [name, ok, detail] of checks) {
-  if (!ok) failed++
-  console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name}${detail ? `  — ${detail}` : ''}`)
-}
-console.log(`\n${checks.length - failed}/${checks.length} checks passed`)
-process.exit(failed ? 1 : 0)
+clearTimeout(watchdog)
+process.exit(report() ? 1 : 0)
