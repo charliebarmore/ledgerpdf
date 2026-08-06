@@ -3,9 +3,16 @@
  *
  * WHAT THIS IS: a second front door onto the same session model and the same
  * Python engine the Electron app drives. The agent assembles a binder — import,
- * order, bookmark, mark, tape — saves the session, and you open that session in
- * the app to review it. There is no live link to a running app window; the
- * session file is the handoff.
+ * order, bookmark, mark, tape — and either saves it as a binder PDF you open to
+ * review, or edits the binder you ALREADY have open.
+ *
+ * Both, since 2026-08-04. This header used to say "there is no live link to a
+ * running app window; the session file is the handoff", which stopped being
+ * true when live access shipped and is the sort of stale sentence that gets
+ * believed because it sits at the top of the file people treat as the contract.
+ * When the app is listening, `binder_status` says LIVE and every tool here acts
+ * on the window's own session; standalone, it falls back to a session of its
+ * own and the saved binder is the handoff. `binder_status` names the mode.
  *
  * WHAT CROSSES THE BOUNDARY: file paths, file names, page counts, page order,
  * bookmark titles, mark/tape metadata — and, since binder_read_page and
