@@ -927,17 +927,29 @@ claude mcp add --scope user \
   ledgerpdf -- node <repo>/app/out/mcp-server.cjs
 ```
 
-**The session file is the handoff.** There is no live link to a running app
-window: the agent assembles a binder and calls `binder_save`, you open that
-`.wptsession.json` in the app (`⌘O`) to review and finish it. An agent can also
-`binder_export` straight to PDF when no review is wanted.
+**Two modes, and `binder_status` names which one is in effect.** When the app is
+listening, the agent edits the binder you already have open and you watch it
+happen — see *Live agent access* above. Standalone, the saved binder is the
+handoff: the agent assembles one, calls `binder_save`, and you open it in the
+app to review and finish. An agent can also `binder_export` straight to PDF
+when no review is wanted.
 
-Tools: `probe_pdf` · `binder_new` / `binder_open` / `binder_save` /
-`binder_status` · `binder_add_pdfs` · `binder_move_pages` / `binder_rotate_pages`
-/ `binder_delete_pages` · `binder_bookmarks` / `binder_add_bookmark` /
-`binder_rename_bookmark` · `binder_set_reviewer` / `binder_place_mark` /
-`binder_annotations` / `binder_remove_marks` · `binder_add_tape` ·
-`binder_export`.
+(This paragraph said "there is no live link to a running app window" until
+2026-08-06. Live access shipped on 2026-08-04 and the section above documented
+it correctly — this second, older copy further down the file was missed. Worth
+a look whenever the MCP surface changes: there is more than one place here that
+describes it.)
+
+Tools — all 34: `probe_pdf` · `binder_new` / `binder_open` / `binder_save` /
+`binder_status` · `binder_add_pdfs` / `binder_add_folder` · `binder_move_pages`
+/ `binder_rotate_pages` / `binder_delete_pages` · `binder_bookmarks` /
+`binder_add_bookmark` / `binder_rename_bookmark` · `binder_set_reviewer` /
+`binder_place_mark` / `binder_draw` / `binder_annotations` /
+`binder_remove_marks` / `binder_add_note` · `binder_add_tape` / `binder_foot` /
+`binder_tie` · `binder_set_status` / `binder_review_queue` · `binder_read_page`
+/ `binder_read_cells` / `binder_find` · `binder_current_page` ·
+`binder_history` / `binder_revert_run` · `binder_inventory` / `binder_summary`
+/ `binder_add_cover` · `binder_export`.
 
 Page ids (`pg_*`) are permanent and are how every tool refers to pages, so an
 agent reads them once from `binder_status` and they stay valid across reordering.

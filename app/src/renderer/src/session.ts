@@ -1112,6 +1112,12 @@ export function addShape(
   const id = `sh_${seq}`
   const next: Shape = {
     ...shape,
+    // Same stamp as addMark/addLink. This was missing while shapes could only
+    // come from the toolbar — invisible then, because a human drew every one.
+    // The moment an agent can draw, its shapes would have been recorded as a
+    // person's work and revertRun, which filters on `run`, would have left
+    // them behind on a binder someone signs.
+    ...stamp(session),
     id,
     nx: clamp01(shape.nx),
     ny: clamp01(shape.ny),

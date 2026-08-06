@@ -45,6 +45,7 @@ import {
   addMark,
   agentWork,
   beginRun,
+  addShape,
   addSource,
   addTape,
   baseName,
@@ -65,6 +66,7 @@ import {
   rotateVisual,
   setBookmarkTitle,
   setPageStatus,
+  SHAPE_WIDTH_DEFAULT,
   clearPageStatus,
   coverIsStale,
   statusDefs,
@@ -654,6 +656,63 @@ registerTool(
     session = res.session
     return text(
       `Placed ${kind === 'text' ? `"${letters}"` : kind} on ${pageId} at (${nx}, ${ny}). ${session.marks?.length} mark(s) total.`
+    )
+  }
+)
+
+registerTool(
+  'binder_draw',
+  {
+    title: 'Draw on a page',
+    description:
+      'Draw a rectangle, ellipse, line, arrow, highlight or text box on a page — the same drawing tools the toolbar has. Geometry is TWO CORNERS, not a point: (nx, ny) to (nx2, ny2), each normalized to the page as displayed, nx 0→1 left to right and ny 0→1 TOP TO BOTTOM. For "line" and "arrow" the two corners are the endpoints, and an arrow points AT the second. Use this to draw attention; use binder_place_mark to assert that something was checked.',
+    inputSchema: {
+      pageId: z.string(),
+      kind: z.enum(['rect', 'ellipse', 'line', 'arrow', 'highlight', 'textbox']),
+      nx: z.number().min(0).max(1),
+      ny: z.number().min(0).max(1),
+      nx2: z.number().min(0).max(1),
+      ny2: z.number().min(0).max(1),
+      text: z.string().max(2000).optional().describe('Required for kind "textbox" — it wraps to the box'),
+      color: z
+        .enum(['red', 'green', 'blue', 'black', 'orange', 'grey'])
+        .optional()
+        .describe('Default red. Ignored by "highlight", which is always yellow.'),
+      width: z.number().min(0.5).max(8).optional().describe('Stroke width in points, default 1.5'),
+      note: z.string().optional().describe("Shown as the annotation's comment in any viewer")
+    }
+  },
+  async ({ pageId, kind, nx, ny, nx2, ny2, text: body, color, width, note }) => {
+    if (!session.pages.some((p) => p.id === pageId)) return fail(`unknown page id: ${pageId}`)
+    if (kind === 'textbox' && !body?.trim()) {
+      return fail('kind "textbox" needs its text — an empty box tells a reviewer nothing')
+    }
+    // A zero-area box has no appearance to render: the viewer's BBox->Rect fit
+    // divides by the height and the annotation is invalid. Refused rather than
+    // nudged to a minimum, because a shape the agent did not ask for is worse
+    // than an error it can correct.
+    if (kind !== 'line' && kind !== 'arrow' && (nx === nx2 || ny === ny2)) {
+      return fail(
+        `a ${kind} needs two DIFFERENT corners — got (${nx}, ${ny}) to (${nx2}, ${ny2}), which has no area`
+      )
+    }
+    mutating('draw', `Drew ${kind} on ${pageId}`)
+    const res = addShape(session, {
+      page: pageId,
+      kind,
+      nx,
+      ny,
+      nx2,
+      ny2,
+      color: color ?? 'red',
+      width: width ?? SHAPE_WIDTH_DEFAULT,
+      ...(body ? { text: body } : {}),
+      ...(note ? { note } : {})
+    })
+    session = res.session
+    return text(
+      `Drew ${kind} on ${pageId} from (${nx}, ${ny}) to (${nx2}, ${ny2}). ` +
+        `${session.shapes?.length} shape(s) total.`
     )
   }
 )

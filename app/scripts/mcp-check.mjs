@@ -157,6 +157,45 @@ check(
   (await call('binder_place_mark', { pageId: pageIds[0], kind: 'text', nx: 0.5, ny: 0.5 })).isError
 )
 
+// --- binder_draw: the toolbar's drawing tools, reachable by an agent.
+{
+  const drew = await call('binder_draw', {
+    pageId: pageIds[0], kind: 'rect', nx: 0.2, ny: 0.2, nx2: 0.5, ny2: 0.35, color: 'blue'
+  })
+  check('binder_draw draws a rectangle', !drew.isError && /1 shape\(s\) total/.test(drew.text), drew.text)
+  const box = await call('binder_draw', {
+    pageId: pageIds[0], kind: 'textbox', nx: 0.6, ny: 0.6, nx2: 0.9, ny2: 0.72,
+    text: 'Tied to the payroll register.'
+  })
+  check('binder_draw draws a text box', !box.isError, box.text)
+  check(
+    'a text box with no text is refused',
+    (await call('binder_draw', {
+      pageId: pageIds[0], kind: 'textbox', nx: 0.1, ny: 0.8, nx2: 0.4, ny2: 0.9
+    })).isError
+  )
+  // A zero-area box has no renderable appearance — the viewer's BBox->Rect fit
+  // divides by its height. Refused, not silently nudged to a minimum.
+  check(
+    'a shape with no area is refused rather than nudged',
+    (await call('binder_draw', {
+      pageId: pageIds[0], kind: 'rect', nx: 0.3, ny: 0.3, nx2: 0.3, ny2: 0.6
+    })).isError
+  )
+  check(
+    'a line may share an axis, because two endpoints are not a box',
+    !(await call('binder_draw', {
+      pageId: pageIds[0], kind: 'line', nx: 0.3, ny: 0.9, nx2: 0.7, ny2: 0.9
+    })).isError
+  )
+  check(
+    'drawing on a bad page id is refused',
+    (await call('binder_draw', {
+      pageId: 'pg_nope', kind: 'ellipse', nx: 0.1, ny: 0.1, nx2: 0.2, ny2: 0.2
+    })).isError
+  )
+}
+
 const bm = await call('binder_add_bookmark', { pageId: pageIds[0], title: 'Adjusting entries' })
 check('binder_add_bookmark returns the key needed to rename it', /key u:bm_\d+/.test(bm.text), bm.text)
 const tree = await call('binder_bookmarks', { pageCounts: true })
@@ -228,9 +267,19 @@ if (probe.ok) {
   const annots = probe.probe.pages.flatMap((p) => (p.annotations ?? []).filter((x) => x.wpt_kind))
   check(
     'the marks the agent placed are in the PDF, authored by the reviewer',
-    annots.filter((x) => x.wpt_kind !== 'tape').length === 2 &&
+    // Names the kinds it means. This used to count "everything that is not a
+    // tape" and expect 2, which is a subtraction that breaks every time a new
+    // annotation kind lands — binder_draw's shapes broke it exactly that way.
+    annots.filter((x) => ['tick', 'cross', 'text', 'note'].includes(x.wpt_kind)).length === 2 &&
       annots.some((x) => x.wpt_data?.text === 'TB' && x.wpt_data?.author === 'CJB'),
     JSON.stringify(annots.map((x) => [x.wpt_kind, x.wpt_data?.text, x.wpt_data?.author]))
+  )
+  const drawn = annots.filter((x) => ['rect', 'textbox', 'line'].includes(x.wpt_kind))
+  check(
+    'the shapes the agent drew reach the exported PDF',
+    drawn.length === 3 &&
+      drawn.some((x) => x.wpt_kind === 'textbox' && /payroll register/.test(x.wpt_data?.text ?? '')),
+    JSON.stringify(drawn.map((x) => [x.wpt_kind, x.wpt_data?.color]))
   )
   const t = annots.find((x) => x.wpt_kind === 'tape')
   check(
@@ -764,6 +813,11 @@ await call('binder_set_reviewer', { initials: 'CJB' })
 const attIds = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
 await call('binder_place_mark', { pageId: attIds[0], kind: 'tick', nx: 0.3, ny: 0.3 })
 await call('binder_add_tape', { pageId: attIds[0], nx: 0.5, ny: 0.6, entries: [10, 20] })
+// A drawn shape belongs in this run too. addShape did not stamp provenance
+// while only the toolbar could reach it — harmless when every shape came from
+// a person, and a hole the moment binder_draw existed: the shape would have
+// been filed as the reviewer's own work and survived the revert below.
+await call('binder_draw', { pageId: attIds[0], kind: 'rect', nx: 0.1, ny: 0.7, nx2: 0.4, ny2: 0.85 })
 await call('binder_rotate_pages', { pageIds: [attIds[1]], degrees: 90 })
 
 const history = await call('binder_history')
@@ -800,7 +854,7 @@ check(
 const reverted = await call('binder_revert_run', { run: runId })
 check(
   'binder_revert_run removes the agent annotations',
-  reverted.text.includes('removed 2 agent annotation(s)'),
+  reverted.text.includes('removed 3 agent annotation(s)'),
   reverted.text.split('\n')[0]
 )
 check(

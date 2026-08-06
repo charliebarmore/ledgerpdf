@@ -22,6 +22,7 @@ from __future__ import annotations
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
+from . import appearance
 from .appearance import _display_author
 from .geometry import PageGeom, appearance_matrix, visual_rect_to_user_rect
 
@@ -163,7 +164,10 @@ def _make_form(
     box: tuple[float, float],
     rotate: int,
     resources: Dictionary | None = None,
+    agent: bool = False,
 ) -> pikepdf.Stream:
+    if agent:
+        content = appearance._agent_outline((0.0, 0.0, box[0], box[1])) + content
     form = pdf.make_stream(content)
     form.Type = Name.XObject
     form.Subtype = Name.Form
@@ -247,7 +251,16 @@ def make_shape(pdf: pikepdf.Pdf, geom: PageGeom, spec: dict, nm: str) -> pikepdf
                 parts.append(_arrow_head(sx, sy, ex, ey, head))
 
     parts.append("Q")
-    form = _make_form(pdf, " ".join(parts).encode("ascii"), (box_w, box_h), geom.rotate, resources)
+    # Only the textbox. A rectangle or a highlight says "look here" and asserts
+    # nothing, so marking who drew it would be noise on an already dense page —
+    # its provenance still rides in the data for revert and file review. A
+    # textbox carries WORDS: it is a comment with a border, and a comment is an
+    # assertion, so it is outlined with the notes and ticks rather than with
+    # the shapes it is filed under.
+    form = _make_form(
+        pdf, " ".join(parts).encode("ascii"), (box_w, box_h), geom.rotate, resources,
+        agent=(kind == "textbox" and spec.get("by") == "agent"),
+    )
 
     rect = visual_rect_to_user_rect(geom, cx, cy, box_w, box_h)
     annot = Dictionary(
