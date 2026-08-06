@@ -64,9 +64,9 @@ click past a security prompt. Releases start once the certificate is in hand.
 
 Until then there are two ways to run it, in order of effort:
 
-1. **A CI build**, if you have access to this repository. Run the
-   **Windows x64** workflow under the Actions tab — it is manual-dispatch only,
-   so nothing builds or bills until someone asks — and download the artifact it
+1. **A CI build**, if you have access to this repository. The **Windows x64**
+   workflow under the Actions tab runs on every non-docs push to `main` and on
+   pull requests, and can also be dispatched by hand; download the artifact it
    attaches. Artifacts expire after 14 days and are **unsigned: for pilot
    testing, not for redistribution.**
 2. **From source**, below. Works on macOS and Windows and takes about five

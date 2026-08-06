@@ -23,3 +23,12 @@ app/out/
 app/dist/
 app/release/
 *.tsbuildinfo
+
+# app/build/ is where electron-builder's INPUTS live alongside its scratch
+# output, so the blanket `build/` rule above hid a file the mac build cannot
+# run without. Git cannot re-include a file whose parent directory is excluded,
+# hence the three-step dance: re-admit the directory, exclude its contents,
+# then name the one file that is source rather than artefact.
+!app/build/
+app/build/*
+!app/build/entitlements.mac.plist
