@@ -355,19 +355,19 @@
 <section class="dl" id="download">
   <div class="wrap">
     <h2 class="section-title">Get LedgerPDF</h2>
-    <p class="section-sub">Free and open source under GPL-3.0. Signed installers are in progress —
-    and we won't hand an unsigned build to people we're asking to trust us with client data.</p>
+    <p class="section-sub">Free and open source under GPL-3.0, published by Ledger&nbsp;Labs&nbsp;LLC.
+    Releases begin when the repository opens; code signing follows as an update.</p>
     <div class="dl-grid">
       <div class="dl-card">
         <div class="os">Windows</div>
-        <p class="note">x64 installer, signed by Ledger&nbsp;Labs&nbsp;LLC. Code signing is being
-        set up now — this is the primary platform and ships first.</p>
+        <p class="note">x64 installer. The primary platform — every change is tested on Windows in
+        CI, and it ships first.</p>
         <span class="pill">Coming soon</span>
       </div>
       <div class="dl-card">
         <div class="os">macOS</div>
-        <p class="note">Signed and notarized under the Ledger&nbsp;Labs Apple Developer&nbsp;ID.
-        Follows the Windows release.</p>
+        <p class="note">Universal build, tested on Apple&nbsp;silicon. Follows the Windows
+        release.</p>
         <span class="pill">Coming soon</span>
       </div>
       <div class="dl-card">
@@ -377,11 +377,13 @@
         <span class="pill">Coming soon</span>
       </div>
     </div>
-    <p class="dl-fine">Why no download button yet? An unsigned installer trips SmartScreen's
-    “Windows protected your PC” warning, and the first thing a workpaper tool should not do is teach
-    an accountant to click past a security prompt. Releases begin the moment the certificates land,
-    and the repository opens under GPL-3.0 at the same time — so the build you install and the source
-    you can audit arrive together rather than months apart.</p>
+    <p class="dl-fine">A note on the security prompt, since this is a tool you are being asked to
+    trust with client files. The first builds are unsigned, so Windows will show SmartScreen's
+    “unknown publisher” warning. That warning is accurate and worth reading properly: it says the
+    <em>publisher identity</em> is unverified, not that the software is unsafe. What you get instead
+    is the thing signing cannot give you — the full source under GPL-3.0, builds produced by CI
+    rather than from someone's laptop, and install instructions that explain the prompt rather than
+    telling you to click past it. Signing lands as an update.</p>
   </div>
 </section>
 
