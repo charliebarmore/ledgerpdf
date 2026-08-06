@@ -37,6 +37,12 @@
       --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     * { box-sizing: border-box; margin: 0; }
+    /* Deliberately NO `overflow-x: hidden` here. It was added while chasing the
+       hero-shot overflow below and removed once that was actually fixed: it
+       hides the next such bug rather than preventing it, and on `html` it also
+       defeats the `scroll-behavior: smooth` this page relies on for its anchor
+       nav. Measured at a real 390px viewport, the document is 390px wide with
+       zero overflowing elements — so there is nothing to hide. */
     html { scroll-behavior: smooth; }
     body {
       font-family: var(--body);
@@ -99,6 +105,12 @@
     .btn-ghost:hover { border-color: rgb(253 252 234 / 0.8); }
     .hero-shot {
       margin: 52px auto -80px;
+      /* `width` matters as much as `max-width` here. This is a class rule, so
+         it outranks the global `img { max-width: 100% }` on specificity — and
+         without a width the 1200px-wide poster rendered at its 980px cap on a
+         390px phone, pushing the BODY 590px wide. Every heading on the page
+         was then clipped mid-word. */
+      width: 100%;
       max-width: 980px;
       border-radius: 10px 10px 0 0;
       box-shadow: 0 18px 60px rgb(11 26 31 / 0.45);
@@ -159,6 +171,22 @@
     /* data section */
     .data-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
     @media (max-width: 800px) { .data-cols { grid-template-columns: 1fr; } }
+
+    /* ------------------------------------------------------------- phones */
+    /* A landing page for accountants gets opened from LinkedIn on a phone as
+       often as from a desktop. Until the hero-shot width was fixed above, this
+       page scrolled sideways and clipped every heading there. */
+    @media (max-width: 720px) {
+      .nav { flex-wrap: wrap; gap: 12px; padding: 14px 0; }
+      .nav nav { margin-left: 0; gap: 18px; flex-wrap: wrap; row-gap: 8px; }
+      .hero { padding-top: 36px; }
+      .hero-shot { margin: 32px auto -40px; }
+      .under-hero { height: 56px; }
+      section { padding: 48px 0; }
+      .journal { font-size: 11px; padding: 16px; }
+      .cta-row { gap: 10px; }
+      .btn { padding: 11px 18px; }
+    }
     .data-cols h3 { font-size: 17px; margin-bottom: 10px; }
     .data-cols p { font-size: 15px; color: rgb(11 26 31 / 0.78); }
     .data-cols .honest {
