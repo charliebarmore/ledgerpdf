@@ -80,8 +80,8 @@ disk once `node_modules`, the venv and a packaged build are all present.
 **macOS / Linux**
 
 ```bash
-git clone https://github.com/charliebarmore/workpaper-tool.git
-cd workpaper-tool
+git clone https://github.com/charliebarmore/ledgerpdf.git
+cd ledgerpdf
 
 python3 -m venv engine/.venv
 engine/.venv/bin/pip install -r engine/requirements.txt
@@ -97,8 +97,8 @@ A virtual environment puts its interpreter in `Scripts\` on Windows rather than
 Store stub that will not create a venv.
 
 ```powershell
-git clone https://github.com/charliebarmore/workpaper-tool.git
-cd workpaper-tool
+git clone https://github.com/charliebarmore/ledgerpdf.git
+cd ledgerpdf
 
 python -m venv engine\.venv
 engine\.venv\Scripts\pip install -r engine\requirements.txt
