@@ -14,6 +14,9 @@ User-selected session ─read/write─┘                        │
                                                                  └─ user-selected export
 
 Optional MCP client ─local stdio─ MCP server ─same session model/engine─ approved roots
+                                       │
+                                       └─ live mode: local socket / named pipe,
+                                          token-authenticated, to the open window
 ```
 
 ## Desktop application
@@ -42,7 +45,9 @@ Optional MCP client ─local stdio─ MCP server ─same session model/engine─
   working record never travels to a recipient.
 - The older two-file `.wptsession.json` format still opens, once, so nothing made
   before this change is stranded. Saving converts it to a binder; the app never
-  writes that format again. The MCP server still uses it as its handoff.
+  writes that format again. The MCP server still uses it as its handoff when it
+  is running standalone; in live mode it acts on the open window's own session
+  and there is no handoff file at all.
 - Export writes a temporary file beside the chosen output, validates it, then
   atomically replaces the destination. A source file can never be the export
   target. The app does not maintain a cloud copy, recent-file database, or
@@ -65,13 +70,42 @@ engagement folders. Canonical-path checks reject access and symlink escapes
 outside those roots.
 
 An MCP client can receive file paths and names, page counts/order/rotation,
-bookmark titles, and mark/tape metadata. It cannot request extracted page text
-through the current tools. That is still a disclosure surface: paths, bookmark
-titles, reviewer notes, and tape amounts can identify a taxpayer or reveal tax
-information. Whether the MCP client sends that data to a hosted model depends
-on that client and provider, not LedgerPDF. Do not enable MCP on client
-engagements until the firm's IRC §7216, privacy, vendor, and consent analysis
-allows it.
+bookmark titles, and mark/tape metadata.
+
+**It can also receive the page content itself.** `binder_read_page` returns a
+page's embedded text, `binder_read_cells` returns a spreadsheet page's parsed
+cell values, and `binder_find` locates a figure and reports its coordinates.
+Both of the first two accept `ocr: true`, which reads a scan or photograph
+on-device and returns that text labelled as a machine reading with per-word
+confidence. Nothing here is a metadata-only surface: on a return, this is
+wages, balances, and — on a 1040 — the taxpayer's SSN.
+
+That is a deliberate capability, not an oversight; an agent that cannot read the
+documents cannot tie anything out. But it makes pointing an MCP client at real
+client documents an IRC §7216 disclosure decision about *content*, not merely
+about file names. LedgerPDF does not make that decision: reads are refused
+unless `WPT_MCP_ROOTS` names approved engagement folders, and that variable is
+empty by default. Whether the client sends what it reads to a hosted model
+depends on that client and provider, not on LedgerPDF. Do not enable MCP on
+client engagements until the firm's IRC §7216, privacy, vendor, and consent
+analysis allows it.
+
+### Live access to the open binder
+
+Since 2026-08-04 an MCP client can also edit the binder already open in the
+desktop app, rather than handing a saved file back and forth. `binder_status`
+reports which mode is in effect.
+
+The channel is a **unix socket (POSIX) or named pipe (Windows) — never a TCP
+port**, so nothing is reachable from another machine. It is off by default and
+armed per launch from the app. A client must present a 32-byte token, minted
+fresh each launch, as the first line it sends; unauthenticated connections are
+refused. The endpoint file naming the socket is owner-only (`0600`) on POSIX;
+on Windows the protection is the per-user profile ACL on `%APPDATA%`, since
+Windows has no POSIX modes and named pipes carry their own ACLs.
+
+Live mode does not widen what an agent may read. `WPT_MCP_ROOTS` still gates
+file access, and the disclosure surface above is unchanged.
 
 ## Storage, retention, and deletion
 
