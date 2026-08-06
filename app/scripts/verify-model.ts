@@ -18,6 +18,7 @@ import {
   baseName,
   imageLayout,
   addBookmark,
+  addLink,
   addMark,
   addSource,
   addShape,
@@ -29,6 +30,7 @@ import {
   deletePages,
   formatAmount,
   movePages,
+  refNote,
   newSession,
   normalizeStamp,
   nudgeBookmarkDepth,
@@ -2006,6 +2008,99 @@ print(n)`,
       countMarks.out.trim() === '3',
       `${countMarks.out.trim()} marks (expected 3: 2 marks + 1 tape)`
     )
+  }
+
+  // ------------------------------------- cross-page links survive a reorder
+  //
+  // The bug this replaced: binder_tie resolved the target page id to a POSITION
+  // and wrote it into the note, so "ties to p.4" pointed at whatever was fourth
+  // after the next reorder — authoritatively, on evidence.
+  {
+    // Fresh two-source binder, built the way the UI does it.
+    let base: Session = newSession()
+    base = addSource(base, pa.probe as ProbeWire)
+    base = addSource(base, pb.probe as ProbeWire)
+    const first = base.pages[0].id
+    const last = base.pages[base.pages.length - 1].id
+    let tied = addMark(base, {
+      page: first, kind: 'tick', nx: 0.7, ny: 0.2, size: 20,
+      note: 'Interest — ties', refTarget: last
+    }).session
+    tied = addLink(tied, {
+      page: first, target: last, rect: [0.68, 0.18, 0.72, 0.22], label: 'Interest'
+    }).session
+
+    const before = refNote(tied, tied.marks![0])
+    check(
+      'a reference resolves to the target page position',
+      before === `Interest — ties — see p.${tied.pages.length}`,
+      String(before)
+    )
+
+    // Move the target to the front. A stored number would now be wrong.
+    const moved = movePages(tied, [last], 0)
+    const after = refNote(moved, moved.marks![0])
+    check(
+      'the reference FOLLOWS its page through a reorder',
+      after === 'Interest — ties — see p.1',
+      `${String(before)} -> ${String(after)}`
+    )
+    check(
+      'the link still names page ids, not positions',
+      moved.links![0].target === last && moved.links![0].page === first,
+      JSON.stringify(moved.links![0])
+    )
+
+    const linkSpec = toExportSpec(moved, OUT)
+    check(
+      'links reach the engine spec as page ids',
+      linkSpec.links?.length === 1 &&
+        linkSpec.links[0].target_page === last &&
+        linkSpec.links[0].page === first,
+      JSON.stringify(linkSpec.links)
+    )
+
+    // A link whose far end is gone is a wrong link, not a degraded one.
+    const targetGone = deletePages(moved, [last])
+    check(
+      'deleting the target drops the link',
+      (targetGone.links ?? []).length === 0,
+      JSON.stringify(targetGone.links)
+    )
+    check(
+      'and the orphaned reference degrades to prose, never a wrong number',
+      refNote(targetGone, targetGone.marks![0]) === 'Interest — ties',
+      String(refNote(targetGone, targetGone.marks![0]))
+    )
+    check(
+      'a spec with no surviving links omits the key entirely',
+      toExportSpec(targetGone, OUT).links === undefined
+    )
+
+    // And the engine turns them into real /Link annotations.
+    const linkOut = path.join(REPO, 'spike', 'out', 'app_binder_links.pdf')
+    const linked = await runEngine({ cmd: 'export', binder: toExportSpec(moved, linkOut) })
+    check(
+      'engine exports the binder with the link',
+      linked.ok === true && linked.result.check_problems.length === 0,
+      JSON.stringify(linked.error ?? linked.result?.check_problems)
+    )
+    if (linked.ok) {
+      const probed = await runEngine({ cmd: 'probe', path: linkOut })
+      const links = probed.ok
+        ? probed.probe.pages.flatMap((pg: any, i: number) =>
+            (pg.annotations ?? [])
+              .filter((an: any) => an.subtype === '/Link')   // pikepdf Names stringify with the slash
+              .map((an: any) => ({ on: i, to: an.dest_page }))
+          )
+        : []
+      check(
+        'the exported link points at the target page in its FINAL position',
+        // last was moved to index 0, so first is now index 1 and links back to 0
+        links.length === 1 && links[0].on === 1 && links[0].to === 0,
+        JSON.stringify(links)
+      )
+    }
   }
 
   return report()

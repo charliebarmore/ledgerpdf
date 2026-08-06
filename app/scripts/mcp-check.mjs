@@ -341,8 +341,21 @@ check(
   const afterTie = await call('binder_annotations')
   check(
     'both sides are ticked and cross-referenced to each other',
-    (afterTie.text.match(/tick/g) ?? []).length === 2 && afterTie.text.includes('ties to p.'),
+    (afterTie.text.match(/tick/g) ?? []).length === 2 && afterTie.text.includes('ties'),
     afterTie.text.split('\n').filter((l) => l.includes('tick')).join(' | ').slice(0, 140)
+  )
+  // The reference must NOT carry a baked page number. It used to read
+  // "ties to p.4", resolved when the tie was made and wrong after any reorder —
+  // pointing a reviewer confidently at the wrong page, on evidence.
+  check(
+    'a tie reference carries no frozen page number',
+    !/ties to p\.\d/.test(afterTie.text),
+    afterTie.text.split('\n').find((l) => l.includes('ties')) ?? ''
+  )
+  check(
+    'the tie is linked both ways, not just noted',
+    tied.text.includes('linked both ways'),
+    tied.text.split('\n').pop() ?? ''
   )
 
   const off = await call('binder_tie', {

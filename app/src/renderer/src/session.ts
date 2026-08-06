@@ -387,7 +387,41 @@ export interface Mark extends Provenance {
   text?: string
   author?: string
   note?: string
+  /**
+   * Page this mark's note refers to. The PRINTED page number is rendered from
+   * it at export time, never stored — a stored number is right when it is
+   * written and wrong after the next reorder. Paired with a `Link` for the
+   * clickable half; this is the half that survives being printed.
+   */
+  refTarget?: string
   /** ISO timestamp — part of the review record. */
+  created?: string
+}
+
+/**
+ * A cross-reference from a spot on one page to another page.
+ *
+ * BOTH ENDS ARE PAGE IDS, never positions. That is the whole point: a tie
+ * reference used to be written as prose — "ties to p.4" — with the position
+ * resolved at tie time, so reordering the binder left it pointing confidently
+ * at the wrong page. A link is the same kind of object a bookmark is, and
+ * survives reorder for the same reason.
+ *
+ * The engine turns these into real PDF `/Link` annotations (binder.py step 4),
+ * so they are clickable in Acrobat, Edge, Chrome and Preview — and the printed
+ * page number that goes with them is resolved at EXPORT, via `Mark.refTarget`,
+ * so paper and screen agree with the binder as it actually shipped.
+ */
+export interface Link extends Provenance {
+  id: string
+  /** Page carrying the clickable region. */
+  page: string
+  /** Page it jumps to. */
+  target: string
+  /** Clickable rect in visual coords: [nx0, ny0, nx1, ny1]. */
+  rect: [number, number, number, number]
+  /** What the reference is about — for the journal and the inventory. */
+  label?: string
   created?: string
 }
 
@@ -460,6 +494,8 @@ export interface Session {
   bookmarkPages?: Record<string, string>
   /** Review marks (ticks, crosses, lettered stamps), anchored to page ids. */
   marks?: Mark[]
+  /** Cross-page references, anchored to page ids at both ends. */
+  links?: Link[]
   /** Reviewer initials, stamped as the author of new marks. */
   reviewer?: string
   /**
@@ -526,8 +562,13 @@ export interface ExportSpec {
   source_fingerprints?: Record<string, SourceFingerprint>
   pages: Array<{ id: string; source: string; index: number; rotate: number }>
   bookmarks: BookmarkNode[]
-  /** Engine-side annotation specs — review marks today, tapes/links later. */
+  /** Engine-side annotation specs — review marks, tapes and shapes. */
   annotations: Array<Record<string, unknown>>
+  /**
+   * Internal links, a separate array because the engine builds them in its own
+   * pass (binder.py step 4) against the final page order.
+   */
+  links?: Array<{ page: string; target_page: string; rect_n: number[] }>
   /**
    * Burn our marks into the page content instead of writing them as
    * annotations. For a binder that leaves the building: nothing to drag off,
@@ -756,6 +797,11 @@ export function deletePages(session: Session, ids: string[]): Session {
     sources: session.sources.filter((s) => used.has(s.id)),
     // Anything anchored to a deleted page goes with it (undo restores both).
     ...(session.marks ? { marks: session.marks.filter((m) => !idSet.has(m.page)) } : {}),
+    // A link dies with EITHER endpoint — a cross-reference to a page that is
+    // gone is not a degraded link, it is a wrong one.
+    ...(session.links
+      ? { links: session.links.filter((l) => !idSet.has(l.page) && !idSet.has(l.target)) }
+      : {}),
     ...(session.tapes ? { tapes: session.tapes.filter((t) => !idSet.has(t.page)) } : {}),
     ...(session.shapes ? { shapes: session.shapes.filter((x) => !idSet.has(x.page)) } : {}),
     ...(session.statuses
@@ -851,6 +897,7 @@ export function revertRun(
     mine(session.marks).length +
     mine(session.tapes).length +
     mine(session.shapes).length +
+    mine(session.links).length +
     mine(session.bookmarks).length
   const drop = <T extends Provenance>(xs: T[] | undefined): T[] | undefined =>
     xs ? xs.filter((x) => x.run !== run) : xs
@@ -859,6 +906,7 @@ export function revertRun(
   let next: Session = {
     ...session,
     ...(session.marks ? { marks: drop(session.marks)! } : {}),
+    ...(session.links ? { links: drop(session.links)! } : {}),
     ...(session.tapes ? { tapes: drop(session.tapes)! } : {}),
     ...(session.shapes ? { shapes: drop(session.shapes)! } : {}),
     ...(session.bookmarks ? { bookmarks: drop(session.bookmarks)! } : {})
@@ -892,6 +940,7 @@ export function agentWork(session: Session): {
   marks: number
   tapes: number
   shapes: number
+  links: number
   bookmarks: number
 } {
   const byAgent = <T extends Provenance>(xs: T[] | undefined): number =>
@@ -901,6 +950,7 @@ export function agentWork(session: Session): {
     marks: byAgent(session.marks),
     tapes: byAgent(session.tapes),
     shapes: byAgent(session.shapes),
+    links: byAgent(session.links),
     bookmarks: byAgent(session.bookmarks)
   }
 }
@@ -929,6 +979,20 @@ export function addMark(
     created: new Date().toISOString()
   }
   return { session: { ...session, seq, marks: [...(session.marks ?? []), next] }, id }
+}
+
+/**
+ * Record a cross-page reference. Both ends are page ids, so the link is
+ * correct after any reorder — see the note on `Link`.
+ */
+export function addLink(
+  session: Session,
+  link: Omit<Link, 'id' | 'created'>
+): { session: Session; id: string } {
+  const seq = session.seq + 1
+  const id = `ln_${seq}`
+  const next: Link = { ...link, ...stamp(session), id, created: new Date().toISOString() }
+  return { session: { ...session, seq, links: [...(session.links ?? []), next] }, id }
 }
 
 export function updateMark(session: Session, id: string, patch: Partial<Mark>): Session {
@@ -2032,6 +2096,21 @@ export interface ExportOptions extends BookmarkOptions {
   embedSession?: boolean
 }
 
+/**
+ * A mark's note with its page reference resolved against the CURRENT order.
+ *
+ * `refTarget` holds a page id; the number a reader sees is computed at export.
+ * Storing the number instead is the bug this exists to prevent — it is right
+ * the moment it is written and wrong after the next reorder, while still
+ * reading as authoritative on a document someone signs.
+ */
+export function refNote(session: Session, m: Mark): string | undefined {
+  if (!m.refTarget) return m.note
+  const idx = session.pages.findIndex((p) => p.id === m.refTarget)
+  if (idx < 0) return m.note
+  return `${m.note ? `${m.note} — ` : ''}see p.${idx + 1}`
+}
+
 export function toExportSpec(
   session: Session,
   output: string,
@@ -2057,6 +2136,21 @@ export function toExportSpec(
       rotate: p.rotate
     })),
     bookmarks: buildBookmarks(session, bookmarkOpts),
+    // Both ends must still be in the binder: the engine resolves target_page
+    // through final_index, so a link to a deleted page would throw rather than
+    // degrade. Dropping it here is the difference between a missing
+    // cross-reference and a failed export.
+    ...(session.links?.length
+      ? {
+          links: session.links
+            .filter(
+              (l) =>
+                session.pages.some((p) => p.id === l.page) &&
+                session.pages.some((p) => p.id === l.target)
+            )
+            .map((l) => ({ page: l.page, target_page: l.target, rect_n: l.rect }))
+        }
+      : {}),
     // Marks and tapes whose page survived; the engine reads these as annotations.
     annotations: [
       ...(session.marks ?? [])
@@ -2069,7 +2163,11 @@ export function toExportSpec(
         size: m.size,
         ...(m.text ? { text: m.text } : {}),
         ...(m.author ? { author: m.author } : {}),
-        ...(m.note ? { note: m.note } : {}),
+        // The printed reference is rendered HERE, from the target's position in
+        // the binder being exported — so it is correct for this artifact rather
+        // than for whatever the order was when the tie was made. A target that
+        // no longer exists degrades to the note alone, never to a wrong number.
+        ...(refNote(session, m) ? { note: refNote(session, m) } : {}),
         ...(m.created ? { created: m.created } : {}),
         // Attribution travels into the PDF: /WPT_Data keeps the raw values and
         // the visible author is qualified, so a reviewer opening the exported

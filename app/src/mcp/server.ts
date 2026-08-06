@@ -41,6 +41,7 @@ import { runEngine } from './engine'
 import { workingCopyPathFor } from '../main/persistence'
 import {
   addBookmark,
+  addLink,
   addMark,
   agentWork,
   beginRun,
@@ -809,7 +810,7 @@ registerTool(
       `${entries.length} recorded change(s)` +
       (work.runs.length ? ` across ${work.runs.length} run(s): ${work.runs.join(', ')}` : '') +
       `\nStill present from agent work: ${work.marks} mark(s), ${work.tapes} tape(s), ` +
-      `${work.shapes} shape(s), ${work.bookmarks} bookmark(s)`
+      `${work.shapes} shape(s), ${work.links} link(s), ${work.bookmarks} bookmark(s)`
     return text(entries.length ? `${head}\n\n${journalLines(entries)}` : `${head}\n\nNothing recorded.`)
   }
 )
@@ -1306,8 +1307,15 @@ registerTool(
     const agrees = Math.abs(diff) <= (toleranceCents ?? 0)
 
     const pageNo = (id: string): number => session.pages.findIndex((p) => p.id === id) + 1
-    const refA = `${label} — ties to p.${pageNo(b.pageId)}${b.what ? ` (${b.what})` : ''}`
-    const refB = `${label} — ties to p.${pageNo(a.pageId)}${a.what ? ` (${a.what})` : ''}`
+    // The reference names WHAT it ties to, not WHERE. The page number is not
+    // written here at all: `refTarget` carries the target's page id and the
+    // number is rendered at export against the order the binder actually
+    // ships in. This used to interpolate pageNo() straight into the string,
+    // which was correct the moment it was written and wrong after the next
+    // reorder — pointing a reviewer confidently at the wrong page, on a
+    // document they sign.
+    const refA = `${label} — ties${b.what ? ` to ${b.what}` : ''}`
+    const refB = `${label} — ties${a.what ? ` to ${a.what}` : ''}`
 
     mutating(
       'tie',
@@ -1315,23 +1323,48 @@ registerTool(
         (agrees ? '' : ` (difference ${formatCents(diff)})`)
     )
 
+    // A clickable link each way, alongside the printed reference. The rect is
+    // the tick's own footprint in visual coords, so the thing a reader clicks
+    // is the mark they are already looking at.
+    const linkRect = (nx: number, ny: number): [number, number, number, number] => [
+      Math.max(0, nx - 0.02),
+      Math.max(0, ny - 0.015),
+      Math.min(1, nx + 0.02),
+      Math.min(1, ny + 0.015)
+    ]
+    const crossLink = (): void => {
+      session = addLink(session, {
+        page: a.pageId, target: b.pageId, rect: linkRect(a.nx, a.ny), label
+      }).session
+      session = addLink(session, {
+        page: b.pageId, target: a.pageId, rect: linkRect(b.nx, b.ny), label
+      }).session
+    }
+
     if (agrees) {
       session = addMark(session, {
-        page: a.pageId, kind: 'tick', nx: a.nx, ny: a.ny, size: 20, note: refA
+        page: a.pageId, kind: 'tick', nx: a.nx, ny: a.ny, size: 20, note: refA, refTarget: b.pageId
       }).session
       session = addMark(session, {
-        page: b.pageId, kind: 'tick', nx: b.nx, ny: b.ny, size: 20, note: refB
+        page: b.pageId, kind: 'tick', nx: b.nx, ny: b.ny, size: 20, note: refB, refTarget: a.pageId
       }).session
+      crossLink()
     } else {
-      const detail =
-        `${label} — DOES NOT TIE. p.${pageNo(a.pageId)} shows ${formatCents(ca)}, ` +
-        `p.${pageNo(b.pageId)} shows ${formatCents(cb)}. Difference ${formatCents(diff)}.`
+      // Same rule for the failure note: state the amounts, which do not move,
+      // and let the page reference resolve at export. Each side points at the
+      // other rather than both notes naming both positions.
+      const detailFor = (mine: number, theirs: number): string =>
+        `${label} — DOES NOT TIE. This page shows ${formatCents(mine)}, ` +
+        `the other shows ${formatCents(theirs)}. Difference ${formatCents(diff)}.`
       session = addMark(session, {
-        page: a.pageId, kind: 'note', nx: a.nx, ny: a.ny, size: 20, note: detail
+        page: a.pageId, kind: 'note', nx: a.nx, ny: a.ny, size: 20,
+        note: detailFor(ca, cb), refTarget: b.pageId
       }).session
       session = addMark(session, {
-        page: b.pageId, kind: 'note', nx: b.nx, ny: b.ny, size: 20, note: detail
+        page: b.pageId, kind: 'note', nx: b.nx, ny: b.ny, size: 20,
+        note: detailFor(cb, ca), refTarget: a.pageId
       }).session
+      crossLink()
       session = setPageStatus(session, [a.pageId, b.pageId], 'open', session.reviewer ?? '')
     }
 
@@ -1340,7 +1373,7 @@ registerTool(
         `  p.${pageNo(a.pageId)}: ${formatCents(ca)}\n` +
         `  p.${pageNo(b.pageId)}: ${formatCents(cb)}\n` +
         (agrees
-          ? `  Ticked both, cross-referenced.`
+          ? `  Ticked both, cross-referenced and linked both ways.`
           : `  Difference ${formatCents(diff)}. Noted on both pages and flagged as open items.`) +
         (read.notes.length ? `\n  ${read.notes.join('; ')}` : '')
     )

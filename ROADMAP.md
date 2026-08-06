@@ -92,7 +92,19 @@ Strategic bets — not committed, revisit at each gate.
 
 Useful ideas that should not distract the current build.
 
-- **Cross-page link objects — the tie-reference gap.** `binder_tie` has the
+- ~~**Cross-page link objects — the tie-reference gap.**~~ **The bug half is
+  FIXED (2026-08-05).** `binder_tie` no longer bakes a position into the note:
+  marks carry `refTarget` (a page id) and the printed number is rendered at
+  EXPORT against the order the binder actually ships in, while `Link` objects
+  give the clickable half. Both ends are page ids; a link whose far end is
+  deleted is dropped rather than degraded, and an orphaned reference falls back
+  to prose instead of a wrong number. Proven by reordering and asserting the
+  exported `/Link` resolves to the target's final position.
+  **Still open — the feature half:** no UI to draw or follow a link (an agent
+  can make them, a person cannot), no link inspector, and nothing surfaces them
+  in the app's own page view.
+- ~~superseded description below, kept for the engine detail~~
+  **Cross-page link objects — original entry.** `binder_tie` has the
   target page ID in hand and converts it to a POSITION before writing the
   cross-reference: `` `ties to p.${pageNo(b.pageId)}` ``. Reorder the binder and
   that reference points at whatever is fourth now. This contradicts the headline
