@@ -139,7 +139,11 @@
     .replaces span { color: rgb(11 26 31 / 0.72); font-size: 15px; }
 
     /* feature grid */
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 20px; }
+    /* `min(290px, 100%)` rather than a bare 290px: an auto-fit track cannot
+       shrink below its stated minimum, so on a container narrower than 290px
+       (a 320px phone, once its scrollbar is taken off) the cards overran the
+       page. The min() lets the track collapse to the container instead. */
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(290px, 100%), 1fr)); gap: 20px; }
     .card {
       background: #fff;
       border: 1px solid rgb(29 67 78 / 0.14);
@@ -231,7 +235,6 @@
       <a href="#agents">Agents</a>
       <a href="#data">Your data</a>
       <a href="#download">Download</a>
-      <a href="https://github.com/charliebarmore/ledgerpdf">GitHub</a>
     </nav>
   </div>
 </header>
@@ -248,7 +251,7 @@
       </p>
       <div class="cta-row">
         <a class="btn btn-primary" href="#download">Get LedgerPDF</a>
-        <a class="btn btn-ghost" href="https://github.com/charliebarmore/ledgerpdf">Read the source</a>
+        <a class="btn btn-ghost" href="#agents">How it works</a>
       </div>
     </div>
     <!-- A recording of the real app being driven by a real agent over the MCP
@@ -334,8 +337,9 @@
         <h3>The application makes no network calls.</h3>
         <p>No telemetry, no accounts, no cloud, no auto-update phoning home. Binders and the client
         documents behind them stay on your machine. Live agent access is a local socket — never a
-        network port — off by default, with a fresh token every launch. And because the source is
-        public, your own IT reviewer can verify every word of this instead of taking ours.</p>
+        network port — off by default, with a fresh token every launch. And the source is published
+        under GPL-3.0 at release, so your own IT reviewer can verify every word of this rather than
+        taking ours.</p>
       </div>
       <div class="honest">
         <h3>The one honest caveat</h3>
@@ -368,14 +372,16 @@
       </div>
       <div class="dl-card">
         <div class="os">Build from source</div>
-        <p class="note">Available today on macOS and Windows. Clone, install, run — about five
-        minutes on a machine with Node and Python. Instructions in the README.</p>
-        <a class="btn btn-primary" href="https://github.com/charliebarmore/ledgerpdf#build-from-source">GitHub&nbsp;→</a>
+        <p class="note">Builds on macOS and Windows in about five minutes on a machine with Node
+        and Python. The repository goes public under GPL-3.0 with the first release.</p>
+        <span class="pill">Coming soon</span>
       </div>
     </div>
     <p class="dl-fine">Why no download button yet? An unsigned installer trips SmartScreen's
     “Windows protected your PC” warning, and the first thing a workpaper tool should not do is teach
-    an accountant to click past a security prompt. Releases begin the moment the certificates land.</p>
+    an accountant to click past a security prompt. Releases begin the moment the certificates land,
+    and the repository opens under GPL-3.0 at the same time — so the build you install and the source
+    you can audit arrive together rather than months apart.</p>
   </div>
 </section>
 
@@ -384,8 +390,7 @@
     <span>© 2026 Ledger Labs LLC</span>
     <a href="https://ledgerlabs.co">A Ledger Labs product</a>
     <span class="spacer"></span>
-    <a href="https://github.com/charliebarmore/ledgerpdf">GitHub</a>
-    <a href="https://github.com/charliebarmore/ledgerpdf/blob/main/LICENSE">GPL-3.0</a>
+    <a href="https://www.gnu.org/licenses/gpl-3.0.en.html">GPL-3.0</a>
     <a href="https://cbarmorecpa.com">Built by Charlie Barmore, CPA/CFE</a>
     <p class="fine">LedgerPDF is not tax software and renders no tax advice. It is a workpaper
     tool; professional judgment — and the §7216 decisions that come with it — remain with the
