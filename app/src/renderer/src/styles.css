@@ -490,6 +490,14 @@ button.link {
   cursor: grabbing;
 }
 
+/* Machine-placed. Mirrors engine appearance.AGENT_OUTLINE_* — rgb(115,115,120)
+   at 0.5pt, drawn just inside the mark's own box so its position never shifts
+   with its provenance. Grey rather than a colour: colour on a mark already
+   carries its KIND, and often which procedure was performed. */
+.mark.is-agent {
+  box-shadow: inset 0 0 0 0.5px rgb(115 115 120);
+}
+
 .mark.is-selected {
   outline: 1.5px solid var(--primary);
   outline-offset: 1px;

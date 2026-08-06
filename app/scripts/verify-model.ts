@@ -1894,6 +1894,65 @@ async function main(): Promise<number> {
     )
   }
 
+  // --- the agent outline
+  //
+  // Attribution has two halves. The author field says "CJB (AI)" in a comments
+  // pane a reviewer has to open; the outline says it on the page, at a glance,
+  // on the marks that ASSERT something. Colour is deliberately not the carrier:
+  // it already means mark KIND, and in workpaper convention often which
+  // procedure was performed.
+  //
+  // Asserted on the appearance stream rather than by looking at pixels, and
+  // BOTH ways round — a check that only proved the agent mark has an outline
+  // would pass just as happily if every mark had one, which would be the same
+  // bug wearing a different hat.
+  {
+    const outlineProbe = `import sys, pikepdf
+from pikepdf import Name
+want = sys.argv[2]
+with pikepdf.open(sys.argv[1]) as pdf:
+    hits = []
+    for pg in pdf.pages:
+        for a in (pg.obj.get(Name('/Annots')) or []):
+            ap = a.get(Name('/AP'))
+            if ap is None: continue
+            body = bytes(ap.get(Name('/N')).read_bytes())
+            author = str(a.get(Name('/T')) or '')
+            hits.append((author, b're S Q' in body[:80]))
+print(';'.join(f'{a}={o}' for a, o in hits))`
+
+    let s = newSession()
+    const probe = await runEngine({ cmd: 'probe', path: path.join(FIXTURES, 'fixture_a.pdf') })
+    s = addSource(s, probe.probe)
+    const pid = s.pages[0].id
+    // A human tick and a stamp...
+    s = addMark(s, { page: pid, kind: 'tick', nx: 0.2, ny: 0.2, size: 24, author: 'CJB' }).session
+    s = addMark(s, { page: pid, kind: 'text', text: 'TB', nx: 0.4, ny: 0.2, size: 24, author: 'CJB' }).session
+    // ...then the same two from an agent run.
+    s = beginRun(s).session
+    s = addMark(s, { page: pid, kind: 'tick', nx: 0.6, ny: 0.2, size: 24, author: 'CJB' }).session
+    s = addMark(s, { page: pid, kind: 'cross', nx: 0.8, ny: 0.2, size: 24, author: 'CJB' }).session
+
+    const OUTLINED = path.join(REPO, 'spike', 'out', 'agent-outline.pdf')
+    const wrote = await runEngine({ cmd: 'export', binder: toExportSpec(s, OUTLINED) })
+    check('agent outline: binder exported', wrote.ok === true, wrote.error ?? '')
+
+    const got = await runPython(['-c', outlineProbe, OUTLINED, 'x'])
+    const rows = got.out.trim().split(';').filter(Boolean)
+    const agentRows = rows.filter((r) => r.startsWith('CJB (AI)='))
+    const humanRows = rows.filter((r) => r.startsWith('CJB=') )
+    check(
+      'agent outline: every AI-placed mark carries it',
+      agentRows.length === 2 && agentRows.every((r) => r.endsWith('=True')),
+      rows.join(' | ')
+    )
+    check(
+      "agent outline: no human-placed mark carries it",
+      humanRows.length === 2 && humanRows.every((r) => r.endsWith('=False')),
+      rows.join(' | ')
+    )
+  }
+
   // ------------------------------------------- the single-file round trip (#3)
   //
   // Everything above proves a binder can be WRITTEN. This proves it can be

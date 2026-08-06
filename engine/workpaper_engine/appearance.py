@@ -63,13 +63,43 @@ def _fmt(v: float) -> str:
     return f"{v:.2f}".rstrip("0").rstrip(".")
 
 
+#: The agent outline. Neutral grey on purpose: colour on a mark already means
+#: its KIND (green tick, red cross, blue stamp, amber note), and in workpaper
+#: convention often also which procedure was performed. Encoding "who placed
+#: this" in the same channel would collide with both, and fails outright for a
+#: colourblind reviewer. A thin box is a second channel, legible in greyscale
+#: and on a photocopy.
+AGENT_OUTLINE_COLOR = (0.45, 0.45, 0.47)
+AGENT_OUTLINE_WIDTH = 0.5
+
+
+def _agent_outline(bbox: tuple[float, float, float, float]) -> bytes:
+    """A hairline box just inside `bbox`, marking a mark as machine-placed.
+
+    Drawn INSIDE the existing box rather than around it so the annotation's
+    /Rect does not have to grow — a mark whose rect changed with its
+    provenance would land in a different place depending on who put it there,
+    which is exactly the property the geometry tests exist to protect.
+    """
+    x0, y0, x1, y1 = bbox
+    i = AGENT_OUTLINE_WIDTH  # inset by the stroke so nothing clips at the edge
+    r, g, b = AGENT_OUTLINE_COLOR
+    return (
+        f"q {r} {g} {b} RG {_fmt(AGENT_OUTLINE_WIDTH)} w "
+        f"{_fmt(x0 + i)} {_fmt(y0 + i)} {_fmt(x1 - x0 - 2 * i)} {_fmt(y1 - y0 - 2 * i)} re S Q "
+    ).encode("ascii")
+
+
 def _make_form(
     pdf: pikepdf.Pdf,
     content: bytes,
     bbox: tuple[float, float, float, float],
     rotate: int,
     resources: Dictionary | None = None,
+    agent: bool = False,
 ) -> pikepdf.Stream:
+    if agent:
+        content = _agent_outline(bbox) + content
     form = pdf.make_stream(content)
     form.Type = Name.XObject
     form.Subtype = Name.Form
@@ -87,6 +117,7 @@ def tick_appearance(
     rotate: int,
     size: float = TICK_SIZE,
     color: tuple[float, float, float] = TICK_COLOR,
+    agent: bool = False,
 ) -> pikepdf.Stream:
     """A checkmark, stroked, in a size x size form space."""
     r, g, b = color
@@ -99,7 +130,7 @@ def tick_appearance(
         f"q {r} {g} {b} RG {w} w 1 J 1 j "
         f"{pts[0]} {pts[1]} m {pts[2]} {pts[3]} l {pts[4]} {pts[5]} l S Q"
     ).encode("ascii")
-    return _make_form(pdf, content, (0, 0, size, size), rotate)
+    return _make_form(pdf, content, (0, 0, size, size), rotate, agent=agent)
 
 
 def cross_appearance(
@@ -107,6 +138,7 @@ def cross_appearance(
     rotate: int,
     size: float = TICK_SIZE,
     color: tuple[float, float, float] | None = None,
+    agent: bool = False,
 ) -> pikepdf.Stream:
     """An X — "does not agree" in most review conventions."""
     r, g, b = color or MARK_COLORS["cross"]
@@ -116,7 +148,7 @@ def cross_appearance(
         f"q {r} {g} {b} RG {_fmt(size * 0.11)} w 1 J "
         f"{a} {a} m {z} {z} l S {a} {z} m {z} {a} l S Q"
     ).encode("ascii")
-    return _make_form(pdf, content, (0, 0, size, size), rotate)
+    return _make_form(pdf, content, (0, 0, size, size), rotate, agent=agent)
 
 
 def text_mark_size(text: str, font_size: float = TEXT_MARK_FONT_SIZE) -> tuple[float, float]:
@@ -133,6 +165,7 @@ def text_appearance(
     rotate: int,
     font_size: float = TEXT_MARK_FONT_SIZE,
     color: tuple[float, float, float] | None = None,
+    agent: bool = False,
 ) -> tuple[pikepdf.Stream, float, float]:
     """A short lettered mark (F = footed, T = tied, initials, ...)."""
     r, g, b = color or MARK_COLORS["text"]
@@ -154,7 +187,9 @@ def text_appearance(
             )
         )
     )
-    form = _make_form(pdf, " ".join(parts).encode("ascii"), (0, 0, w, h), rotate, resources)
+    form = _make_form(
+        pdf, " ".join(parts).encode("ascii"), (0, 0, w, h), rotate, resources, agent=agent
+    )
     return form, w, h
 
 
@@ -167,7 +202,7 @@ def tape_size(lines: list[str]) -> tuple[float, float]:
 
 
 def tape_appearance(
-    pdf: pikepdf.Pdf, lines: list[str], rotate: int
+    pdf: pikepdf.Pdf, lines: list[str], rotate: int, agent: bool = False
 ) -> tuple[pikepdf.Stream, float, float]:
     """Calculator-tape appearance: tinted card, bordered, Courier lines."""
     w, h = tape_size(lines)
@@ -195,7 +230,9 @@ def tape_appearance(
             F1=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Courier)
         )
     )
-    form = _make_form(pdf, " ".join(parts).encode("ascii"), (0, 0, w, h), rotate, resources)
+    form = _make_form(
+        pdf, " ".join(parts).encode("ascii"), (0, 0, w, h), rotate, resources, agent=agent
+    )
     return form, w, h
 
 
@@ -213,7 +250,9 @@ def _display_author(spec: dict) -> str:
     return author
 
 
-def note_appearance(pdf: pikepdf.Pdf, rotate: int, size: float) -> pikepdf.Stream:
+def note_appearance(
+    pdf: pikepdf.Pdf, rotate: int, size: float, agent: bool = False
+) -> pikepdf.Stream:
     """A small sheet with a folded corner and two rules — a note.
 
     pdfium and several other renderers draw nothing for a /Text annotation with
@@ -305,21 +344,24 @@ def make_mark(
     size = float(spec.get("size", TICK_SIZE))
     author = _display_author(spec)
     color = MARK_COLORS.get(kind, TICK_COLOR)
+    # The outline is the at-a-glance half of attribution. The author field says
+    # "(AI)" in a comments pane a reviewer has to open; this says it on the page.
+    agent = spec.get("by") == "agent"
 
     if kind == "text":
         text = str(spec.get("text", "")).strip() or "?"
-        form, w, h = text_appearance(pdf, text, geom.rotate, size * 0.5, color)
+        form, w, h = text_appearance(pdf, text, geom.rotate, size * 0.5, color, agent=agent)
         note = spec.get("note") or f"Mark: {text}"
     elif kind == "note":
-        form = note_appearance(pdf, geom.rotate, size)
+        form = note_appearance(pdf, geom.rotate, size, agent=agent)
         note = spec.get("note") or ""
         w = h = size
     else:
         if kind == "cross":
-            form = cross_appearance(pdf, geom.rotate, size, color)
+            form = cross_appearance(pdf, geom.rotate, size, color, agent=agent)
             note = spec.get("note") or "Does not agree"
         else:
-            form = tick_appearance(pdf, geom.rotate, size, color)
+            form = tick_appearance(pdf, geom.rotate, size, color, agent=agent)
             note = spec.get("note") or "Agreed"
         w = h = size
 
@@ -349,11 +391,12 @@ def make_tape(
     tape_data: dict,
     nm: str,
     author: str = "",
+    agent: bool = False,
 ) -> pikepdf.Object:
     """Tape annotation. `lines` is the printed appearance; `tape_data` is the
     structured, editable form embedded as private metadata (/WPT_Data) so the
     app can reopen and edit while ordinary viewers just show the appearance."""
-    form, w, h = tape_appearance(pdf, lines, geom.rotate)
+    form, w, h = tape_appearance(pdf, lines, geom.rotate, agent=agent)
     rect = visual_rect_to_user_rect(geom, nx, ny, w, h)
     contents = "Calculator tape: " + (lines[-1].strip() if lines else "")
     annot = _base_annot(pdf, rect, form, nm, author, contents, "tape")

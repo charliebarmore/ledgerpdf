@@ -92,7 +92,12 @@ export function MarkLayer({
         return (
           <span
             key={m.id}
-            className={`mark${selectedId === m.id ? ' is-selected' : ''}`}
+            // `is-agent` mirrors appearance._agent_outline in the engine. The
+            // rule in appearance.py is that a mark looks the same on screen as
+            // in the export, and attribution is part of how a mark looks now.
+            className={`mark${m.by === 'agent' ? ' is-agent' : ''}${
+              selectedId === m.id ? ' is-selected' : ''
+            }`}
             style={{
               left: `${m.nx * 100}%`,
               top: `${m.ny * 100}%`,
