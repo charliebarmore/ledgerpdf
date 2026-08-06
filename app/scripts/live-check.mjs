@@ -53,12 +53,38 @@ if (!existsSync(fixture) || !existsSync(SERVER)) {
 }
 rmSync(OUT, { force: true })
 
+// detached: the child leads its own process group, so cleanup can signal the
+// GROUP. `app.kill()` alone kills npm and orphans Electron underneath it — and
+// an orphaned Electron holds the single-instance lock, which made every
+// FOLLOWING run fail in ways that looked like the code under test.
 const app = spawn('npm', ['run', 'dev'], {
   cwd: APP,
   shell: process.platform === 'win32',
   stdio: ['ignore', 'pipe', 'pipe'],
+  detached: process.platform !== 'win32',
   env: { ...process.env, WPT_DEV_OPEN: fixture, WPT_DEV_LIVE: '1' }
 })
+// Stop the app and WAIT for it to be gone. SIGTERM starts a graceful Electron
+// quit; returning while that is in flight leaves the single-instance lock held
+// against whatever runs next — which is exactly how one run's teardown became
+// the next run's mystery failure.
+const stopApp = async () => {
+  const closed = new Promise((resolve) => {
+    if (app.exitCode !== null) return resolve()
+    app.once('close', resolve)
+  })
+  try {
+    if (process.platform === 'win32') app.kill()
+    else process.kill(-app.pid, 'SIGTERM')
+  } catch {}
+  const timeout = new Promise((resolve) => setTimeout(resolve, 8000))
+  if ((await Promise.race([closed.then(() => 'closed'), timeout.then(() => 'timeout')])) === 'timeout') {
+    try {
+      process.kill(-app.pid, 'SIGKILL')
+    } catch {}
+    await closed
+  }
+}
 let out = ''
 let err = ''
 app.stdout.on('data', (d) => (out += d))
@@ -197,7 +223,7 @@ try {
   check('live session drove without throwing', false, `${String(e)}  ::  ${trace}`)
 } finally {
   if (client) await client.close().catch(() => {})
-  app.kill()
+  await stopApp()
 }
 
 console.log('\n=== live agent access ===')

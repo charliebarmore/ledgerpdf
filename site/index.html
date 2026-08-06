@@ -11,7 +11,7 @@
   <meta property="og:type" content="website" />
   <meta property="og:title" content="LedgerPDF — the tax workpaper binder built for humans and AI agents" />
   <meta property="og:description" content="Assemble, tick, tie and review workpaper binders locally. No cloud, no telemetry. Open source under GPL-3.0." />
-  <meta property="og:image" content="https://ledgerpdf.com/screenshot.png" />
+  <meta property="og:image" content="https://ledgerpdf.com/poster.png" />
   <meta property="og:url" content="https://ledgerpdf.com/" />
 
   <!-- Ledger Labs brand kit: Playfair Display / Inter / JetBrains Mono.
@@ -223,7 +223,15 @@
         <a class="btn btn-ghost" href="https://github.com/charliebarmore/workpaper-tool">Read the source</a>
       </div>
     </div>
-    <img class="hero-shot" src="screenshot.png" alt="LedgerPDF with a three-page binder open: bookmark tree, page view with a tick mark, thumbnail rail." />
+    <!-- A recording of the real app being driven by a real agent over the MCP
+         live socket — app/scripts/record-demo.mjs re-records it when the UI
+         changes. Browsers without animated-WebP get the finished-binder poster,
+         which is also deliberately the loop's opening frame. -->
+    <picture>
+      <source type="image/webp" srcset="demo.webp" />
+      <img class="hero-shot" src="poster.png"
+           alt="An AI agent filling an empty LedgerPDF binder: files import, tick marks land beside the figures it found, a calculator tape foots the interest, an open item is flagged, and the binder saves." />
+    </picture>
   </div>
 </div>
 <div class="under-hero"></div>

@@ -177,6 +177,8 @@ async function releaseBinder(binder: string): Promise<void> {
   ])
 }
 let rendererDirty = false
+/** Live access started once by whichever dev seam fires first. */
+let liveAnnounced = false
 const trustedWebContents = new Set<number>()
 
 function assertTrustedIpc(event: IpcMainInvokeEvent | IpcMainEvent): void {
@@ -644,11 +646,14 @@ function registerIpc(): void {
    */
   ipcMain.on('dev:rendered', async (e, loaded: unknown) => {
     assertTrustedIpc(e)
-    // Dev seam: bring live access up once a binder is loaded, so the live check
-    // can drive the running app for real. Main does this rather than the
-    // renderer because a sandboxed preload has no process.env, and because
-    // main's stdout is what a test can actually read.
-    if (isDev && process.env.WPT_DEV_LIVE === '1') {
+    // Dev seam, preloading case: a binder named in WPT_DEV_OPEN is loading, so
+    // live access waits for THIS report. Advertising the socket at ready let a
+    // harness attach before the fixture finished importing and pull an empty
+    // binder — a race that passed or failed by which side won. When nothing is
+    // preloading, ready already started live below; setLiveAccess is
+    // idempotent enough that the guard here is what prevents a double start.
+    if (isDev && process.env.WPT_DEV_LIVE === '1' && process.env.WPT_DEV_OPEN && !liveAnnounced) {
+      liveAnnounced = true
       try {
         const live = await setLiveAccess(true)
         console.log(`[dev] live agent access at ${live.socketPath}`)
@@ -840,6 +845,33 @@ app.whenReady().then(async () => {
   }
   registerIpc()
   createWindow()
+  // The live pill re-syncs on every load: the state broadcast is fire-and-
+  // forget, and one sent before the renderer mounts its listener is simply
+  // lost — which is how the pill said "off" over a live socket when live
+  // access was started at ready rather than by the button. Security-relevant
+  // indicator, so it re-announces rather than trusting the first send.
+  liveWindow?.webContents.on('did-finish-load', async () => {
+    const { liveStatus } = await import('./live-host')
+    const s = liveStatus()
+    // Same shape announce() sends — on + socketPath only. The handle also
+    // carries the access token, which must never reach the renderer.
+    if (s && liveWindow && !liveWindow.isDestroyed()) {
+      liveWindow.webContents.send('live:state', { on: true, socketPath: s.socketPath })
+    }
+  })
+  // Dev seam, empty-start case: WPT_DEV_LIVE with nothing preloading brings
+  // live access up at launch — an app started empty never fires dev:rendered,
+  // which is where the preloading case starts it (see registerIpc; ordering
+  // matters there, and the race is documented on that block).
+  if (isDev && process.env.WPT_DEV_LIVE === '1' && !process.env.WPT_DEV_OPEN) {
+    liveAnnounced = true
+    try {
+      const live = await setLiveAccess(true)
+      console.log(`[dev] live agent access at ${live.socketPath}`)
+    } catch (error) {
+      console.error(`[dev] live agent access failed: ${String(error)}`)
+    }
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
