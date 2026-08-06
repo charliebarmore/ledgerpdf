@@ -92,6 +92,29 @@ Strategic bets — not committed, revisit at each gate.
 
 Useful ideas that should not distract the current build.
 
+- **Cross-page link objects — the tie-reference gap.** `binder_tie` has the
+  target page ID in hand and converts it to a POSITION before writing the
+  cross-reference: `` `ties to p.${pageNo(b.pageId)}` ``. Reorder the binder and
+  that reference points at whatever is fourth now. This contradicts the headline
+  claim that references follow their pages, and it does so on evidence — a stale
+  cross-reference sends a reviewer to the wrong page and looks authoritative
+  doing it.
+  The engine side is already done and already reorder-safe: `binder.py` step 4
+  builds `/Link` annotations from `spec["links"]` via
+  `final_index[ln["target_page"]]`, and `appearance.make_link` writes them. What
+  is missing is everything above it — a `links` array on the session, plumbing
+  into the export spec, `binder_tie` emitting one instead of a page number, and
+  a UI affordance. **Fixing `binder_tie` alone is the honest minimum**; the full
+  link surface (click a figure, jump to its support) is the feature.
+- **Leadsheet system.** No concept of one anywhere in the codebase — a leadsheet
+  is a page like any other. Real binders index `A`, `A-1`, `A-2` with a summary
+  that ties detail to the trial balance, and that indexing is how preparers
+  navigate and how reviewers check coverage. The pieces exist separately today
+  (workbooks import as pages, bookmarks nest, `binder_tie` compares figures);
+  what is missing is the convention tying them together and an index page that
+  regenerates rather than being retyped. Design this AFTER watching real binders
+  get built — an indexing scheme guessed at is worse than none.
+
 - The mark-colour masks are duplicated. `verify_viewers.py` and
   `check_mark_positions.py` each hardcode their own brown/green/blue/red
   thresholds with no tie to `appearance.MARK_COLORS` / `TAPE_BORDER_COLOR`.
