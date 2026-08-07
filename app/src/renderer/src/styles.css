@@ -1960,3 +1960,68 @@ button.ai-count {
   font-size: 11.5px;
   opacity: 0.6;
 }
+
+/* ------------------------------------------------------------- save + where
+   A split button: Save acts on click, the caret opens the one other
+   destination. Two buttons visually joined, so the row reads as ONE Save
+   rather than the two that used to sit here both beginning with the word. */
+.savemenu {
+  position: relative;
+  display: inline-flex;
+}
+
+.savemenu .sm-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.savemenu .sm-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  /* A hairline so the two halves read as one control with a divider, rather
+     than as two buttons that happen to touch. */
+  border-left: 1px solid rgb(255 255 255 / 0.35);
+  padding-left: 7px;
+  padding-right: 7px;
+}
+
+.sm-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 40;
+  width: 300px;
+  padding: var(--xs);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+
+.sm-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: var(--sm);
+  border-radius: var(--r-sm);
+}
+
+.sm-item:hover:not(:disabled) {
+  background: #f1efe9;
+}
+
+.sm-item-name {
+  display: block;
+  font-weight: 500;
+}
+
+/* The consequence, carried on the item itself rather than in a tooltip nobody
+   hovers. This is the one save in the app that saving again cannot undo. */
+.sm-item-why {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}

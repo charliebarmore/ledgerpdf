@@ -7,6 +7,7 @@ import { Keypad } from './components/Keypad'
 import { StatusMenu } from './components/StatusMenu'
 import { ColorMenu } from './components/ColorMenu'
 import { ExportMenu } from './components/ExportMenu'
+import { SaveMenu } from './components/SaveMenu'
 import { PageView } from './components/PageView'
 import { ThumbnailRail } from './components/ThumbnailRail'
 import { MARK_COLOR } from './components/MarkLayer'
@@ -986,9 +987,15 @@ export default function App(): React.JSX.Element {
     if (!pages.length) return setStatus('Nothing to send yet — add some pages.')
     const out = await window.wpt.chooseBinderOutput(`${binderStem} (copy to send).pdf`)
     if (!out) return
+    // A refusal, not a warning. Writing a flattened copy over the binder you
+    // have open destroys the editable session inside it — the marks stop being
+    // marks and become ink, and there is no saving again to undo it. That is
+    // the only irreversible thing this app can do to a file, so it is the one
+    // place a message you can click past is not enough.
     if (binderPath && out === binderPath) {
       return setStatus(
-        'That is the binder you are working in. Choose a different name — a flattened copy cannot be edited again.'
+        'Refused — that is the binder you are working in. A flattened copy cannot be edited again, ' +
+          'and writing it here would take the editable session with it. Choose a different name.'
       )
     }
     await writeBinder(session, out, { flatten: true, reveal: true })
@@ -1718,17 +1725,20 @@ export default function App(): React.JSX.Element {
         <button onClick={() => void openBinder()} title={`Open a binder  ${MOD}O`}>
           Open
         </button>
-        {/* Save sits with Add and Open — it is the one done constantly, and it
-            was last in the row behind the widest label here, so on a narrower
-            window it was the button that got pushed off the edge. */}
-        <button
-          className="primary"
-          onClick={() => void saveBinder(false)}
+        {/* One Save in the row. The send-out copy used to sit beside it as a
+            second button, and both starting with "Save" made them read as two
+            flavours of one action when they are two destinations — the second
+            produces a file with the marks printed on permanently and the
+            editable session removed. It is on the caret now: clicking Save
+            still saves, because that happens once a minute and should cost
+            nothing, and the other destination happens once an engagement. */}
+        <SaveMenu
+          onSave={() => void saveBinder(false)}
+          onSendOut={() => void saveCopyToSendOut()}
           disabled={busy || !pages.length}
-          title={`Save this binder  ${MOD}S    (${MOD}⇧S to save it under a new name)`}
-        >
-          Save
-        </button>
+          saveHint={`Save this binder  ${MOD}S    (${MOD}⇧S to save it under a new name)`}
+          sendHint={`Save a copy for a client or a file room. Marks are printed on permanently and it cannot be reopened for editing.  ${MOD}E`}
+        />
         <ExportMenu
           numbering={numberCfg}
           onNumbering={(patch) =>
@@ -1736,17 +1746,6 @@ export default function App(): React.JSX.Element {
           }
           pageCount={pages.length}
         />
-        {/* Kept as words rather than "Export": it is a different DESTINATION,
-            not a variant of Save, and the difference — permanent marks, cannot
-            be reopened — is the whole reason it is a separate button. Last in
-            the row because it happens once an engagement, not once a minute. */}
-        <button
-          onClick={() => void saveCopyToSendOut()}
-          disabled={busy || !pages.length}
-          title={`Save a copy for a client or a file room. Marks are printed on permanently and it cannot be reopened for editing.  ${MOD}E`}
-        >
-          Save a copy to send out
-        </button>
         </div>
       </header>
 
