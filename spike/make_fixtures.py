@@ -351,6 +351,9 @@ ledger unless noted.
 The balance is materially *higher* than Q1 because of the annual `ANTHROPIC`
 renewal, which was expensed rather than prepaid.
 
+See [the restatement memo](../../equity-restatement-2026.md) for the history,
+and [IRC 1362](https://www.law.cornell.edu/uscode/text/26/1362) for authority.
+
 > Management represents that no subscription exceeds twelve months.
 
 ## Conclusion

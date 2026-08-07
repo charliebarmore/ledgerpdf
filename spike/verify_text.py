@@ -382,6 +382,60 @@ else:
         f"nx={figure['nx']} ny={figure['ny']}" if figure else "missing",
     )
 
+    # A wrapped source line must not weld the words either side of it together.
+    # This fixture has always contained one ("...the general\nledger..."), and it
+    # rendered as "generalledger" until 2026-08-07 — the assertion above stops at
+    # "general", which is exactly why nothing caught it. Worse than ugly: a
+    # figure wrapped away from its label became one token that binder_find could
+    # not locate.
+    check(
+        "a wrapped source line keeps the space between its words",
+        "general ledger" in doc["text"] and "generalledger" not in doc["text"],
+        next((l for l in doc["text"].split(chr(10)) if "general" in l), ""),
+    )
+
+    # On a workpaper the REFERENCE is part of the evidence trail. A relative
+    # path cannot become a working PDF link once the page is in a binder, but
+    # dropping it leaves "see the memo" naming no memo.
+    check(
+        "a relative link prints its target beside the text",
+        "../../equity-restatement-2026.md" in doc["text"],
+        next((l for l in doc["text"].split(chr(10)) if "restatement" in l), ""),
+    )
+    # ...and the live one does NOT get its URL printed, because it is clickable.
+    check(
+        "a live link is not padded with its own URL",
+        "law.cornell.edu" not in doc["text"],
+        next((l for l in doc["text"].split(chr(10)) if "IRC" in l), ""),
+    )
+
+    # The structural half of the same distinction: an http target becomes a real
+    # /Link a reviewer can click in any viewer, and a relative path becomes
+    # printed text and NOT a link. Asserted both ways — a check that only
+    # counted links would pass just as happily if everything became one, which
+    # would put dead links on a workpaper.
+    import pikepdf as _pike
+    from workpaper_engine.documents import doc_to_pdf as _doc_to_pdf
+
+    with _doc_to_pdf(str(memo)) as _mp:
+        _uris = []
+        for _pg in _mp.pages:
+            for _a in (_pg.obj.get(_pike.Name("/Annots")) or []):
+                if _a.get(_pike.Name("/Subtype")) == _pike.Name("/Link"):
+                    _act = _a.get(_pike.Name("/A"))
+                    if _act is not None and _act.get(_pike.Name("/URI")) is not None:
+                        _uris.append(str(_act.get(_pike.Name("/URI"))))
+    check(
+        "an http target becomes a real clickable /Link",
+        any("law.cornell.edu" in u for u in _uris),
+        ", ".join(_uris) or "no /Link annotations",
+    )
+    check(
+        "a relative target does NOT become a link that goes nowhere",
+        not any("equity-restatement" in u for u in _uris),
+        ", ".join(_uris) or "none",
+    )
+
 # --------------------------------------------------------------- scanned pages
 # An image-only page has no text layer. Reporting that plainly is the whole
 # point: it tells an agent OCR is missing rather than that the page is blank.

@@ -39,6 +39,18 @@ BODY = 11
 LEAD = 15.4
 MAX_PAGES = 400
 
+#: Hyperlink ink. Deliberately NOT a brand token: per DESIGN.md the brand stops
+#: at the chrome, and this is body text on a document somebody files. A muted
+#: document blue is what Word puts on a hyperlink, so a rendered memo still sits
+#: beside a Word deliverable without looking foreign.
+LINK_COLOR = "#1A4F8A"
+
+#: Schemes that survive as a real PDF link. A relative path or a `#anchor` has
+#: no meaning once the page is inside a binder — the file it pointed at is not
+#: there, and a link annotation that goes nowhere is worse than none, so those
+#: keep rendering as plain text (the link TEXT is still drawn either way).
+_LINK_SCHEMES = ("http://", "https://", "mailto:")
+
 
 def is_doc(path: str | Path) -> bool:
     return Path(path).suffix.lower() in DOC_SUFFIXES
@@ -122,9 +134,61 @@ def _escape(text: str, font: str = "Times-Roman") -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _escape_attr(text: str) -> str:
+    """Escape for an attribute value, quotes included.
+
+    No glyph substitution: a URL is addressed, not drawn, so `_safe_text` would
+    corrupt a perfectly good link to make a character it never has to render.
+    """
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+#: Ink for a target that is printed rather than linked. Muted, and set in
+#: Courier at a smaller size, so it reads as a citation beside the sentence
+#: rather than as prose — and so it can never be mistaken for a live link,
+#: which is blue and underlined.
+TARGET_COLOR = "#6B6B70"
+TARGET_SIZE = 9
+
+
+def _strip_tags(markup: str) -> str:
+    import re
+
+    return re.sub(r"<[^>]+>", "", markup)
+
+
+def _link_target_text(href: str, inner_markup: str = "") -> str:
+    """How a target that cannot become a PDF link is printed beside its text.
+
+    A relative path or an `#anchor` has no meaning once the page is inside a
+    binder, so it cannot be a working link — but on a workpaper the reference
+    is part of the evidence trail. "See the memo" that does not say WHICH memo
+    supports nothing a reviewer can follow.
+    """
+    if not href:
+        return ""
+    # `[../x.md](../x.md)` is common in working notes; printing it twice helps
+    # nobody and makes the line harder to read than leaving it alone.
+    if _strip_tags(inner_markup).strip() == href:
+        return ""
+    return (
+        f' <font face="Courier" size="{TARGET_SIZE}" color="{TARGET_COLOR}">'
+        f'({_escape(href, "Courier")})</font>'
+    )
+
+
 def _inline(tokens) -> str:
     """markdown-it inline tokens -> the mini-markup reportlab paragraphs take."""
     out: list[str] = []
+    # One entry per open link, True if we actually emitted an <a> for it. A link
+    # we declined to linkify still arrives with a link_close, and closing a tag
+    # that was never opened is what corrupts the rest of the paragraph.
+    links: list[bool] = []
     for t in tokens:
         if t.type == "text":
             out.append(_escape(t.content))
@@ -141,9 +205,43 @@ def _inline(tokens) -> str:
         elif t.type in ("em_close",):
             out.append("</i>")
         elif t.type == "softbreak":
+            # A wrapped source line. Dropping the token welded the words either
+            # side of it together — "and the\nregs." rendered as "and theregs",
+            # and a figure wrapped away from its label came out as one unfindable
+            # token. Most hand-written markdown wraps, so this hit most memos.
             out.append(" ")
         elif t.type == "hardbreak":
             out.append("<br/>")
+        elif t.type == "s_open":
+            # The parser has strikethrough enabled, so without this the tokens
+            # arrive and vanish: `~~cleared~~` renders as ordinary text and an
+            # item struck off an open-items list reads as still open. Same
+            # failure as the checkbox above — wrong, and not visibly wrong.
+            out.append("<strike>")
+        elif t.type == "s_close":
+            out.append("</strike>")
+        elif t.type == "link_open":
+            href = (t.attrGet("href") or "").strip()
+            live = href.lower().startswith(_LINK_SCHEMES)
+            if live:
+                # Underlined as well as coloured. Colour alone is invisible on a
+                # greyscale print, and a printed binder is how these get signed.
+                out.append(f'<a href="{_escape_attr(href)}" color="{LINK_COLOR}"><u>')
+            links.append((live, href, len(out)))
+        elif t.type == "link_close":
+            was_live, href, start = links.pop() if links else (False, "", len(out))
+            if was_live:
+                out.append("</u></a>")
+            elif href:
+                # A relative path or an #anchor cannot become a working PDF link
+                # — the file it names is not in this document. Dropping it was
+                # the old behaviour and it is the wrong trade on a workpaper: the
+                # REFERENCE is part of the evidence trail, and "see the memo"
+                # with no memo named supports nothing. So print the target beside
+                # the text, in a way that cannot be mistaken for a live link.
+                shown = _link_target_text(href, "".join(out[start:]))
+                if shown:
+                    out.append(shown)
         elif t.children:
             out.append(_inline(t.children))
     return "".join(out)
