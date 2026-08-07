@@ -67,6 +67,8 @@ import {
   SHAPE_COLOR_NAMES,
   SHAPE_COLORS,
   SHAPE_WIDTH_DEFAULT,
+  TAPE_SIZE_MAX,
+  TAPE_SIZE_MIN,
   type Mark,
   type ProbeWire,
   type Shape,
@@ -1953,6 +1955,14 @@ export default function App(): React.JSX.Element {
             setActiveTapeId(null)
             setTapeBuffer('')
           }}
+          onSize={(size) =>
+            apply(
+              updateTape(session, activeTape.id, {
+                size: Math.max(TAPE_SIZE_MIN, Math.min(TAPE_SIZE_MAX, size))
+              }),
+              `Tape size ${size}.`
+            )
+          }
           onNewTape={() => setArmed({ kind: 'tape' })}
         />
       )}

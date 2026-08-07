@@ -468,11 +468,24 @@ export interface Tape extends Provenance {
   section?: number
   /** Optional caption above the numbers, e.g. "Repairs & maintenance". */
   title?: string
+  /**
+   * Courier point size. Every other dimension — character advance, line
+   * height, padding — follows from it, so one number scales the whole card and
+   * the preview cannot end up a different shape from the export. Absent means
+   * the default; a tape made before tapes could be resized stays exactly as it
+   * was drawn.
+   */
+  size?: number
   author?: string
   created?: string
 }
 
 export const TAPE_TITLE_MAX_LEN = 28
+/** Mirrors engine appearance.TAPE_FONT_SIZE / TAPE_SIZE_MIN / TAPE_SIZE_MAX. */
+export const TAPE_SIZE_DEFAULT = 9
+export const TAPE_SIZE_MIN = 6
+export const TAPE_SIZE_MAX = 18
+export const TAPE_SIZE_STEP = 1
 
 export interface Session {
   formatVersion: number
@@ -1272,6 +1285,17 @@ export const TAPE_FONT_SIZE = 9
 export const TAPE_LINE_HEIGHT = 11
 export const TAPE_PAD = 6
 export const TAPE_CHAR_W = TAPE_FONT_SIZE * 0.6 // Courier advance = 0.6 em
+
+/**
+ * A tape's metrics at a given point size — the mirror of engine
+ * appearance.tape_metrics. Both sides derive every dimension from the font, so
+ * a resized tape cannot be one shape in the preview and another in the PDF.
+ */
+export function tapeMetrics(size?: number): { charW: number; lineH: number; pad: number } {
+  const font = Math.max(TAPE_SIZE_MIN, Math.min(TAPE_SIZE_MAX, size ?? TAPE_FONT_SIZE))
+  const k = font / TAPE_FONT_SIZE
+  return { charW: font * 0.6, lineH: TAPE_LINE_HEIGHT * k, pad: TAPE_PAD * k }
+}
 
 /**
  * Sum in whole cents.
@@ -2268,6 +2292,8 @@ export function toExportSpec(
             ...(t.title ? { title: t.title } : {}),
             ...(t.created ? { created: t.created } : {})
           },
+          // Alongside the other annotation kinds, which all carry `size`.
+          ...(t.size ? { size: t.size } : {}),
           ...(t.author ? { author: t.author } : {}),
           ...(t.by ? { by: t.by } : {}),
           ...(t.run ? { run: t.run } : {})

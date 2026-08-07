@@ -1,6 +1,10 @@
 import { useRef, useState } from 'react'
 import {
   TAPE_OPS,
+  TAPE_SIZE_DEFAULT,
+  TAPE_SIZE_MAX,
+  TAPE_SIZE_MIN,
+  TAPE_SIZE_STEP,
   formatAmount,
   parseAmount,
   tapeRunning,
@@ -78,7 +82,8 @@ export function Keypad({
   onEditEntry,
   onRemoveEntry,
   onClose,
-  onNewTape
+  onNewTape,
+  onSize
 }: {
   tape: Tape
   buffer: string
@@ -88,7 +93,9 @@ export function Keypad({
   onRemoveEntry: (index: number) => void
   onClose: () => void
   onNewTape: () => void
+  onSize: (size: number) => void
 }): React.JSX.Element {
+  const size = tape.size ?? TAPE_SIZE_DEFAULT
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
   const panel = useRef<HTMLDivElement>(null)
 
@@ -128,6 +135,29 @@ export function Keypad({
     >
       <div className="kp-title">
         <span>10 Key</span>
+        {/* A tape is the largest thing placed on a page and was the only
+            annotation that could not be resized — marks have carried a size
+            all along. One control, because size is a single number here: the
+            font, with the card's width, line height and padding all following
+            from it. */}
+        <span className="kp-size">
+          <span className="kp-size-label">Size</span>
+          <button
+            onClick={() => onSize(size - TAPE_SIZE_STEP)}
+            disabled={size <= TAPE_SIZE_MIN}
+            title="Smaller tape"
+          >
+            −
+          </button>
+          <span className="kp-size-val">{size}</span>
+          <button
+            onClick={() => onSize(size + TAPE_SIZE_STEP)}
+            disabled={size >= TAPE_SIZE_MAX}
+            title="Larger tape"
+          >
+            +
+          </button>
+        </span>
         <button className="kp-close" onClick={onClose} title="Close (the tape stays)">
           ×
         </button>

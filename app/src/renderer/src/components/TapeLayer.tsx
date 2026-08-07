@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import {
   TAPE_CHAR_W,
   TAPE_FONT_SIZE,
+  tapeMetrics,
   TAPE_LINE_HEIGHT,
   TAPE_PAD,
   TAPE_TITLE_MAX_LEN,
@@ -114,7 +115,10 @@ export function TapeLayer({
             })[tape.entries.length + 1]
           : null
         const cols = Math.max(...rows.map((r) => r.length), pending?.length ?? 0, 8)
-        const fs = TAPE_FONT_SIZE * scale
+        // Per-tape size, defaulting to the constant. Metrics come from the
+        // shared helper so the card here matches the one the engine draws.
+        const m = tapeMetrics(tape.size)
+        const fs = (tape.size ?? TAPE_FONT_SIZE) * scale
         const all = hasTitle ? rows.slice(1) : rows
         // The line being keyed belongs above the total, where it will land.
         const body = all.slice(0, -1)
@@ -133,10 +137,10 @@ export function TapeLayer({
               top: `${tape.ny * 100}%`,
               // Width from the same character advance the engine uses, so the
               // card can't be one size here and another in the PDF.
-              width: (cols * TAPE_CHAR_W + 2 * TAPE_PAD) * scale,
-              padding: TAPE_PAD * scale,
+              width: (cols * m.charW + 2 * m.pad) * scale,
+              padding: m.pad * scale,
               fontSize: fs,
-              lineHeight: `${TAPE_LINE_HEIGHT * scale}px`,
+              lineHeight: `${m.lineH * scale}px`,
               pointerEvents: armed ? 'none' : 'auto'
             }}
             onPointerDown={(e) => startDrag(e, tape.id)}

@@ -1894,6 +1894,73 @@ async function main(): Promise<number> {
     )
   }
 
+  // --- a tape can be resized, and the size reaches the PDF
+  //
+  // A tape is the largest object placed on a page and was the only annotation
+  // with no size at all: marks have carried one from the start, while a tape's
+  // dimensions came entirely from a fixed 9pt constant. Charlie found it by
+  // trying to make one smaller.
+  //
+  // Asserted on the annotation RECT rather than on the spec, because the whole
+  // risk in scaling a tape is that one dimension follows the font and another
+  // does not — text tightening inside a card that never moved. Both dimensions
+  // must scale, and the same numbers drive the on-screen preview.
+  {
+    const sizes: Array<[number | undefined, string]> = [[undefined, 'default'], [6, 'min'], [18, 'max']]
+    const got: Record<string, [number, number]> = {}
+    for (const [size, label] of sizes) {
+      let s = newSession()
+      const probe = await runEngine({ cmd: 'probe', path: path.join(FIXTURES, 'fixture_a.pdf') })
+      s = addSource(s, probe.probe)
+      s = { ...s, reviewer: 'CJB' }
+      const t = addTape(s, {
+        page: s.pages[0].id,
+        nx: 0.5,
+        ny: 0.5,
+        entries: [{ value: 1900, op: '+' }, { value: 1500, op: '+' }],
+        ...(size ? { size } : {})
+      })
+      s = t.session
+      const OUT_T = path.join(REPO, 'spike', 'out', `tape-${label}.pdf`)
+      const wrote = await runEngine({ cmd: 'export', binder: toExportSpec(s, OUT_T) })
+      const pr = wrote.ok ? await runEngine({ cmd: 'probe', path: OUT_T }) : { ok: false }
+      const ann = (pr as any).ok
+        ? (pr as any).probe.pages.flatMap((p: any) => (p.annotations ?? []).filter((x: any) => x.wpt_kind === 'tape'))[0]
+        : null
+      const r = ann?.rect ?? ann?.Rect ?? null
+      got[label] = r ? [Math.round((r[2] - r[0]) * 10) / 10, Math.round((r[3] - r[1]) * 10) / 10] : [0, 0]
+    }
+    check(
+      'a tape at the default size is unchanged',
+      got.default[0] > 0 && got.default[1] > 0,
+      JSON.stringify(got.default)
+    )
+    check(
+      'a smaller tape is smaller in BOTH dimensions',
+      got.min[0] < got.default[0] && got.min[1] < got.default[1],
+      `min=${JSON.stringify(got.min)} default=${JSON.stringify(got.default)}`
+    )
+    check(
+      'a larger tape is larger in BOTH dimensions',
+      got.max[0] > got.default[0] && got.max[1] > got.default[1],
+      `max=${JSON.stringify(got.max)} default=${JSON.stringify(got.default)}`
+    )
+    // Proportional, not merely bigger: the card must not gain padding a preparer
+    // did not ask for, or the preview and the export drift apart.
+    // Within a tolerance, not exactly: these dimensions are rounded to 0.1pt
+    // for reporting, so 3.2064 and 3.2036 are the SAME aspect ratio measured
+    // either side of a rounding boundary. Comparing them for equality failed
+    // and would have sent someone hunting a disproportion that is not there.
+    const ratio = (a: [number, number]): number => a[0] / a[1]
+    const near = (a: number, b: number): boolean => Math.abs(a - b) / b < 0.01
+    const base = ratio(got.default)
+    check(
+      'the card keeps its proportions at every size',
+      near(ratio(got.min), base) && near(ratio(got.max), base),
+      `min=${ratio(got.min).toFixed(3)} default=${base.toFixed(3)} max=${ratio(got.max).toFixed(3)}`
+    )
+  }
+
   // --- the agent outline
   //
   // Attribution has two halves. The author field says "CJB (AI)" in a comments

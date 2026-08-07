@@ -222,6 +222,7 @@ def export_binder(spec: dict) -> dict:
                         out, geom, a["nx"], a["ny"], a["lines"], a.get("tape", {}),
                         nm, author=appearance._display_author(a),
                         agent=a.get("by") == "agent",
+                        font=a.get("size"),
                     )
                 else:
                     raise ValueError(f"unknown annotation kind: {a['kind']}")

@@ -193,19 +193,41 @@ def text_appearance(
     return form, w, h
 
 
-def tape_size(lines: list[str]) -> tuple[float, float]:
+#: A tape is sized by its FONT, and everything else follows proportionally —
+#: character advance, line height, padding. One number so a preparer scaling a
+#: tape cannot end up with tight text in a roomy card, and so the preview and
+#: the export cannot drift: both derive every dimension from this one input.
+#: The border stays a hairline at any size, because that is what a hairline is.
+TAPE_SIZE_MIN = 6.0
+TAPE_SIZE_MAX = 18.0
+
+
+def tape_metrics(font: float | None = None) -> tuple[float, float, float]:
+    """(char advance, line height, padding) for a tape set at `font` points."""
+    size = TAPE_FONT_SIZE if font is None else max(TAPE_SIZE_MIN, min(TAPE_SIZE_MAX, float(font)))
+    k = size / TAPE_FONT_SIZE
+    return (size * 0.6, TAPE_LINE_HEIGHT * k, TAPE_PAD * k)
+
+
+def tape_size(lines: list[str], font: float | None = None) -> tuple[float, float]:
     """Visual (w, h) in points for a tape with these lines."""
+    char_w, line_h, pad = tape_metrics(font)
     max_chars = max((len(ln) for ln in lines), default=1)
-    w = max_chars * TAPE_CHAR_W + 2 * TAPE_PAD
-    h = len(lines) * TAPE_LINE_HEIGHT + 2 * TAPE_PAD
+    w = max_chars * char_w + 2 * pad
+    h = len(lines) * line_h + 2 * pad
     return (w, h)
 
 
 def tape_appearance(
-    pdf: pikepdf.Pdf, lines: list[str], rotate: int, agent: bool = False
+    pdf: pikepdf.Pdf,
+    lines: list[str],
+    rotate: int,
+    agent: bool = False,
+    font: float | None = None,
 ) -> tuple[pikepdf.Stream, float, float]:
     """Calculator-tape appearance: tinted card, bordered, Courier lines."""
-    w, h = tape_size(lines)
+    size, line_h, pad = (tape_metrics(font)[0] / 0.6, *tape_metrics(font)[1:])
+    w, h = tape_size(lines, font)
     tr, tg, tb = TAPE_TEXT_COLOR
     br, bg, bb = TAPE_BORDER_COLOR
     kr, kg, kb = TAPE_BG_COLOR
@@ -217,8 +239,8 @@ def tape_appearance(
         f"{_fmt(inset)} {_fmt(inset)} {_fmt(w - TAPE_BORDER_W)} {_fmt(h - TAPE_BORDER_W)} re S",
         f"{tr} {tg} {tb} rg",
         "BT",
-        f"/F1 {_fmt(TAPE_FONT_SIZE)} Tf {_fmt(TAPE_LINE_HEIGHT)} TL",
-        f"{_fmt(TAPE_PAD)} {_fmt(h - TAPE_PAD - TAPE_FONT_SIZE)} Td",
+        f"/F1 {_fmt(size)} Tf {_fmt(line_h)} TL",
+        f"{_fmt(pad)} {_fmt(h - pad - size)} Td",
     ]
     for i, ln in enumerate(lines):
         if i > 0:
@@ -392,11 +414,12 @@ def make_tape(
     nm: str,
     author: str = "",
     agent: bool = False,
+    font: float | None = None,
 ) -> pikepdf.Object:
     """Tape annotation. `lines` is the printed appearance; `tape_data` is the
     structured, editable form embedded as private metadata (/WPT_Data) so the
     app can reopen and edit while ordinary viewers just show the appearance."""
-    form, w, h = tape_appearance(pdf, lines, geom.rotate, agent=agent)
+    form, w, h = tape_appearance(pdf, lines, geom.rotate, agent=agent, font=font)
     rect = visual_rect_to_user_rect(geom, nx, ny, w, h)
     contents = "Calculator tape: " + (lines[-1].strip() if lines else "")
     annot = _base_annot(pdf, rect, form, nm, author, contents, "tape")

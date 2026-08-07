@@ -2025,3 +2025,34 @@ button.ai-count {
   color: var(--muted);
   margin-top: 2px;
 }
+
+/* Tape size, in the keypad's title bar beside the close button. A tape is the
+   largest object placed on a page and was the only annotation with no size
+   control — marks have carried one all along. */
+.kp-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  margin-right: var(--sm);
+}
+
+.kp-size-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.kp-size button {
+  padding: 1px 6px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.kp-size-val {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  min-width: 16px;
+  text-align: center;
+}
