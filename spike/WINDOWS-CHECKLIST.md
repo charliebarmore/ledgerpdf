@@ -35,9 +35,29 @@ invocation, a persistence branch — execute for the first time on this machine.
 
 The thing CI cannot answer.
 
-- [ ] Run the **unsigned** installer. Expect "Windows protected your PC" — note
-      the exact wording and how many clicks it takes to proceed.
-- [ ] Note whether it warns again on first launch of the installed app.
+- [x] Run the **unsigned** installer. **Done 2026-08-07 on the ThinkPad.**
+      Result: **no SmartScreen prompt at all.** The installer was copied to
+      Downloads and manually stamped with mark-of-the-web, so the "came from
+      the internet" path was tested honestly rather than bypassed; Defender
+      real-time was on and Smart App Control off. It went straight into the
+      wizard. Three pages (per-user vs all-users, location, progress), ~50
+      seconds, no admin prompt, ~441 MB installed, registered as "LedgerPDF
+      0.1.0" publisher **Ledger Labs LLC** with a clean uninstall entry.
+- [x] Note whether it warns again on first launch of the installed app.
+      **It did not.** Clean empty-binder screen, live agent access off.
+
+**What this changes:** the docs led with the warning as a certainty. They now
+say Windows *may* show it, because a tester braced for a scary prompt that never
+arrives starts doubting everything else the docs claim. The explanation stays —
+a stricter machine, an enterprise policy, or Smart App Control can still fire —
+and now lives in `docs/INSTALL-WINDOWS.md` rather than being promised and absent.
+
+**Also proven in the same run, which was the real packaging risk:** the frozen
+Python engine works in the installed build. A PDF imported, rendered,
+thumbnailed and auto-bookmarked; a tick placed and saved came back as a real
+`/Stamp` with its own appearance stream; bookmarks survived; the editable
+session was embedded inside the PDF; and Acrobat rendered the mark in the right
+position. Zero TCP sockets held by any LedgerPDF process for the whole session.
 
 This is the worst case, and the point of seeing it. Azure Trusted Signing
 improves it but does **not** remove it immediately: SmartScreen reputation

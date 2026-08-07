@@ -58,19 +58,21 @@ and Windows. Code signing is planned as a follow-up, not a release gate.
 ### Getting a build
 
 **There is no public download yet.** Builds are currently unsigned, so Windows
-shows SmartScreen's "unknown publisher" warning on first run. That warning is
-accurate — the publisher identity is unverified, not the software unsafe: the
-source is auditable, builds come from CI, and signing lands in an update.
-Install instructions explain what the prompt means rather than just telling
-anyone to click through it.
+**may** show a SmartScreen "unknown publisher" warning — see
+[`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md), which walks the install and
+says plainly what that prompt means rather than telling anyone to click through
+it. On a first real test (2026-08-07, Windows 11, Defender on, mark-of-the-web
+applied) it did not appear at all; a stricter machine may still show it.
 
 Until public releases start, there are two ways to run it, in order of effort:
 
-1. **A CI build**, if you have access to this repository. The **Windows x64**
-   workflow under the Actions tab runs on every non-docs push to `main` and on
-   pull requests, and can also be dispatched by hand; download the artifact it
-   attaches. Artifacts expire after 14 days and are **unsigned: for pilot
-   testing, not for redistribution.**
+1. **A CI build**, if you have access to this repository. Go to the **Windows
+   x64** workflow under the Actions tab and **"Run workflow"** with `package`
+   ticked — the installer is attached only on a manual dispatch, deliberately,
+   because uploading a ~140 MB installer on every push burns the storage quota.
+   Ordinary pushes still build, package and verify; they just attach evidence
+   rather than a download. Artifacts expire after 14 days and are **unsigned:
+   for pilot testing, not for redistribution.**
 2. **From source**, below. Works on macOS and Windows and takes about five
    minutes on a machine that already has Node and Python.
 

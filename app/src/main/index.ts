@@ -495,11 +495,51 @@ function registerIpc(): void {
     return runEngine({ cmd: 'probe', path: abs })
   })
 
+  /**
+   * Where "Save binder as" should point on a machine we know nothing about.
+   *
+   * This used to pass a bare filename and let the OS choose the folder. On
+   * Windows the OS chooses the shell Documents folder, and OneDrive's Known
+   * Folder Move redirects exactly that — so the default landed a client
+   * workpaper in a folder syncing to a CONSUMER Microsoft account, with no
+   * business data-protection agreement behind it. A pilot user accepting the
+   * default would have moved client data off the machine without being told,
+   * from an app whose headline claim is that nothing does.
+   *
+   * So the directory is chosen here rather than delegated, in the order a
+   * preparer would expect:
+   *   1. wherever they last kept a binder,
+   *   2. else the engagement folder they opened these documents from,
+   *   3. else home — deliberately NOT `getPath('documents')`, which is the
+   *      redirected one.
+   * A `suggested` value that already names a directory is left alone.
+   */
+  const defaultSaveDir = async (): Promise<string | undefined> => {
+    try {
+      const recents = await readRecents(app.getPath('userData'))
+      const lastPresent = recents.find((r) => r.present !== false && existsSync(path.dirname(r.path)))
+      if (lastPresent) return path.dirname(lastPresent.path)
+    } catch {}
+    // The sources the user authorized this session are, by definition, folders
+    // they chose on purpose — which is what an engagement folder is.
+    for (const input of [...allowedInputs].reverse()) {
+      const dir = path.dirname(input)
+      if (existsSync(dir)) return dir
+    }
+    return app.getPath('home')
+  }
+
   ipcMain.handle('dialog:saveBinderAs', async (_e, suggested: unknown) => {
     assertTrustedIpc(_e)
+    const name = typeof suggested === 'string' ? suggested : 'binder.pdf'
+    const already = path.dirname(name)
+    const defaultPath =
+      already && already !== '.' ? name : path.join((await defaultSaveDir()) ?? '', path.basename(name))
     const res = await dialog.showSaveDialog({
-      title: 'Export binder',
-      defaultPath: typeof suggested === 'string' ? suggested : 'binder.pdf',
+      // "Save", not "Export". The binder PDF IS the document — "Export" is the
+      // vocabulary of the two-file model this deliberately moved away from.
+      title: 'Save binder as',
+      defaultPath,
       filters: [{ name: 'PDF', extensions: ['pdf'] }]
     })
     if (res.canceled || !res.filePath) return null
