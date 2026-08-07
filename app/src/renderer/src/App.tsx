@@ -135,6 +135,13 @@ export default function App(): React.JSX.Element {
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [liveOn, setLiveOn] = useState(false)
+  /** A mark waiting on initials, so it can land attributed once they are given. */
+  const [initialsPrompt, setInitialsPrompt] = useState<{
+    pageId: string
+    nx: number
+    ny: number
+  } | null>(null)
+  const [initialsDraft, setInitialsDraft] = useState('')
   const [recents, setRecents] = useState<
     Array<{ path: string; name: string; at: string; pages?: number; present?: boolean }>
   >([])
@@ -405,13 +412,26 @@ export default function App(): React.JSX.Element {
   // -------------------------------------------------------------------- marks
 
   const placeTool = useCallback(
-    (pageId: string, nx: number, ny: number) => {
+    (pageId: string, nx: number, ny: number, base?: Session) => {
       if (!armed) return
       const target = pages.find((p) => p.id === pageId)
       if (!target) return
+      // A mark is evidence that SOMEONE checked something. Recorded with a
+      // blank author it is evidence of nothing, and until now that happened
+      // silently: only the initials-stamp button was gated, so a fresh install
+      // could mark up a whole binder and every tick exported with no author —
+      // which is what the first Windows install test hit. Ask once, at the only
+      // moment the answer matters, rather than refusing the tool or writing a
+      // blank. `base` lets the answer be applied and the mark placed in one go.
+      const from = base ?? session
+      if (!(from.reviewer ?? '').trim()) {
+        setInitialsDraft('')
+        setInitialsPrompt({ pageId, nx, ny })
+        return
+      }
       if (armed.kind === 'tape') {
-        const onPage = (session.tapes ?? []).filter((t) => t.page === pageId).length
-        const { session: next, id } = addTape(session, {
+        const onPage = (from.tapes ?? []).filter((t) => t.page === pageId).length
+        const { session: next, id } = addTape(from, {
           page: pageId,
           nx,
           ny,
@@ -430,7 +450,7 @@ export default function App(): React.JSX.Element {
       }
       // Shapes are dragged out, not clicked into place — drawShape handles them.
       if (isShapeKind(armed.kind)) return
-      const { session: next, id } = addMark(session, {
+      const { session: next, id } = addMark(from, {
         page: pageId,
         kind: armed.kind,
         nx,
@@ -443,6 +463,22 @@ export default function App(): React.JSX.Element {
     },
     [pages, armed, session, markSize, apply]
   )
+
+  /**
+   * Answer the initials question and land the mark that asked it, in one step.
+   *
+   * The reviewer is written into the SAME session the mark is added to, rather
+   * than set and left for the next render — otherwise the mark that triggered
+   * the prompt is the one mark that still records a blank author, which would
+   * be a peculiar bug to ship in the fix for blank authors.
+   */
+  const commitInitials = useCallback(() => {
+    const value = initialsDraft.trim().toUpperCase().slice(0, 4)
+    const pending = initialsPrompt
+    if (!value || !pending) return
+    setInitialsPrompt(null)
+    placeTool(pending.pageId, pending.nx, pending.ny, { ...session, reviewer: value })
+  }, [initialsDraft, initialsPrompt, placeTool, session])
 
   const moveMark = useCallback(
     (id: string, nx: number, ny: number) => {
@@ -1660,6 +1696,37 @@ export default function App(): React.JSX.Element {
           </>
         )}
       </div>
+
+      {initialsPrompt && (
+        <div className="initials-ask" role="dialog" aria-label="Set your initials">
+          <p className="ia-q">Your initials?</p>
+          <p className="ia-why">
+            Marks record who made them — a tick with no author is not evidence of anything.
+          </p>
+          <div className="ia-row">
+            <input
+              className="ia-input"
+              autoFocus
+              value={initialsDraft}
+              maxLength={4}
+              placeholder="e.g. CJB"
+              onChange={(e) => setInitialsDraft(e.target.value.toUpperCase().slice(0, 4))}
+              onKeyDown={(e) => {
+                e.stopPropagation()
+                if (e.key === 'Enter') commitInitials()
+                if (e.key === 'Escape') setInitialsPrompt(null)
+              }}
+            />
+            <button className="ia-go" onClick={commitInitials} disabled={!initialsDraft.trim()}>
+              Place mark
+            </button>
+            <button className="ia-cancel" onClick={() => setInitialsPrompt(null)}>
+              Cancel
+            </button>
+          </div>
+          <p className="ia-later">Change them later in Status ▸ Options.</p>
+        </div>
+      )}
 
       {activeTape && keypadOpen && (
         <Keypad

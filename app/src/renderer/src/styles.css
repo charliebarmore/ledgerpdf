@@ -1898,3 +1898,50 @@ button.ai-count {
 .recent.is-missing .recent-when {
   color: var(--warning);
 }
+
+/* ---------------------------------------------------- the initials question
+   Asked once, the first time a mark would otherwise be recorded with a blank
+   author. Positioned over the workspace rather than at the click point: the
+   mark layer lives two components down, and threading pixel coordinates
+   through it to save one glance is not a trade worth making. */
+.initials-ask {
+  position: fixed;
+  left: 50%;
+  top: 30%;
+  transform: translate(-50%, -50%);
+  z-index: 60;
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, #d8d6cf);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.22);
+  padding: 18px 20px;
+  min-width: 340px;
+}
+.initials-ask .ia-q {
+  font-weight: 700;
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+.initials-ask .ia-why {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  opacity: 0.75;
+  max-width: 34ch;
+}
+.initials-ask .ia-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.initials-ask .ia-input {
+  width: 88px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  text-align: center;
+}
+.initials-ask .ia-later {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  opacity: 0.6;
+}
