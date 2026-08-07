@@ -135,13 +135,26 @@ export default function App(): React.JSX.Element {
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [liveOn, setLiveOn] = useState(false)
-  /** A mark waiting on initials, so it can land attributed once they are given. */
+  /**
+   * The initials question, open.
+   *
+   * `mark` is the mark that triggered it, held so it can land attributed the
+   * moment the answer arrives — or null when the question was asked on its own,
+   * by clicking the initials button in the palette before any mark exists.
+   */
   const [initialsPrompt, setInitialsPrompt] = useState<{
-    pageId: string
-    nx: number
-    ny: number
+    mark: { pageId: string; nx: number; ny: number } | null
   } | null>(null)
   const [initialsDraft, setInitialsDraft] = useState('')
+  /**
+   * The preparer's initials as stored for this MACHINE, not this binder.
+   *
+   * The session keeps its own copy so attribution travels inside the file, but
+   * the person does not change between binders. Without this, every new binder
+   * re-asked and the palette's initials button went back to a dead dash.
+   */
+  const [preparerInitials, setPreparerInitials] = useState('')
+  const initialsInput = useRef<HTMLInputElement | null>(null)
   const [recents, setRecents] = useState<
     Array<{ path: string; name: string; at: string; pages?: number; present?: boolean }>
   >([])
@@ -150,7 +163,10 @@ export default function App(): React.JSX.Element {
     () => (session.tapes ?? []).find((t) => t.id === activeTapeId) ?? null,
     [session.tapes, activeTapeId]
   )
-  const reviewerInitials = session.reviewer ?? ''
+  // The binder's own attribution wins; the machine's stored initials are the
+  // default a fresh session starts from. Falling back here is what keeps the
+  // palette's initials button live on a new binder instead of a dead dash.
+  const reviewerInitials = (session.reviewer ?? '').trim() || preparerInitials
   const stamps = session.stamps ?? []
   const past = useRef<Session[]>([])
   const future = useRef<Session[]>([])
@@ -245,6 +261,7 @@ export default function App(): React.JSX.Element {
     // Refreshed whenever the binder is put down, so the list is current the
     // moment it is visible again.
     void window.wpt.recentBinders().then(setRecents)
+    void window.wpt.preparerInitials().then(setPreparerInitials)
     // Double-clicked in Finder, or dropped on the Dock icon.
     window.wpt.onOpenPath((target) => void openRef.current(target))
     window.wpt.onLiveState((state) => setLiveOn(state.on))
@@ -414,6 +431,21 @@ export default function App(): React.JSX.Element {
   const placeTool = useCallback(
     (pageId: string, nx: number, ny: number, base?: Session) => {
       if (!armed) return
+      // The initials question is open and owns the screen. Without this guard a
+      // click that lands on the page BEHIND it silently re-registers the pending
+      // mark at the new spot: the preparer clicked beside a figure, the prompt
+      // appeared, a stray click moved the mark into white space, and the tick
+      // came to rest somewhere they never pointed at. A tick in the wrong place
+      // is worse than the blank author this prompt exists to prevent — it looks
+      // like a figure was verified when it was not. The backdrop stops the click
+      // reaching here at all; this is the second lock on the same door.
+      //
+      // `base` is the tell. Only commitInitials passes it, and that call IS the
+      // answer being applied — it must go through even though the prompt has not
+      // finished closing. React has not re-rendered yet when it lands, so
+      // `initialsPrompt` is still set in this closure; without the `!base` the
+      // guard would swallow the one placement it exists to protect.
+      if (!base && initialsPrompt) return
       const target = pages.find((p) => p.id === pageId)
       if (!target) return
       // A mark is evidence that SOMEONE checked something. Recorded with a
@@ -423,12 +455,18 @@ export default function App(): React.JSX.Element {
       // which is what the first Windows install test hit. Ask once, at the only
       // moment the answer matters, rather than refusing the tool or writing a
       // blank. `base` lets the answer be applied and the mark placed in one go.
-      const from = base ?? session
-      if (!(from.reviewer ?? '').trim()) {
+      const base0 = base ?? session
+      // Seed from the machine's stored initials before asking. The question is
+      // worth asking once per person, not once per binder.
+      const who = (base0.reviewer ?? '').trim() || preparerInitials
+      if (!who) {
         setInitialsDraft('')
-        setInitialsPrompt({ pageId, nx, ny })
+        setInitialsPrompt({ mark: { pageId, nx, ny } })
         return
       }
+      // Write the answer into the SAME session the mark is added to, so the mark
+      // that seeded it is not the one mark recording a blank author.
+      const from = (base0.reviewer ?? '').trim() === who ? base0 : { ...base0, reviewer: who }
       if (armed.kind === 'tape') {
         const onPage = (from.tapes ?? []).filter((t) => t.page === pageId).length
         const { session: next, id } = addTape(from, {
@@ -461,24 +499,85 @@ export default function App(): React.JSX.Element {
       apply(next, `${armed.kind === 'text' ? armed.text : armed.kind} placed.`)
       setSelectedMarkId(id)
     },
-    [pages, armed, session, markSize, apply]
+    [pages, armed, session, markSize, apply, initialsPrompt, preparerInitials]
   )
 
   /**
-   * Answer the initials question and land the mark that asked it, in one step.
+   * Record the preparer's initials everywhere they need to be, in one place.
    *
-   * The reviewer is written into the SAME session the mark is added to, rather
-   * than set and left for the next render — otherwise the mark that triggered
-   * the prompt is the one mark that still records a blank author, which would
-   * be a peculiar bug to ship in the fix for blank authors.
+   * Two homes, on purpose. The session copy is attribution and has to travel
+   * inside the binder. The stored copy is the default the NEXT binder starts
+   * from, so the question is asked once on a machine rather than once per file.
+   */
+  const rememberInitials = useCallback((value: string): string => {
+    const initials = value.trim().toUpperCase().slice(0, 4)
+    setPreparerInitials(initials)
+    // Fire-and-forget: failing to persist a preference must never block a mark.
+    // The worst case is being asked again on the next binder.
+    void window.wpt.setPreparerInitials(initials).then(setPreparerInitials)
+    setSession((prev) => ({ ...prev, reviewer: initials }))
+    return initials
+  }, [])
+
+  /**
+   * Answer the initials question, and land the mark that asked it if there was
+   * one — the question can also be asked on its own, from the palette button.
+   *
+   * The reviewer is passed into placeTool on the SAME session the mark is added
+   * to, rather than set and left for the next render: `setSession` above does
+   * not take effect until React re-renders, so the mark that triggered the
+   * prompt would otherwise be the one mark still recording a blank author.
    */
   const commitInitials = useCallback(() => {
-    const value = initialsDraft.trim().toUpperCase().slice(0, 4)
     const pending = initialsPrompt
-    if (!value || !pending) return
+    if (!pending) return
+    const value = rememberInitials(initialsDraft)
+    if (!value) return
     setInitialsPrompt(null)
-    placeTool(pending.pageId, pending.nx, pending.ny, { ...session, reviewer: value })
-  }, [initialsDraft, initialsPrompt, placeTool, session])
+    if (pending.mark) {
+      placeTool(pending.mark.pageId, pending.mark.nx, pending.mark.ny, {
+        ...session,
+        reviewer: value
+      })
+    }
+  }, [initialsDraft, initialsPrompt, placeTool, session, rememberInitials])
+
+  /**
+   * Close the question without answering it. Says so in the status bar: the
+   * click that opened this was an attempt to place a mark, and a tool that
+   * quietly does nothing reads as broken.
+   */
+  /**
+   * Put the caret in the initials field when the question opens.
+   *
+   * `autoFocus` alone does not survive here: the click that opens the question
+   * is a click on the page, and the page view takes focus back for its own
+   * keyboard handling after React has mounted the dialog. The visible symptom
+   * was that typing "CJB" went to the global shortcuts instead of the field —
+   * "C" armed the calculator tape — and the preparer was left staring at an
+   * empty box that had apparently ignored them. Focusing in an effect runs
+   * after that, and it is the modal's job to own the keyboard anyway.
+   */
+  useEffect(() => {
+    if (!initialsPrompt) return
+    const put = (): void => {
+      const el = initialsInput.current
+      if (!el) return
+      el.focus()
+      el.select()
+    }
+    put()
+    // Again on the next frame: the page view can take focus back after this
+    // effect has run, and losing that race leaves the caret nowhere.
+    const frame = requestAnimationFrame(put)
+    return () => cancelAnimationFrame(frame)
+  }, [initialsPrompt])
+
+  const cancelInitials = useCallback(() => {
+    const asking = initialsPrompt
+    setInitialsPrompt(null)
+    if (asking?.mark) setStatus('Mark not placed — it needs initials to be evidence of anything.')
+  }, [initialsPrompt])
 
   const moveMark = useCallback(
     (id: string, nx: number, ny: number) => {
@@ -1160,6 +1259,15 @@ export default function App(): React.JSX.Element {
       const el = e.target as HTMLElement | null
       if (el && (el.isContentEditable || /^(input|textarea|select)$/i.test(el.tagName))) return
 
+      // A modal owns the keyboard for as long as it is up, whatever happens to
+      // have focus. The field guard above is not enough on its own: the click
+      // that opens the initials question is a click on the page, and if the page
+      // wins focus back the keystrokes arrive here with the body as their
+      // target. Typing "CJB" then armed the calculator tape on "C" instead of
+      // answering the question — and a stray letter that silently rearms a tool
+      // while a dialog is open is how a preparer ends up placing the wrong mark.
+      if (initialsPrompt) return
+
       const mod = e.metaKey || e.ctrlKey
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault()
@@ -1264,7 +1372,8 @@ export default function App(): React.JSX.Element {
     tapeKey,
     deleteShape,
     selectedMarkId,
-    selectedShapeId
+    selectedShapeId,
+    initialsPrompt
   ])
 
   /** Drag the divider to widen the bookmark panel — real titles are long.
@@ -1356,7 +1465,7 @@ export default function App(): React.JSX.Element {
           onRemoveDef={removeStatusDef}
           onParts={setParts}
           reviewer={reviewerInitials}
-          onReviewer={(v) => setSession((prev) => ({ ...prev, reviewer: v }))}
+          onReviewer={rememberInitials}
         />
         <span className="sep" />
         <span className="palette" title="Review marks — click a tool, then click the page">
@@ -1391,18 +1500,26 @@ export default function App(): React.JSX.Element {
           >
             F
           </button>
+          {/* Not disabled when there are no initials yet. A greyed-out control
+              carrying a bare dash is unreadable — it looks like a divider or a
+              rendering fault, not a setting, and clicking it to find out taught
+              nothing because nothing happened. It now asks the question it is
+              waiting on. */}
           <button
             className={armed?.kind === 'text' && armed.text === reviewerInitials ? 'on' : ''}
             style={{ color: MARK_COLOR.text }}
-            onClick={() => setArmed({ kind: 'text', text: reviewerInitials })}
-            disabled={!reviewerInitials}
+            onClick={() => {
+              if (reviewerInitials) return setArmed({ kind: 'text', text: reviewerInitials })
+              setInitialsDraft('')
+              setInitialsPrompt({ mark: null })
+            }}
             title={
               reviewerInitials
                 ? `Stamp your initials (${reviewerInitials})`
-                : 'Stamp your initials — set them in Status ▸ Options first'
+                : 'Stamp your initials — click to set them'
             }
           >
-            {reviewerInitials || '—'}
+            {reviewerInitials || '··'}
           </button>
           <button
             className={armed?.kind === 'tape' ? 'on' : ''}
@@ -1697,34 +1814,48 @@ export default function App(): React.JSX.Element {
         )}
       </div>
 
+      {/* The backdrop is not decoration. Without it the page stays live behind
+          the question, and a click meant for the dialog lands on the binder and
+          moves the very mark being asked about. It swallows the click instead,
+          and closes on a click outside the way a dialog is expected to. */}
       {initialsPrompt && (
-        <div className="initials-ask" role="dialog" aria-label="Set your initials">
-          <p className="ia-q">Your initials?</p>
-          <p className="ia-why">
-            Marks record who made them — a tick with no author is not evidence of anything.
-          </p>
-          <div className="ia-row">
-            <input
-              className="ia-input"
-              autoFocus
-              value={initialsDraft}
-              maxLength={4}
-              placeholder="e.g. CJB"
-              onChange={(e) => setInitialsDraft(e.target.value.toUpperCase().slice(0, 4))}
-              onKeyDown={(e) => {
-                e.stopPropagation()
-                if (e.key === 'Enter') commitInitials()
-                if (e.key === 'Escape') setInitialsPrompt(null)
-              }}
-            />
-            <button className="ia-go" onClick={commitInitials} disabled={!initialsDraft.trim()}>
-              Place mark
-            </button>
-            <button className="ia-cancel" onClick={() => setInitialsPrompt(null)}>
-              Cancel
-            </button>
+        <div className="initials-backdrop" onMouseDown={cancelInitials}>
+          <div
+            className="initials-ask"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Set your initials"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <p className="ia-q">Your initials?</p>
+            <p className="ia-why">
+              Marks record who made them — a tick with no author is not evidence of anything.
+              They are remembered for the next binder too.
+            </p>
+            <div className="ia-row">
+              <input
+                className="ia-input"
+                ref={initialsInput}
+                autoFocus
+                value={initialsDraft}
+                maxLength={4}
+                placeholder="e.g. CJB"
+                onChange={(e) => setInitialsDraft(e.target.value.toUpperCase().slice(0, 4))}
+                onKeyDown={(e) => {
+                  e.stopPropagation()
+                  if (e.key === 'Enter') commitInitials()
+                  if (e.key === 'Escape') cancelInitials()
+                }}
+              />
+              <button className="ia-go" onClick={commitInitials} disabled={!initialsDraft.trim()}>
+                {initialsPrompt.mark ? 'Place mark' : 'Save'}
+              </button>
+              <button className="ia-cancel" onClick={cancelInitials}>
+                Cancel
+              </button>
+            </div>
+            <p className="ia-later">Change them later in Status ▸ Options.</p>
           </div>
-          <p className="ia-later">Change them later in Status ▸ Options.</p>
         </div>
       )}
 
