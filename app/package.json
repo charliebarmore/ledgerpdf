@@ -17,10 +17,10 @@
     "predev": "npm run prepare:assets",
     "prebuild": "npm run prepare:assets",
     "build:engine": "node scripts/build-engine.mjs",
-    "prepackage:dir": "npm run build:engine && npm run build",
+    "prepackage:dir": "npm run build:icon && npm run build:engine && npm run build",
     "package:dir": "electron-builder --dir --config electron-builder.config.cjs -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false",
     "verify:package": "node scripts/verify-package.mjs",
-    "predist": "npm run build:engine && npm run build",
+    "predist": "npm run build:icon && npm run build:engine && npm run build",
     "dist": "node scripts/build-release.mjs",
     "smoke": "node scripts/smoke.mjs",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --outfile=out/mcp-server.cjs --log-level=warning",
@@ -29,7 +29,8 @@
     "verify": "npm run typecheck && npm run verify:persistence && npm run verify:model && npm run verify:text && npm run verify:mcp && npm run smoke && npm run verify:live",
     "verify:viewers": "node scripts/verify-viewers.mjs",
     "verify:text": "node scripts/verify-text.mjs",
-    "verify:live": "npm run build:mcp && node scripts/live-check.mjs"
+    "verify:live": "npm run build:mcp && node scripts/live-check.mjs",
+    "build:icon": "node scripts/build-icon.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
