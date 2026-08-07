@@ -64,11 +64,19 @@ cd app && npm run verify              # typecheck, model, MCP, text, smoke, live
 engine/.venv/bin/python spike/verify_viewers.py   # cross-engine conformance
 ```
 
-`verify_viewers.py` renders in **two** independent engines and compares them, so it needs
-poppler's `pdftoppm` alongside pdfium (`brew install poppler`, or `apt install
-poppler-utils`). It is effectively macOS/Linux only — poppler is not readily available on
-Windows, which is why CI skips this one step there. The pdfium half is covered by
-`npm run verify` on every platform, so a Windows contributor is not flying blind.
+`verify_viewers.py` renders in **two** independent engines and compares them, so the full
+run needs poppler's `pdftoppm` alongside pdfium (`brew install poppler`, or `apt install
+poppler-utils`). Cross-engine agreement is therefore macOS/Linux only, since poppler is not
+readily installable on Windows.
+
+Windows CI runs `--engines pdfium`, which asserts every mark lands where it was placed
+across the hostile geometries — rotation, `CropBox != MediaBox`, legal-with-existing-
+annotations — without claiming an agreement it cannot check. That step **fails the job**.
+It previously carried `continue-on-error: true`, under which the script died at the
+`pdftoppm` check and reported success on every run for months, having verified nothing.
+If you are changing mark geometry, run the two-engine version locally before pushing:
+Windows CI will catch a mark that moved, but only macOS will catch the two renderers
+disagreeing about where it moved to.
 
 **Quit LedgerPDF before running `npm run verify`.** The smoke and live checks
 launch the real app, and a single-instance lock means a second launch hands off to

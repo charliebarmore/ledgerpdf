@@ -96,9 +96,21 @@ jobs:
         working-directory: app
         run: npm run verify
 
-      - name: Viewer conformance (pdfium)
-        run: engine\.venv\Scripts\python spike\verify_viewers.py
-        continue-on-error: true # poppler is not installed on the runner
+      # No `continue-on-error`. It used to carry one "because poppler is not
+      # installed on the runner" — and the script died at the pdftoppm check
+      # before rendering anything, so this step FAILED on every Windows run
+      # and was reported green every time. It never verified a single mark.
+      # A step that cannot fail is not a check; one named "(pdfium)" that never
+      # reached pdfium is worse than no step, because the tick reads as
+      # coverage nobody has.
+      #
+      # It now runs the pdfium half for real and fails the job if a mark moves.
+      # That is worth having on Windows precisely because this binder carries
+      # the hostile geometries — rotation, CropBox != MediaBox, legal with
+      # existing annotations — which the smoke's single-page check does not.
+      # Cross-engine agreement still needs poppler and still runs on macOS.
+      - name: Viewer conformance (pdfium half — cross-engine needs poppler, macOS)
+        run: engine\.venv\Scripts\python spike\verify_viewers.py --engines pdfium
 
       # `npm run dist` deliberately refuses to build without signing
       # credentials, which is the right default. This is explicitly a TEST

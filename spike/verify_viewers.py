@@ -103,7 +103,32 @@ def render_poppler(path: str, index: int) -> np.ndarray:
 ENGINES = {"pdfium": render_pdfium, "poppler": render_poppler}
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """`--engines pdfium` runs one engine instead of two.
+
+    Not a convenience. On Windows poppler is not readily installable, so this
+    script died at the pdftoppm check — and CI hid that behind
+    `continue-on-error: true`, reporting success on every run while verifying
+    nothing at all. A step that cannot fail is not a check, and one named
+    "(pdfium)" that never reached pdfium is worse than an absent one, because
+    the green tick is read as coverage.
+
+    One engine cannot prove cross-engine agreement, so the closing line says
+    which engines actually ran rather than claiming both. What it CAN prove on
+    Windows is that every mark lands where it was placed across the hostile
+    geometries — rotation, CropBox != MediaBox, legal-with-existing-annotations
+    — which is more than the smoke's single-page position check covers.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+    engines = dict(ENGINES)
+    if "--engines" in args:
+        wanted = args[args.index("--engines") + 1].split(",")
+        unknown = [w for w in wanted if w not in ENGINES]
+        if unknown:
+            print(f"unknown engine(s): {', '.join(unknown)}")
+            return 2
+        engines = {k: ENGINES[k] for k in wanted}
+
     info = build()
     if info["problems"]:
         print(f"FAIL  qpdf reported: {info['problems']}")
@@ -115,7 +140,7 @@ def main() -> int:
         for page, wants in sorted(EXPECTED.items(), key=lambda kv: kv[0]):
             # The flattened file is the same binder; page 6 is the flattened twin
             # of page 1, so only assert the pages that carry marks either way.
-            for engine, render in ENGINES.items():
+            for engine, render in engines.items():
                 img = render(path, page)
                 for color, nx, ny in wants:
                     got = centroid(mask_for(img, color))
@@ -135,7 +160,17 @@ def main() -> int:
     if failures:
         print(f"{failures} check(s) FAILED")
     else:
-        print("every mark lands in the same place in pdfium AND poppler")
+        names = " AND ".join(engines)
+        agreement = (
+            f"every mark lands in the same place in {names}"
+            if len(engines) > 1
+            # Say what was actually proven. "Agreement" across one engine is not
+            # a thing, and a line claiming it would be the same lie the
+            # continue-on-error tick was telling.
+            else f"every mark lands where it was placed in {names} (single engine — "
+            "cross-engine agreement NOT checked)"
+        )
+        print(agreement)
     return 1 if failures else 0
 
 
