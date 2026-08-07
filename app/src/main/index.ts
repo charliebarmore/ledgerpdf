@@ -68,6 +68,23 @@ const packageSmoke = packageUiSmoke || (!isDev && process.argv.includes('--wpt-p
 app.setName('LedgerPDF')
 
 /**
+ * Dev seam: give a headless run its own userData directory.
+ *
+ * Preferences now persist across binders — the preparer's initials among them —
+ * which makes any test that depends on "no initials stored yet" both fragile
+ * and destructive. Fragile because it passes once and then never again, having
+ * stored the answer on its first run; destructive because the state it stores
+ * is the developer's own. The scripted placement smoke hit exactly that: green
+ * on its first run, then failing identically for the wrong reason.
+ *
+ * Set before `whenReady`, because Electron resolves userData lazily on first
+ * use and moving it afterwards would leave earlier reads pointing elsewhere.
+ */
+if (isDev && process.env.WPT_DEV_USERDATA) {
+  app.setPath('userData', path.resolve(process.env.WPT_DEV_USERDATA))
+}
+
+/**
  * A binder opened from Finder or Explorer.
  *
  * macOS delivers it through `open-file`, which can fire BEFORE the window
@@ -825,7 +842,14 @@ function createWindow(): void {
         paths,
         exportTo,
         seedMarks: isDev && !!process.env.WPT_DEV_MARKS,
-        reopen: isDev ? process.env.WPT_DEV_REOPEN : undefined
+        reopen: isDev ? process.env.WPT_DEV_REOPEN : undefined,
+        // A scripted run through the REAL placeTool, rather than around it.
+        // WPT_DEV_MARKS above calls addMark directly, which is why placeTool
+        // had no coverage at all and collected three defects in two days — a
+        // blank author, a mark that moved when a stray click landed behind the
+        // initials prompt, and a keyboard race. Only a person clicking found
+        // any of them. Format: "tick@0.7,0.3;tick@0.1,0.9;answer:RV".
+        place: isDev ? process.env.WPT_DEV_PLACE : undefined
       })
     }
   })

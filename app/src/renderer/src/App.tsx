@@ -1146,9 +1146,91 @@ export default function App(): React.JSX.Element {
   // refs so this subscribes exactly once.
   const devRefs = useRef({ importPaths, writeBinder, openBinderAt: openBinder })
   devRefs.current = { importPaths, writeBinder, openBinderAt: openBinder }
+  /**
+   * The placement path, held by ref so a scripted dev run always calls the
+   * CURRENT closures. placeTool and commitInitials capture session state; a
+   * script that grabbed them once would replay against a stale binder and
+   * assert nothing useful.
+   */
+  const devPlay = useRef({
+    placeTool,
+    commitInitials,
+    setArmed,
+    setInitialsDraft,
+    session,
+    initialsPrompt,
+    initialsDraft,
+    armed
+  })
+  devPlay.current = {
+    placeTool,
+    commitInitials,
+    setArmed,
+    setInitialsDraft,
+    session,
+    initialsPrompt,
+    initialsDraft,
+    armed
+  }
   useEffect(() => {
-    window.wpt.onDevOpen(async ({ paths, exportTo, seedMarks, reopen }) => {
+    window.wpt.onDevOpen(async ({ paths, exportTo, seedMarks, reopen, place }) => {
       let imported = await devRefs.current.importPaths(paths)
+      // A scripted run through the REAL placement path. `seedMarks` above calls
+      // addMark directly, which is exactly why placeTool went uncovered and
+      // collected three defects in two days. Steps are replayed one render
+      // apart, because placeTool and commitInitials are useCallbacks over
+      // state: fired in a single tick they would all see the session as it was
+      // before the first of them, and the test would pass while proving nothing.
+      if (imported && place) {
+        const pageId = imported.pages[0].id
+        // Wait for OBSERVED state, never for a duration. placeTool's guard reads
+        // `initialsPrompt` from its closure, and that closure is only replaced
+        // on render — so a fixed delay makes this a race, and the first version
+        // of this runner duly lost it about half the time. A flaky test is worse
+        // than none: it fails on correct code often enough that people learn to
+        // re-run it, which is how a real failure gets waved through.
+        const until = async (what: string, ok: () => boolean): Promise<void> => {
+          for (let i = 0; i < 200; i++) {
+            if (ok()) return
+            await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 5)))
+          }
+          throw new Error(`dev place script: timed out waiting for ${what}`)
+        }
+        for (const raw of place.split(';').map((x) => x.trim()).filter(Boolean)) {
+          const answer = raw.match(/^answer:(.*)$/i)
+          if (answer) {
+            const value = answer[1].trim().toUpperCase().slice(0, 4)
+            devPlay.current.setInitialsDraft(value)
+            // commitInitials reads the draft from ITS closure, so the wait is
+            // for that closure to exist — not merely for setState to be called.
+            await until(
+              'the answer to reach the field',
+              () => devPlay.current.initialsDraft === value
+            )
+            devPlay.current.commitInitials()
+            await until('the question to close', () => !devPlay.current.initialsPrompt)
+            continue
+          }
+          const m = raw.match(/^([a-z]+)@([\d.]+),([\d.]+)$/i)
+          if (!m) continue
+          const kind = m[1] as ToolKind
+          const before = (devPlay.current.session.marks ?? []).length
+          devPlay.current.setArmed({ kind })
+          await until(`the ${kind} tool to arm`, () => devPlay.current.armed?.kind === kind)
+          devPlay.current.placeTool(pageId, Number(m[2]), Number(m[3]))
+          // Either the mark lands, or the question opens. Both are settled
+          // states; waiting for "one of them" is what makes this deterministic.
+          await until(
+            'the mark to land or the question to open',
+            () =>
+              (devPlay.current.session.marks ?? []).length > before ||
+              !!devPlay.current.initialsPrompt
+          )
+        }
+        // Hand the scripted session back to the rest of this flow, which still
+        // owns exporting and the snapshot.
+        imported = devPlay.current.session
+      }
       if (imported && seedMarks) {
         // Exercise the same model the palette uses, so the smoke test covers
         // place -> render -> export without simulating pointer events.

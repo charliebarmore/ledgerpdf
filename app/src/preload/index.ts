@@ -117,7 +117,13 @@ const api = {
 
   /** Dev seam (WPT_DEV_OPEN) — preload a binder without clicking dialogs. */
   onDevOpen: (
-    cb: (arg: { paths: string[]; exportTo?: string; seedMarks?: boolean; reopen?: string }) => void
+    cb: (arg: {
+      paths: string[]
+      exportTo?: string
+      seedMarks?: boolean
+      reopen?: string
+      place?: string
+    }) => void
   ): void => {
     ipcRenderer.on('dev:open', (_e, arg) => cb(arg))
   },

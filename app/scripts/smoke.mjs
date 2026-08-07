@@ -267,6 +267,88 @@ check(
     : `exit=${orphanCode} — pipe was never severed while running, so EPIPE went untested (electron started: ${sawElectron})`
 )
 
+// ------------------------------------- the placement path, driven for real
+//
+// `WPT_DEV_MARKS` above calls addMark directly, so until now placeTool — the
+// function a preparer's every click goes through — had NO automated coverage.
+// It collected three defects in two days: a blank author, a mark that moved
+// when a stray click landed behind the initials prompt, and a keyboard race.
+// A person clicking found all three.
+//
+// The script below replays the exact sequence that produced the worst of them:
+// click beside a figure with no initials set, let a stray click land while the
+// question is up, then answer it.
+const PLACE_PDF = path.join(REPO, 'spike', 'out', 'app_place_binder.pdf')
+const PLACE_HOME = path.join(REPO, 'spike', 'out', 'place-userdata')
+rmSync(PLACE_PDF, { force: true })
+rmSync(PLACE_HOME, { force: true, recursive: true })
+const placed = await run('npm', ['run', 'dev'], {
+  cwd: APP,
+  shell: process.platform === 'win32',
+  env: {
+    ...process.env,
+    WPT_DEV_OPEN: a,
+    WPT_DEV_EXPORT: PLACE_PDF,
+    WPT_DEV_SHOT: path.join(REPO, 'spike', 'out', 'app_place_window.png'),
+    // no WPT_DEV_MARKS: this run must start with NO reviewer, which is the
+    // state that makes the question appear at all.
+    WPT_DEV_PLACE: 'tick@0.72,0.30;tick@0.11,0.88;answer:RV;tick@0.40,0.60',
+    // Its own userData, wiped first. Initials now persist across binders, so
+    // "no initials stored yet" is a precondition this test would otherwise
+    // destroy on its first run — passing once and then failing identically ever
+    // after, for a reason that has nothing to do with the code. It would also
+    // be overwriting the developer's own initials to do it.
+    WPT_DEV_USERDATA: PLACE_HOME,
+    WPT_DEV_EXIT: '1'
+  }
+})
+check('scripted placement run exited cleanly', placed.code === 0, `exit=${placed.code}`)
+
+if (existsSync(PLACE_PDF)) {
+  const pp = await engine({ cmd: 'probe', path: PLACE_PDF })
+  const ticks = pp.ok
+    ? pp.probe.pages.flatMap((pg) => (pg.annotations ?? []).filter((x) => x.wpt_kind === 'tick'))
+    : []
+  const at = (nx, ny) =>
+    ticks.find(
+      (t) => Math.abs((t.wpt_data?.nx ?? -1) - nx) < 0.01 && Math.abs((t.wpt_data?.ny ?? -1) - ny) < 0.01
+    )
+
+  // THE ONE THAT MATTERS. The second click in the script lands while the
+  // initials question is open. If it is allowed through, it silently moves the
+  // pending mark and the tick comes to rest at 0.11,0.88 — white space, far
+  // from the figure the preparer pointed at. That is worse than a blank author:
+  // it looks like a completed assertion about a number nobody checked.
+  check(
+    'a stray click while the initials question is open does not move the mark',
+    !!at(0.72, 0.3) && !at(0.11, 0.88),
+    ticks.map((t) => `(${t.wpt_data?.nx},${t.wpt_data?.ny})`).join(' ') || 'no ticks'
+  )
+  // Answering the question places the mark that asked it, attributed — the mark
+  // that seeded the initials must not be the one mark recording a blank author.
+  check(
+    'the mark that asked for initials lands carrying them',
+    at(0.72, 0.3)?.wpt_data?.author === 'RV',
+    JSON.stringify(at(0.72, 0.3)?.wpt_data?.author ?? null)
+  )
+  // And once answered, the question is not asked again: a later click places
+  // straight away rather than opening the prompt a second time.
+  check(
+    'a later click places directly, without asking again',
+    at(0.4, 0.6)?.wpt_data?.author === 'RV',
+    ticks.length === 2 ? '2 ticks, both attributed' : `${ticks.length} tick(s)`
+  )
+  // Deliberately NOT named for the stray click: with the guard removed the mark
+  // MOVES rather than duplicating, so this count stays at 2 and passes while the
+  // bug is live. The position check above is the one with teeth. This one guards
+  // a different failure — a click that places twice — and is kept for that.
+  check(
+    'exactly two marks exist, one per intended click',
+    ticks.length === 2,
+    `${ticks.length}`
+  )
+}
+
 let fails = 0
 for (const [name, ok, detail] of checks) {
   if (!ok) fails++
