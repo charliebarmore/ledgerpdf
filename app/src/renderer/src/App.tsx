@@ -1017,7 +1017,11 @@ export default function App(): React.JSX.Element {
       if (imported && seedMarks) {
         // Exercise the same model the palette uses, so the smoke test covers
         // place -> render -> export without simulating pointer events.
-        imported = { ...imported, reviewer: 'CJB' }
+        // A neutral placeholder, not anyone's real initials. This is shipped
+        // source: a maintainer's initials sitting in it read as the app being
+        // personalised to them, and this value ends up as the author on every
+        // mark the smoke test exports.
+        imported = { ...imported, reviewer: 'RV' }
         imported = addMark(imported, {
           page: imported.pages[0].id,
           kind: 'tick',

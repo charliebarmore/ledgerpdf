@@ -37,7 +37,7 @@ export function recoveryPathFor(target: string): string {
  *
  * The dot prefix does that on macOS and Linux and does NOTHING on Windows, so
  * a preparer there would open an engagement folder and find
- * ".CJB-Q2 2026.wpt-working.pdf" and ".CJB-Q2 2026.wpt-recovery.json" sitting
+ * ".Q2 2026 close.wpt-working.pdf" and ".Q2 2026 close.wpt-recovery.json" sitting
  * next to their binder — a stray JSON they cannot interpret and a second PDF
  * they might open and mark up by mistake. That is the exact confusion the
  * single-file model exists to remove.

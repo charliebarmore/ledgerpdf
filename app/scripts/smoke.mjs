@@ -147,7 +147,7 @@ if (existsSync(OUT_PDF)) {
     marks.length === 5 &&
       marks
         .filter((m) => m.wpt_kind !== 'tape')
-        .every((m) => m.has_ap && m.wpt_data?.author === 'CJB') &&
+        .every((m) => m.has_ap && m.wpt_data?.author === 'RV') &&
       marks.some((m) => m.wpt_data?.text === 'F'),
     JSON.stringify(marks.map((m) => [m.wpt_kind, m.wpt_data?.author, m.wpt_data?.text]))
   )
