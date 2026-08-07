@@ -1904,12 +1904,20 @@ button.ai-count {
    author. Positioned over the workspace rather than at the click point: the
    mark layer lives two components down, and threading pixel coordinates
    through it to save one glance is not a trade worth making. */
-.initials-ask {
+/* Covers the workspace so a click cannot reach the page underneath and move
+   the mark this question is about. The tint is what tells the eye the binder
+   is not accepting clicks right now. */
+.initials-backdrop {
   position: fixed;
-  left: 50%;
-  top: 30%;
-  transform: translate(-50%, -50%);
+  inset: 0;
   z-index: 60;
+  background: rgb(0 0 0 / 0.18);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 22vh;
+}
+.initials-ask {
   background: var(--panel, #fff);
   border: 1px solid var(--line, #d8d6cf);
   border-radius: 10px;
@@ -1939,6 +1947,13 @@ button.ai-count {
   letter-spacing: 0.06em;
   font-weight: 700;
   text-align: center;
+}
+/* The uppercase transform above applies to the placeholder too, which rendered
+   the hint as "E.G. CJB". The example is meant to read as an example. */
+.initials-ask .ia-input::placeholder {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
 }
 .initials-ask .ia-later {
   margin: 12px 0 0;

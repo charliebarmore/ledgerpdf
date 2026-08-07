@@ -19,6 +19,7 @@ import {
 } from './persistence'
 import { restrictedProcessEnv, runJsonCommand } from '../shared/json-process'
 import { clearRecents, readRecents, rememberBinder } from './recents'
+import { readPreparerInitials, writePreparerInitials } from './preferences'
 import { toSaved, type Session } from '../renderer/src/session'
 
 /**
@@ -583,6 +584,23 @@ function registerIpc(): void {
   ipcMain.handle('recents:clear', async (e) => {
     assertTrustedIpc(e)
     await clearRecents(app.getPath('userData'))
+  })
+
+  /**
+   * The preparer's initials, remembered across binders.
+   *
+   * Asked once on a machine rather than once per binder — see preferences.ts
+   * for why they do not belong to the document.
+   */
+  ipcMain.handle('prefs:initials:get', async (e) => {
+    assertTrustedIpc(e)
+    return readPreparerInitials(app.getPath('userData'))
+  })
+
+  /** Returns the value as stored, so the renderer shows what was actually kept. */
+  ipcMain.handle('prefs:initials:set', async (e, value: unknown) => {
+    assertTrustedIpc(e)
+    return writePreparerInitials(app.getPath('userData'), value)
   })
 
   ipcMain.handle('binder:autosave', async (_e, binder: unknown, session: unknown) => {

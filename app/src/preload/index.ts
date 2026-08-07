@@ -102,6 +102,14 @@ const api = {
     Array<{ path: string; name: string; at: string; pages?: number; present?: boolean }>
   > => ipcRenderer.invoke('recents:list'),
   clearRecentBinders: (): Promise<void> => ipcRenderer.invoke('recents:clear'),
+  /**
+   * The preparer's own initials, remembered across binders rather than asked
+   * for again on each one. Setting returns the value as stored (trimmed,
+   * upper-cased, clamped), so the UI shows what was actually kept.
+   */
+  preparerInitials: (): Promise<string> => ipcRenderer.invoke('prefs:initials:get'),
+  setPreparerInitials: (value: string): Promise<string> =>
+    ipcRenderer.invoke('prefs:initials:set', value),
   /** A binder opened from Finder/Explorer, or handed to a second launch. */
   onOpenPath: (cb: (target: string) => void): void => {
     ipcRenderer.on('binder:openPath', (_e, target) => cb(target))
