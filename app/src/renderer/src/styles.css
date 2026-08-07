@@ -1988,9 +1988,17 @@ button.ai-count {
 .sm-menu {
   position: absolute;
   top: calc(100% + 5px);
-  left: 0;
+  /* Anchored to its RIGHT edge, like .ex-menu beside it, because this button
+     sits near the right of the window. Anchored left, a 300px panel ran off
+     the edge — and an absolutely-positioned child still counts toward the
+     scroll width, so the whole app gained a horizontal scrollbar and the menu
+     was only readable by scrolling to it. */
+  right: 0;
   z-index: 40;
   width: 300px;
+  /* Belt for a narrow window: whatever the anchor, it cannot exceed the
+     viewport and reintroduce the scrollbar. */
+  max-width: calc(100vw - 2 * var(--md));
   padding: var(--xs);
   background: var(--surface);
   border: 1px solid var(--border);
