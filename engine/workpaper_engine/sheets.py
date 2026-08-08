@@ -30,8 +30,10 @@ tickable with no OCR involved.
 
 from __future__ import annotations
 
+import codecs
 import csv as csvlib
 import datetime as dt
+import io
 from pathlib import Path
 
 import pikepdf
@@ -108,16 +110,63 @@ def _clean(value, number_format: str = "") -> str:
     return "".join(ch for ch in text.replace("\n", " ") if ord(ch) >= 32 or ch == "\t")
 
 
+def _decode_csv(raw: bytes) -> tuple[str, str | None]:
+    """Decode CSV bytes, returning the text and a warning if it had to guess.
+
+    This used to be `encoding="utf-8-sig", errors="replace"` — one encoding
+    assumed, and anything that was not it replaced character by character. The
+    assumption is the wrong way round for this profession. Excel's plain "CSV"
+    export writes the WINDOWS ANSI codepage, not UTF-8, and it is the export a
+    firm reaches for; only the separately-named "CSV UTF-8" writes UTF-8. So a
+    trial balance for Peña & Fuentes, saved the ordinary way, arrived as
+    "Pe�a" — every accented character replaced before the file was even
+    parsed, with no error and nothing to notice.
+
+    The order below is what the bytes can actually support, not a preference:
+
+    1. A BOM is a statement of fact; believe it.
+    2. UTF-8, strictly. This is self-validating — its multi-byte sequences are
+       structured enough that ordinary cp1252 text almost never decodes as
+       valid UTF-8 by accident — so a clean decode is strong evidence, and a
+       failure is proof it is NOT UTF-8 rather than a reason to start replacing
+       characters.
+    3. cp1252, strictly. What Excel actually wrote.
+    4. latin-1, which cannot fail, so there is always an answer.
+
+    Steps 3 and 4 are guesses and say so. Encoding cannot be recovered from
+    bytes with certainty; what it can do is stop silently destroying them.
+    """
+    for bom, enc in (
+        (codecs.BOM_UTF8, "utf-8-sig"),
+        (codecs.BOM_UTF16_LE, "utf-16"),
+        (codecs.BOM_UTF16_BE, "utf-16"),
+    ):
+        if raw.startswith(bom):
+            return raw.decode(enc), None
+    try:
+        return raw.decode("utf-8"), None
+    except UnicodeDecodeError:
+        pass
+    try:
+        # Kept short on purpose: this lands in the status bar, which truncates.
+        # A caveat the preparer cannot finish reading is half a caveat.
+        return raw.decode("cp1252"), "read as Windows-1252, not UTF-8 — check accented names"
+    except UnicodeDecodeError:
+        return raw.decode("latin-1"), "read as Latin-1 — check any non-English characters"
+
+
 def read_grids(path: str | Path) -> tuple[list[tuple[str, list[list[str]]]], list[str]]:
     """(sheet name, rows of cell strings) per sheet, plus any warnings."""
     p = Path(path)
     warnings: list[str] = []
     if p.suffix.lower() == ".csv":
-        with p.open(newline="", encoding="utf-8-sig", errors="replace") as handle:
-            rows = [
-                [_clean(cell) for cell in row[:MAX_COLS]]
-                for row in list(csvlib.reader(handle))[:MAX_ROWS]
-            ]
+        text, guess = _decode_csv(p.read_bytes())
+        if guess:
+            warnings.append(f"{p.name}: {guess}")
+        rows = [
+            [_clean(cell) for cell in row[:MAX_COLS]]
+            for row in list(csvlib.reader(io.StringIO(text, newline="")))[:MAX_ROWS]
+        ]
         return [(p.stem, rows)], warnings
 
     import openpyxl

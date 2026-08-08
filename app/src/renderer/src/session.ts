@@ -612,6 +612,20 @@ export interface ProbeWire {
   pages: Array<{ index: number; rotate: number; mediabox: number[]; cropbox: number[] | null }>
   outline: Array<{ title: string; dest_page: number | null; children: unknown[] }>
   image?: { pixels: number[]; lossless: boolean; reason: string }
+  /**
+   * Present when the source was a spreadsheet. `warnings` is how the engine
+   * reports that it had to GUESS or gave up on something — a CSV whose encoding
+   * had to be inferred, a sheet cut off at the row cap.
+   *
+   * The engine has always returned this and nothing ever read it: the field was
+   * not declared here, so the one channel for "your spreadsheet did not import
+   * exactly as written" ended at the process boundary. A warning nobody can see
+   * is the same as no warning.
+   */
+  sheet?: {
+    sheets: Array<{ name: string; rows: number; columns: number }>
+    warnings: string[]
+  }
   fingerprint?: SourceFingerprint
 }
 
