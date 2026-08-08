@@ -25,11 +25,18 @@ const APPLE_PASSWORD_KEYS = ['APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_T
 const APPLE_API_KEYS = ['APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']
 if (signedRelease && process.platform === 'darwin') {
   const has = (keys) => keys.every((key) => process.env[key])
-  if (!has(APPLE_PASSWORD_KEYS) && !has(APPLE_API_KEYS)) {
+  // THREE paths, not two. The keychain profile is the one to prefer and the
+  // one this check originally missed — which would have rejected the safest
+  // setup while accepting the two that put a live credential in the
+  // environment, where it reaches every child process and any shell history
+  // that recorded the command.
+  if (!process.env.APPLE_KEYCHAIN_PROFILE && !has(APPLE_PASSWORD_KEYS) && !has(APPLE_API_KEYS)) {
     throw new Error(
-      'Signed macOS release needs notarization credentials, and neither set is complete.\n' +
+      'Signed macOS release needs notarization credentials, and none of the three sets is complete.\n' +
+        '  Keychain (preferred):  APPLE_KEYCHAIN_PROFILE — store it once with\n' +
+        '                         xcrun notarytool store-credentials\n' +
         `  App-specific password: ${APPLE_PASSWORD_KEYS.join(', ')}\n` +
-        `  or App Store Connect:  ${APPLE_API_KEYS.join(', ')}\n` +
+        `  App Store Connect:     ${APPLE_API_KEYS.join(', ')}\n` +
         'Generate an app-specific password at appleid.apple.com > Sign-In and Security.'
     )
   }
