@@ -15,7 +15,7 @@
  */
 
 import { execFile, spawn } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -24,16 +24,52 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const APP = path.resolve(here, '..')
 const REPO = path.resolve(APP, '..')
-const FIXTURES = path.join(REPO, 'spike', 'fixtures')
 const PY = path.join(REPO, 'engine', '.venv', 'bin', 'python')
+
+// The engagement the demo prepares: the Whitmore set — a synthetic MFJ 1040
+// with two W-2s, three interest payers, childcare, a donation, a prior-year
+// return and a multi-tab workpaper. Invented names, EINs and figures, built
+// for exactly this. The documents stay OUT of the repo; only the recording
+// ships. Point WPT_DEMO_DOCS at any folder with the same shape to re-record
+// without them.
+const DEMO_DOCS = process.env.WPT_DEMO_DOCS
+  ? path.resolve(process.env.WPT_DEMO_DOCS)
+  : path.join(
+      process.env.HOME ?? '',
+      'Desktop',
+      'Demo Docs',
+      'Whitmore Demo Client (Synthetic)'
+    )
+const WORKPAPER = path.join(
+  DEMO_DOCS,
+  'Taxes',
+  '2025',
+  'Whitmore-Demo-Client-Synthetic-2025-Tax-Workpaper.xlsx'
+)
 const FRAMES = path.join(REPO, 'spike', 'out', 'demo_frames')
 const SERVER = path.join(APP, 'out', 'mcp-server.cjs')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+if (!existsSync(DEMO_DOCS) || !existsSync(WORKPAPER)) {
+  console.error(`demo documents not found at ${DEMO_DOCS}`)
+  console.error('set WPT_DEMO_DOCS to a folder of synthetic engagement documents')
+  process.exit(1)
+}
+
 // ---------------------------------------------------------------- the app
 rmSync(FRAMES, { recursive: true, force: true })
 mkdirSync(FRAMES, { recursive: true })
+
+// Rebuild the server bundle FIRST. The recorder drives out/mcp-server.cjs,
+// and a take against a stale bundle records behavior the source no longer
+// has — which happened: two takes ran without a fix that was sitting
+// typechecked in server.ts, and the missing beat read as a product bug.
+console.log('bundling the MCP server…')
+await new Promise((resolve, reject) => {
+  const b = spawn('npm', ['run', 'build:mcp'], { cwd: APP, stdio: 'inherit' })
+  b.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`build:mcp exited ${code}`))))
+})
 
 console.log('launching the app (empty binder, live access on)…')
 // detached + group kill: killing npm alone orphans Electron, and the orphan
@@ -121,7 +157,7 @@ await client.connect(
   new StdioClientTransport({
     command: process.execPath,
     args: [SERVER],
-    env: { ...process.env, WPT_MCP_ROOTS: path.join(REPO, 'spike') }
+    env: { ...process.env, WPT_MCP_ROOTS: [path.join(REPO, 'spike'), DEMO_DOCS].join(path.delimiter) }
   })
 )
 const call = async (name, args = {}) => {
@@ -139,55 +175,88 @@ const call = async (name, args = {}) => {
 const status = await call('binder_status')
 if (!status.includes('LIVE')) throw new Error(`agent is not live against the window: ${status.split('\n')[0]}`)
 
-await call('binder_add_pdfs', {
-  paths: [
-    path.join(FIXTURES, 'fixture_a.pdf'),
-    path.join(FIXTURES, 'fixture_b.pdf'),
-    path.join(FIXTURES, 'trial_balance.xlsx'),
-    path.join(FIXTURES, 'receipt.jpg')
+await call('binder_set_reviewer', { initials: 'CJB' })
+
+// The stack a 1040 preparer actually receives, in one gesture: thirteen source
+// documents — W-2s, consolidated 1099s, 1098, childcare, a donation receipt,
+// the prior-year return — then the firm's own multi-tab workpaper. recurse:
+// false because the folder also holds filed copies underneath; the demo takes
+// the inbox, not the archive.
+await call('binder_add_folder', { path: DEMO_DOCS, recurse: false })
+await sleep(4200)
+
+const beforeWp = await call('binder_status')
+const preIds = new Set([...beforeWp.matchAll(/\bpg_\d+\b/g)].map((m) => m[0]))
+await call('binder_add_pdfs', { paths: [WORKPAPER] })
+await sleep(3000)
+const afterWp = await call('binder_status')
+// The workpaper's own pages, so a find can be told "the workpaper copy, not
+// the source document" when the same figure rightly appears on both.
+const wpPages = new Set(
+  [...afterWp.matchAll(/\bpg_\d+\b/g)].map((m) => m[0]).filter((id) => !preIds.has(id))
+)
+
+// Every hit a find returned, each with the spot a preparer would tick —
+// "beside" the figure, not on top of it.
+const hits = (text) =>
+  [...text.matchAll(/\[page (pg_\d+)\s+nx ([\d.]+)\s+ny ([\d.]+)(?:\s+beside nx ([\d.]+))?\]/g)].map(
+    (m) => ({ page: m[1], nx: Number(m[4] ?? m[2]), ny: Number(m[3]) })
+  )
+const findOn = async (query, wanted) => {
+  const found = hits(await call('binder_find', { query, limit: 50 })).filter((h) =>
+    wanted ? wpPages.has(h.page) === wanted.workpaper : true
+  )
+  if (!found.length) throw new Error(`"${query}" not found where expected`)
+  return found[0]
+}
+
+// Tie Daniel's W-2 box 1 to the workpaper's W-2 line. The agent decides these
+// SHOULD agree; binder_tie proves whether they do, in integer cents, and
+// records the result on both pages. The window follows the work.
+const w2 = await findOn('128,450.00', { workpaper: false })
+const lead = await findOn('128,450', { workpaper: true })
+await call('binder_tie', {
+  label: 'Wages — W-2 box 1 to workpaper',
+  a: { pageId: w2.page, amount: '128,450.00', nx: w2.nx, ny: w2.ny, what: 'W-2 box 1 (Ironwood)' },
+  b: { pageId: lead.page, amount: '128,450', nx: lead.nx, ny: lead.ny, what: 'workpaper W-2 wages' }
+})
+await sleep(2600)
+
+// Foot Schedule B interest from its three payers, on the workpaper page where
+// the figures live. Whole cents, never floats; the card shows its addends.
+const int3 = await findOn('486.12', { workpaper: true })
+await call('binder_add_tape', {
+  pageId: int3.page,
+  nx: 0.64,
+  ny: Math.min(int3.ny + 0.16, 0.9),
+  title: 'Interest — Sch B',
+  entries: [
+    { value: 187.42, op: '+', note: 'Atlantic Natl' },
+    { value: 214.87, op: '+', note: 'Meridian' },
+    { value: 486.12, op: '+', note: 'Whitfield Barnes' }
   ]
 })
 await sleep(2600)
 
-// Find the wages figure BY NAME and tick it where it sits — the product's
-// whole argument in one gesture. Coordinates come from the find, not a human.
-const locate = (hit) => ({
-  page: hit.match(/\bpg_\d+\b/)?.[0],
-  // find hands back "beside nx" — the spot just right of the figure, where a
-  // preparer would actually put the tick. Use it rather than guessing offsets.
-  nx: Number(hit.match(/beside nx (\d+\.\d+)/)?.[1] ?? hit.match(/nx (\d+\.\d+)/)?.[1]),
-  ny: Number(hit.match(/ny (\d+\.\d+)/)?.[1])
-})
-const wages = locate(await call('binder_find', { query: '84,200.00' }))
-const page = wages.page
-await call('binder_place_mark', { pageId: page, kind: 'tick', nx: wages.nx, ny: wages.ny })
-await sleep(1800)
-
-const interest = locate(await call('binder_find', { query: '1,150.00' }))
-await call('binder_place_mark', { pageId: page, kind: 'tick', nx: interest.nx, ny: interest.ny })
-await sleep(1800)
-
-// A tape that shows the interest figure footing from its parts.
-await call('binder_add_tape', {
-  pageId: page,
-  nx: 0.62,
-  ny: 0.42,
-  title: 'Interest ties',
-  entries: [
-    { value: 612.0, op: '+', note: 'First Natl' },
-    { value: 538.0, op: '+', note: 'Credit Union' }
-  ]
-})
-await sleep(2200)
-
+// A real open item, flagged where the document is: the childcare statement
+// has no provider EIN, and Form 2441 needs one.
+const care = await findOn('9,840.00', { workpaper: false })
 await call('binder_add_note', {
-  pageId: page,
-  nx: 0.33,
-  ny: 0.55,
-  note: 'Wages agreed to W-2 summary. Interest foots to 1099-INTs.',
+  pageId: care.page,
+  nx: Math.min(care.nx + 0.06, 0.92),
+  ny: care.ny,
+  note: 'Provider EIN not on statement — request Form W-10 before filing 2441.',
   flag: true
 })
-await sleep(2200)
+await sleep(2600)
+
+// The binder explains itself: a cover memo, typeset as page 1.
+await call('binder_add_cover', {
+  path: path.join(REPO, 'spike', 'out', 'demo_cover.md'),
+  narrative:
+    'Assembled the 2025 Whitmore engagement from the client folder. Wages tied to the workpaper; Schedule B interest footed across three payers. One open item: the childcare provider EIN.'
+})
+await sleep(2600)
 
 await call('binder_save', { path: path.join(REPO, 'spike', 'out', 'demo_binder.pdf') })
 await sleep(2400)
