@@ -139,6 +139,8 @@ export function PageView({
   const [box, setBox] = useState({ w: 800, h: 900 })
   const [zoom, setZoom] = useState<Zoom>({ mode: 'fitWidth' })
   const [scrollTop, setScrollTop] = useState(0)
+  /** Where a programmatic scroll is headed, so arrival can be detected. */
+  const programmaticTarget = useRef<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   /** Set while WE scroll, so the scroll handler doesn't fight the jump. */
   const programmatic = useRef(false)
@@ -191,7 +193,20 @@ export function PageView({
     const el = scroller.current
     if (!el) return
     setScrollTop(el.scrollTop)
-    if (programmatic.current) return
+    // A programmatic jump is over when the column has ARRIVED, not when a timer
+    // says so. This used to clear after a flat 60ms, and a long jump — page 1 to
+    // page 11 — does not always settle inside it: a late scroll event then ran
+    // the handler below, recomputed the page from scroll position, and set
+    // currentId back to where the reader had been. Intermittent by construction,
+    // and it hit whichever navigation happened to be slowest.
+    if (programmatic.current) {
+      const target = programmaticTarget.current
+      if (target === null || Math.abs(el.scrollTop - target) <= 2) {
+        programmatic.current = false
+        programmaticTarget.current = null
+      }
+      return
+    }
     // A third down the viewport, not the very top: at a page boundary the page
     // filling most of the screen is the one you are reading, and a fixed 80px
     // offset kept naming the page that was mostly scrolled past.
@@ -206,6 +221,14 @@ export function PageView({
   }, [tops, pages, page?.id, onCurrentPage])
 
   /** Bring a page into view when NAVIGATION changed it, not scrolling. */
+  // Depends on `tops`, not on pageIndex alone. The geometry is recomputed
+  // whenever the page list or zoom changes — including when a live agent pushes
+  // a session — and if pageIndex changed BEFORE the new geometry existed, this
+  // effect read `undefined`, returned having scrolled nothing, and never ran
+  // again. The column stayed at the top while currentId said page 6, and the
+  // next scroll event duly "corrected" currentId back to page 1. That is what
+  // made following an agent look intermittent: it was not the follow failing,
+  // it was the scroll never happening and the page tracker overwriting it.
   useLayoutEffect(() => {
     const el = scroller.current
     const top = tops[pageIndex]
@@ -214,11 +237,16 @@ export function PageView({
     // scroll would yank the column back to the page boundary.
     if (top >= el.scrollTop - 4 && top < el.scrollTop + viewH * 0.6) return
     programmatic.current = true
+    programmaticTarget.current = top
     el.scrollTo({ top, behavior: 'auto' })
+    // Fallback only. If the column was already at `top`, no scroll event fires
+    // and the arrival check above never runs — without this, programmatic would
+    // stay true and the reader's own scrolling would stop updating the page.
     window.setTimeout(() => {
       programmatic.current = false
-    }, 60)
-  }, [pageIndex])
+      programmaticTarget.current = null
+    }, 1200)
+  }, [pageIndex, tops])
 
   const nudgeZoom = useCallback(
     (dir: 1 | -1) => setZoom({ mode: 'scale', factor: stepFrom(effective, dir) }),

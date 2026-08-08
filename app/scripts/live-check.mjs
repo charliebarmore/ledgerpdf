@@ -270,11 +270,22 @@ try {
     const before = await call('binder_current_page')
     if (last && !before.text.includes(last)) {
       await call('binder_place_mark', { pageId: last, kind: 'tick', nx: 0.5, ny: 0.5 })
-      const after = await call('binder_current_page')
+      // Wait for the OBSERVED view, not for the push to return. The push
+      // resolves when the renderer acknowledges it, but setCurrentId is a React
+      // state update and binder_current_page pulls what the last RENDER put in
+      // the ref — so reading it immediately races the re-render. It passed on
+      // timing luck until a rebase shifted the timing, which is exactly how a
+      // flaky check earns its keep: never on the run where it matters.
+      let after = ''
+      for (let i = 0; i < 40; i++) {
+        after = (await call('binder_current_page')).text
+        if (after.includes(last)) break
+        await new Promise((r) => setTimeout(r, 100))
+      }
       check(
         'the window follows the agent to the page it marked',
-        after.text.includes(last),
-        `marked ${last}; view: ${after.text.split('\n')[0]}`
+        after.includes(last),
+        `marked ${last}; view: ${after.split('\n')[0]}`
       )
     } else {
       check('the window follows the agent to the page it marked', false,
