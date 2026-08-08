@@ -254,6 +254,32 @@ try {
       back.text.includes('6 page(s)') && back.text.includes('1 mark(s)'),
       back.text.split('\n')[0]
     )
+
+    // Follow-the-agent: marking a page the person is NOT looking at moves the
+    // window there. Without this, an agent working deep in a real binder is
+    // invisible — the push applies but the view sits on page 1 and "watch it
+    // work" is only true of binders small enough to have no elsewhere. The
+    // harness never generates input events, so the idle guard is open and the
+    // follow must fire.
+    // binder_open's reply summarizes; binder_status is what enumerates pages.
+    // The first draft read ids out of the open reply, found none, and failed
+    // for a reason that had nothing to do with following.
+    const enumerated = await call('binder_status')
+    const ids = [...enumerated.text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+    const last = [...new Set(ids)].pop()
+    const before = await call('binder_current_page')
+    if (last && !before.text.includes(last)) {
+      await call('binder_place_mark', { pageId: last, kind: 'tick', nx: 0.5, ny: 0.5 })
+      const after = await call('binder_current_page')
+      check(
+        'the window follows the agent to the page it marked',
+        after.text.includes(last),
+        `marked ${last}; view: ${after.text.split('\n')[0]}`
+      )
+    } else {
+      check('the window follows the agent to the page it marked', false,
+        `could not find an off-screen page to mark (view: ${before.text.split('\n')[0]})`)
+    }
   }
 } catch (e) {
   const trace = (out + err)

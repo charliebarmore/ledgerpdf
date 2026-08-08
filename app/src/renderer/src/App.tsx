@@ -260,6 +260,29 @@ export default function App(): React.JSX.Element {
   const openRef = useRef<(target?: string) => Promise<void>>(async () => {})
   const liveRefs = useRef({ session, binderPath, apply, currentId })
   liveRefs.current = { session, binderPath, apply, currentId }
+  /**
+   * When the person last touched the app, for follow-the-agent. A live agent's
+   * change carries the page it acted on, and the view follows it there — that
+   * is what "watch it work" means on a 53-page binder where the action is
+   * otherwise off-screen. But the view is the REVIEWER's: any input (click,
+   * scroll, keys) suppresses following long enough that the page can never be
+   * yanked out from under someone mid-read. Idle again = watching again.
+   */
+  const FOLLOW_IDLE_MS = 8000
+  const lastUserInput = useRef(0)
+  useEffect(() => {
+    const bump = (): void => {
+      lastUserInput.current = Date.now()
+    }
+    for (const ev of ['pointerdown', 'keydown', 'wheel'] as const) {
+      document.addEventListener(ev, bump, true)
+    }
+    return () => {
+      for (const ev of ['pointerdown', 'keydown', 'wheel'] as const) {
+        document.removeEventListener(ev, bump, true)
+      }
+    }
+  }, [])
   useEffect(() => {
     // Refreshed whenever the binder is put down, so the list is current the
     // moment it is visible again.
@@ -282,7 +305,15 @@ export default function App(): React.JSX.Element {
       // `apply`, not setSession: an agent's change lands on the undo stack and
       // autosaves exactly like a click, so a person can take it back with the
       // undo they already know and never sees a change they cannot reverse.
-      liveRefs.current.apply(req.payload as Session, 'The agent changed this binder.')
+      const pushed = req.payload as Session
+      liveRefs.current.apply(pushed, 'The agent changed this binder.')
+      if (
+        req.focus &&
+        pushed.pages.some((p) => p.id === req.focus) &&
+        Date.now() - lastUserInput.current > FOLLOW_IDLE_MS
+      ) {
+        setCurrentId(req.focus)
+      }
       window.wpt.liveReply(req.id, { ok: true })
     })
   }, [])

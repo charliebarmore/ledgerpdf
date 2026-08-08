@@ -87,7 +87,7 @@ const api = {
   setLive: (on: boolean): Promise<{ on: boolean; socketPath?: string }> =>
     ipcRenderer.invoke('live:set', on),
   onLiveRequest: (
-    cb: (req: { id: number; kind: 'pull' | 'push'; payload?: unknown }) => void
+    cb: (req: { id: number; kind: 'pull' | 'push'; payload?: unknown; focus?: string | null }) => void
   ): void => {
     ipcRenderer.on('live:request', (_e, req) => cb(req))
   },

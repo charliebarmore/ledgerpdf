@@ -102,10 +102,23 @@ let sessionPath: string | null = null
  */
 export interface SessionOwner {
   pull: () => Promise<{ session: Session; path: string | null; currentPage?: string | null }>
-  push: (session: Session) => Promise<void>
+  push: (session: Session, focus?: string | null) => Promise<void>
 }
 
 let owner: SessionOwner | null = null
+/**
+ * The page the tool now running acted on, so the live window can follow the
+ * work. Without it an agent marking page 41 of a 53-page binder is invisible:
+ * the push applies the change but the person keeps looking at page 1, and
+ * "the preparer watches it happen" is only true on binders small enough that
+ * the action lands on the page already showing. Set by tools that touch one
+ * identifiable page; cleared after every push so a later tool cannot inherit
+ * a stale target.
+ */
+let focusPage: string | null = null
+const focus = (pageId: string | null | undefined): void => {
+  if (pageId) focusPage = pageId
+}
 /** The page the person is looking at, when the app is live. */
 let currentPage: string | null = null
 
@@ -286,7 +299,8 @@ const registerTool: typeof server.registerTool = (name, config, handler) =>
     } finally {
       // Push only on a real change, so a read-only tool never marks a person's
       // binder dirty or lands on their undo stack.
-      if (owner && session !== before) await owner.push(session)
+      if (owner && session !== before) await owner.push(session, focusPage)
+      focusPage = null
     }
   }) as never)
 
@@ -644,6 +658,7 @@ registerTool(
       'place_mark',
       `Placed ${kind === 'text' ? `"${letters}"` : kind} on ${pageId} at (${nx}, ${ny})`
     )
+    focus(pageId)
     const res = addMark(session, {
       page: pageId,
       kind,
@@ -697,6 +712,7 @@ registerTool(
       )
     }
     mutating('draw', `Drew ${kind} on ${pageId}`)
+    focus(pageId)
     const res = addShape(session, {
       page: pageId,
       kind,
@@ -794,6 +810,7 @@ registerTool(
       'add_tape',
       `Tape on ${pageId}${title ? ` ("${title}")` : ''}: ${lines.length} line(s), total ${formatAmount(tapeTotal(lines))}`
     )
+    focus(pageId)
     const res = addTape(session, { page: pageId, nx, ny, entries: lines, ...(title ? { title } : {}) })
     session = res.session
     return text(
@@ -1052,6 +1069,7 @@ registerTool(
       return fail('a note needs actual text — an empty comment tells a reviewer nothing')
     }
     mutating('add_note', `Noted on ${pageId}: ${note.trim().slice(0, 80)}`)
+    focus(pageId)
     const res = addMark(session, { page: pageId, kind: 'note', nx, ny, size: 20, note: note.trim() })
     session = res.session
     if (flag) {
@@ -1086,6 +1104,7 @@ registerTool(
     }
     const label = status ? defs.find((d) => d.id === status)!.label : 'cleared'
     mutating('set_status', `Set ${pageId} to ${label}`, true)
+    focus(pageId)
     session = status
       ? setPageStatus(session, [pageId], status, session.reviewer ?? '')
       : clearPageStatus(session, [pageId])
@@ -1376,6 +1395,7 @@ registerTool(
     const refA = `${label} — ties${b.what ? ` to ${b.what}` : ''}`
     const refB = `${label} — ties${a.what ? ` to ${a.what}` : ''}`
 
+    focus(a.pageId)
     mutating(
       'tie',
       `${agrees ? 'Tied' : 'DID NOT tie'} ${label}: ${formatCents(ca)} vs ${formatCents(cb)}` +
@@ -1465,6 +1485,7 @@ registerTool(
     const diff = sum - stated
     const foots = Math.abs(diff) <= (toleranceCents ?? 0)
 
+    focus(pageId)
     mutating(
       'foot',
       `${foots ? 'Footed' : 'DID NOT foot'} ${label}: ${parts.length} line(s) = ${formatCents(sum)}` +
@@ -1702,6 +1723,9 @@ registerTool(
         added.map((p) => p.id),
         0
       )
+      // The agent just replaced page 1; following it there is the point of a
+      // cover — the binder introducing itself is the thing worth watching.
+      focus(added[0]?.id)
       session = {
         ...session,
         cover: {

@@ -274,7 +274,7 @@ let liveWindow: BrowserWindow | null = null
 let liveSeq = 0
 const livePending = new Map<number, (payload: unknown) => void>()
 
-function askRenderer(kind: 'pull' | 'push', payload?: unknown): Promise<unknown> {
+function askRenderer(kind: 'pull' | 'push', payload?: unknown, focus?: string | null): Promise<unknown> {
   const win = liveWindow
   if (!win || win.isDestroyed()) return Promise.reject(new Error('no open binder window'))
   const id = ++liveSeq
@@ -288,7 +288,7 @@ function askRenderer(kind: 'pull' | 'push', payload?: unknown): Promise<unknown>
       clearTimeout(timer)
       resolve(value)
     })
-    win.webContents.send('live:request', { id, kind, payload })
+    win.webContents.send('live:request', { id, kind, payload, ...(focus ? { focus } : {}) })
   })
 }
 
@@ -346,10 +346,10 @@ async function setLiveAccess(on: boolean): Promise<{ on: boolean; socketPath?: s
         path: string | null
         currentPage?: string | null
       },
-    push: async (session) => {
+    push: async (session, focus) => {
       // Before the renderer is asked to draw it.
       authorizeSessionSources(session)
-      await askRenderer('push', session)
+      await askRenderer('push', session, focus)
     }
   })
   return announce({ on: true, socketPath: started.socketPath })

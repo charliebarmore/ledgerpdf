@@ -39,7 +39,7 @@ export interface LiveHandle {
 
 export interface LiveHooks {
   pull: () => Promise<{ session: unknown; path: string | null; currentPage?: string | null }>
-  push: (session: unknown) => Promise<void>
+  push: (session: unknown, focus?: string | null) => Promise<void>
 }
 
 let server: NetServer | null = null
@@ -96,7 +96,7 @@ export async function startLive(hooks: LiveHooks): Promise<LiveHandle> {
         cut = buffer.indexOf('\n')
         if (!line.trim()) continue
 
-        let msg: { id?: number; verb?: string; token?: string; session?: unknown }
+        let msg: { id?: number; verb?: string; token?: string; session?: unknown; focus?: string }
         try {
           msg = JSON.parse(line)
         } catch {
@@ -130,7 +130,7 @@ export async function startLive(hooks: LiveHooks): Promise<LiveHandle> {
                 currentPage: got.currentPage ?? null
               })
             } else if (msg.verb === 'push') {
-              await hooks.push(msg.session)
+              await hooks.push(msg.session, typeof msg.focus === 'string' ? msg.focus : null)
               reply({ id: msg.id, ok: true })
             } else {
               reply({ id: msg.id, ok: false, error: `unknown verb: ${String(msg.verb)}` })

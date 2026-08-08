@@ -137,8 +137,11 @@ export async function attachToRunningApp(): Promise<SessionOwner | null> {
         currentPage: reply.currentPage ?? null
       }
     },
-    push: async (session) => {
-      const reply = await link.send('push', { session })
+    push: async (session, focus) => {
+      // `focus` rides the envelope beside the session, never inside it: the
+      // payload stays a pure Session, so an older app that predates following
+      // simply ignores the extra key.
+      const reply = await link.send('push', { session, ...(focus ? { focus } : {}) })
       if (!reply.ok) throw new Error(reply.error ?? 'push failed')
     }
   }
