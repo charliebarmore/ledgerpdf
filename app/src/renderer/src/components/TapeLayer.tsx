@@ -160,14 +160,30 @@ export function TapeLayer({
             onFocus={() => !active && onActivate(tape.id)}
           >
             {active ? (
-              <input
-                className="tape-title-input"
-                value={tape.title ?? ''}
-                maxLength={TAPE_TITLE_MAX_LEN}
-                placeholder="caption…"
-                style={{ fontSize: fs, height: TAPE_LINE_HEIGHT * scale }}
-                onChange={(e) => onTitle(tape.id, e.target.value)}
-              />
+              <>
+                <input
+                  className="tape-title-input"
+                  value={tape.title ?? ''}
+                  maxLength={TAPE_TITLE_MAX_LEN}
+                  placeholder="caption…"
+                  style={{ fontSize: fs, height: TAPE_LINE_HEIGHT * scale }}
+                  onChange={(e) => onTitle(tape.id, e.target.value)}
+                />
+                {/* `maxLength` alone stops accepting keystrokes and says
+                    nothing, so a caption typed past the cap is silently
+                    shortened: "Peña & Fuentes — §1031 exchange" was stored as
+                    "…§1031 excha" with no indication. On a workpaper the
+                    caption is what a reviewer reads to know what was footed,
+                    and one that quietly means something narrower than what the
+                    preparer wrote is the same class of defect as a mark with
+                    no author. The cap stays — it is what keeps the drawn card
+                    from growing off the page — but it announces itself. */}
+                {(tape.title ?? '').length >= TAPE_TITLE_MAX_LEN && (
+                  <div className="tape-title-full" role="status">
+                    caption full · {TAPE_TITLE_MAX_LEN} characters
+                  </div>
+                )}
+              </>
             ) : (
               hasTitle && <div className="tape-line tape-title">{tape.title}</div>
             )}
