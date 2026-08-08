@@ -37,6 +37,8 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name
 
+from .appearance import _esc
+
 SHEET_SUFFIXES = frozenset({".xlsx", ".xlsm", ".csv"})
 
 # Both Letter orientations are tried per sheet: a transaction register is tall
@@ -89,8 +91,21 @@ def _clean(value, number_format: str = "") -> str:
         text = value.strftime("%Y-%m-%d")
     else:
         text = str(value)
-    # WinAnsi cannot show every codepoint; a visible marker beats a broken glyph.
-    return "".join(ch if 32 <= ord(ch) < 256 else "?" for ch in text.replace("\n", " "))
+    # This used to end `ch if 32 <= ord(ch) < 256 else "?"`, reasoning that
+    # WinAnsi cannot show every codepoint and a visible marker beats a broken
+    # glyph. The reasoning was right; the TEST was wrong. A codepoint's numeric
+    # value does not say whether WinAnsi carries it: the em dash is U+2014, so
+    # it failed `< 256` and became "?" — while WinAnsi carries it perfectly well
+    # at 0x97. "Interest — Sch B" in a trial balance rendered "Interest ? Sch B"
+    # and nothing said so. Meanwhile codepoints like U+0081 passed the test and
+    # WinAnsi genuinely cannot carry them.
+    #
+    # `_esc` answers the real question — it asks cp1252 whether it can encode
+    # the character, and writes a visible [U+XXXX] when it cannot. That is the
+    # same "visible marker" this line wanted, applied on the right test, so the
+    # substitution belongs there and not here. Control characters still go, as
+    # they would break the content stream rather than merely look wrong.
+    return "".join(ch for ch in text.replace("\n", " ") if ord(ch) >= 32 or ch == "\t")
 
 
 def read_grids(path: str | Path) -> tuple[list[tuple[str, list[list[str]]]], list[str]]:
@@ -327,8 +342,20 @@ def _numeric_columns(rows: list[list[str]], n_cols: int) -> list[bool]:
     return out
 
 
-def _esc(text: str) -> str:
-    return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+#: The fourth copy of `_esc` lived here. b7763a1 consolidated the other three
+#: into appearance.py and missed this one, so a spreadsheet kept its own rules:
+#: delimiters escaped, everything else passed through raw and then encoded
+#: `latin-1, "replace"` below — which is not a crash but is worse in one
+#: specific way. An em dash is not IN latin-1, so "Interest — Sch B" in a cell
+#: rendered as "Interest ? Sch B", and a trial balance for Peña & Fuentes came
+#: out "Pe?a". A figure read off that page is still right; the label naming what
+#: it is quietly is not, and nothing anywhere reported a problem.
+#:
+#: The shared one emits WinAnsi octal escapes, and this module's font already
+#: declares /WinAnsiEncoding, so it needed no other change. A character WinAnsi
+#: genuinely cannot carry becomes a visible [U+XXXX] — the honest failure the
+#: rest of the engine uses, rather than a "?" indistinguishable from a "?" the
+#: client actually typed.
 
 
 def _page_stream(
@@ -364,7 +391,11 @@ def _page_stream(
                 parts.append(f"BT /F1 {size:g} Tf {at:g} {y:g} Td ({_esc(text)}) Tj ET")
             x += cols[c]
         y -= line
-    return " ".join(parts).encode("latin-1", "replace")
+    # ASCII, not `latin-1, "replace"`. The shared `_esc` has already turned
+    # everything outside ASCII into an octal escape, so there is nothing left
+    # for a lossy codec to stand in for — and "replace" was the mechanism that
+    # turned an em dash into "?" without telling anyone.
+    return " ".join(parts).encode("ascii")
 
 
 def sheet_to_pdf(path: str | Path) -> pikepdf.Pdf:

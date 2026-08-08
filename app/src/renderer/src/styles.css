@@ -621,6 +621,26 @@ button.link {
   color: #b9b6ad;
 }
 
+/* Sits BELOW the card, positioned against it rather than inside its flow: the
+   card's on-screen size is a promise about the size it will be drawn in the
+   binder, so a UI-only hint must not add a pixel to it. */
+.tape-title-full {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 3px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  font-family: var(--sans);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
 .tape-close {
   position: absolute;
   top: -9px;

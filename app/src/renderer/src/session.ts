@@ -480,6 +480,17 @@ export interface Tape extends Provenance {
   created?: string
 }
 
+/**
+ * Longest caption a tape will hold. The card is sized to its widest line, so
+ * an uncapped title would let one caption drag the card across the figures it
+ * is meant to sit beside.
+ *
+ * Enforcing it is not the whole job. It used to be a bare `maxLength`, which
+ * stops accepting keystrokes and says nothing — a longer caption was silently
+ * shortened and the preparer had no way to know the binder disagreed with what
+ * they typed. TapeLayer now says when the cap is reached. If this number
+ * changes, that notice reads from the same constant and follows it.
+ */
 export const TAPE_TITLE_MAX_LEN = 28
 /** Mirrors engine appearance.TAPE_FONT_SIZE / TAPE_SIZE_MIN / TAPE_SIZE_MAX. */
 export const TAPE_SIZE_DEFAULT = 9

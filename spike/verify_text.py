@@ -290,6 +290,27 @@ else:
         f"{len(both['pages'])} page(s)",
     )
 
+# A cell's characters have to reach the page as themselves. sheets.py kept its
+# own escaper — the fourth copy, missed when the others were consolidated — and
+# encoded `latin-1, "replace"`, so an em dash became "?" and Peña became "Pe?a".
+# No crash and no warning: the figures stayed right while the label saying what
+# they were quietly did not, which is the harder failure to catch because the
+# page still looks finished. An accented client name is the realistic case; the
+# em dash is the one latin-1 cannot carry at all.
+_u_csv = REPO / "spike" / "out" / "unicode-cells.csv"
+_u_csv.parent.mkdir(parents=True, exist_ok=True)
+_u_csv.write_text(
+    "Account,Detail,Amount\n1200,Interest — Sch B,41850.25\n1300,Peña & Fuentes §1031,88750.00\n",
+    encoding="utf-8",
+)
+_u_page = extract_text({"path": str(_u_csv), "pages": [0]})["pages"][0]
+for _label, _needle in [("an em dash", "Interest — Sch B"), ("an accented name", "Peña & Fuentes")]:
+    check(
+        f"{_label} in a spreadsheet cell reaches the page as itself",
+        _needle in _u_page["text"],
+        _u_page["text"].replace(chr(10), " | ")[:160],
+    )
+
 # ------------------------------------------------- a sheet an agent can USE
 # The rendered page is for a human; it flattens a row and loses which column a
 # figure sits in. These assert the data path an agent should be reading instead.
