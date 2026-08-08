@@ -327,10 +327,17 @@ export default function App(): React.JSX.Element {
       try {
         let next = session
         const failed: string[] = []
+        // What the engine had to guess or truncate. A file that imported but
+        // not exactly as written is not a failure and must not be reported as
+        // one — but it cannot pass in silence either, which is what happened
+        // until now: the engine filled this in and nothing read it.
+        const caveats: string[] = []
         for (const p of paths) {
           const res = await window.wpt.probe(p)
           if (res.ok && res.probe) {
-            next = addSource(next, res.probe as ProbeWire)
+            const probe = res.probe as ProbeWire
+            next = addSource(next, probe)
+            for (const w of probe.sheet?.warnings ?? []) caveats.push(w)
           } else {
             failed.push(`${baseName(p)}: ${res.error ?? 'unreadable'}`)
           }
@@ -339,7 +346,9 @@ export default function App(): React.JSX.Element {
           apply(next, `Added ${paths.length - failed.length} file(s).`)
           setCurrentId((cur) => cur ?? next.pages[0]?.id ?? null)
         }
+        // Failures first: not adding a file at all is the bigger news.
         if (failed.length) setStatus(`Could not add — ${failed.join('; ')}`)
+        else if (caveats.length) setStatus(caveats.join(' · '))
         return next === session ? null : next
       } finally {
         setBusy(false)

@@ -15,6 +15,7 @@ the engine reports.
 """
 
 from pathlib import Path
+import codecs
 import sys
 
 import numpy as np
@@ -309,6 +310,39 @@ for _label, _needle in [("an em dash", "Interest — Sch B"), ("an accented name
         f"{_label} in a spreadsheet cell reaches the page as itself",
         _needle in _u_page["text"],
         _u_page["text"].replace(chr(10), " | ")[:160],
+    )
+
+# A CSV does not carry its encoding, and the assumption used to be UTF-8 with
+# `errors="replace"` — the wrong way round for this profession. Excel's plain
+# "CSV" export writes the Windows ANSI codepage; only the separately-named
+# "CSV UTF-8" writes UTF-8. So the ordinary export of a trial balance for
+# Peña & Fuentes lost every accented character to U+FFFD before it was parsed.
+from workpaper_engine.sheets import read_grids  # noqa: E402
+
+_ENC_ROW = "Account,Detail\n1300,Peña & Fuentes — §1031\n"
+_ENC_CASES = [
+    ("UTF-8 without a BOM", "utf8-plain.csv", _ENC_ROW.encode("utf-8"), False),
+    ("UTF-8 with a BOM", "utf8-bom.csv", codecs.BOM_UTF8 + _ENC_ROW.encode("utf-8"), False),
+    ("UTF-16 with a BOM", "utf16.csv", _ENC_ROW.encode("utf-16"), False),
+    # The one that matters: what Excel writes when a preparer picks "CSV".
+    ("Excel's Windows-1252", "excel-ansi.csv", _ENC_ROW.encode("cp1252"), True),
+]
+for _label, _fname, _bytes, _expect_warning in _ENC_CASES:
+    _f = REPO / "spike" / "out" / _fname
+    _f.parent.mkdir(parents=True, exist_ok=True)
+    _f.write_bytes(_bytes)
+    _grids, _warns = read_grids(_f)
+    _cell = _grids[0][1][1][1]
+    check(
+        f"a CSV saved as {_label} keeps its characters",
+        _cell == "Peña & Fuentes — §1031",
+        _cell.encode("unicode_escape").decode("ascii"),
+    )
+    # Guessing is allowed; guessing quietly is not.
+    check(
+        f"a CSV saved as {_label} {'says it was guessed' if _expect_warning else 'needs no warning'}",
+        bool(_warns) == _expect_warning,
+        str(_warns),
     )
 
 # ------------------------------------------------- a sheet an agent can USE
