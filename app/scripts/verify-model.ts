@@ -2012,17 +2012,62 @@ async function main(): Promise<number> {
               'import sys, pypdfium2 as pdfium',
               "d = pdfium.PdfDocument(sys.argv[1])",
               't = d[0].get_textpage().get_text_range()',
-              "print('EMDASH' if '\u2014' in t else 'missing', 'SECTION' if '\u00a7' in t else 'missing')"
+              // Each character names ITSELF in the result. The first version
+              // printed a bare positional 'missing', so a real failure read
+              // "missing SECTION" \u2014 which looks like the section sign is the
+              // problem when it was the em dash, and sends the next person
+              // reading CI straight to the wrong character.
+              "print('emdash=' + ('ok' if '\u2014' in t else 'LOST'),",
+              "      'section=' + ('ok' if '\u00a7' in t else 'LOST'))"
             ].join('\n'),
             OUT_UF
           ])
         : { out: `flatten failed: ${flat.error}` }
       check(
         'the em dash and section sign render as themselves, not as escapes',
-        /EMDASH SECTION/.test(read.out),
+        /emdash=ok section=ok/.test(read.out),
         read.out.trim()
       )
     }
+
+    // The check above is drawing; this one is the PROCESS BOUNDARY, which is
+    // where the bug actually was. The engine read stdin with the locale
+    // encoding — UTF-8 on macOS, cp1252 on Windows — while the shell always
+    // writes UTF-8, so a preparer's characters were corrupted on the way IN,
+    // before any escaping could see them. Every drawing path inherited it, so
+    // testing one of them only catches it by luck; asserting the round trip
+    // catches it wherever the text is later used. An accented client name
+    // rather than punctuation, because that is the one a firm actually types
+    // and it must come back byte-for-byte.
+    const NAME = 'Peña & Fuentes — §1031 exchange'
+    let u = newSession()
+    const uprobe = await runEngine({ cmd: 'probe', path: path.join(FIXTURES, 'fixture_a.pdf') })
+    u = addSource(u, uprobe.probe)
+    u = { ...u, reviewer: 'CJB' }
+    u = addTape(u, {
+      page: u.pages[0].id, nx: 0.5, ny: 0.5,
+      entries: [{ value: 100, op: '+' }], title: NAME
+    }).session
+    const OUT_RT = path.join(REPO, 'spike', 'out', 'unicode-roundtrip.pdf')
+    const uwrote = await runEngine({
+      cmd: 'export',
+      binder: toExportSpec(u, OUT_RT, { embedSession: true })
+    })
+    const ureopened = uwrote.ok ? await runEngine({ cmd: 'open_binder', path: OUT_RT }) : null
+    const back = parseSession(ureopened?.binder?.session)
+    const why = !uwrote.ok
+      ? `export failed: ${uwrote.error}`
+      : !ureopened?.binder?.found
+        ? `reopen found no session: ${ureopened?.error ?? JSON.stringify(ureopened?.binder)}`
+        : 'error' in (back as any)
+          ? `session did not parse: ${(back as any).error}`
+          : ''
+    const title = why ? null : (back as { session: any }).session?.tapes?.[0]?.title
+    check(
+      'a name with an accent survives the engine boundary byte for byte',
+      title === NAME,
+      why || `got ${JSON.stringify(title)}`
+    )
   }
 
   // --- the agent outline
