@@ -55,8 +55,31 @@ TAPE_BORDER_W = 1.0
 
 
 def _esc(text: str) -> str:
-    """Escape a string for a PDF literal string in a content stream."""
-    return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+    """Escape a string for a PDF literal string drawn by a standard-14 font.
+
+    The old version escaped the three PDF delimiters and nothing else, and the
+    content stream is written as ASCII — so the first em dash in a tape title
+    crashed SAVE with a UnicodeEncodeError. A caption character must never be
+    able to take down a save.
+
+    Non-ASCII goes out as octal escapes of its WinAnsi byte — the escapes are
+    ASCII, so the stream still encodes — and every font that draws user text
+    declares /WinAnsiEncoding so those bytes mean what they say. A character
+    WinAnsi cannot carry becomes a visible [U+XXXX], the same honest failure
+    the memo typesetter uses, never a silent swap and never a crash.
+    """
+    out: list[str] = []
+    for ch in text:
+        if ch in "\\()":
+            out.append("\\" + ch)
+        elif " " <= ch <= "~":
+            out.append(ch)
+        else:
+            try:
+                out.append(f"\\{ch.encode('cp1252')[0]:03o}")
+            except (UnicodeEncodeError, IndexError):
+                out.append(f"[U+{ord(ch):04X}]")
+    return "".join(out)
 
 
 def _fmt(v: float) -> str:
@@ -183,7 +206,7 @@ def text_appearance(
     resources = Dictionary(
         Font=Dictionary(
             F1=Dictionary(
-                Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Helvetica-Bold")
+                Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Helvetica-Bold"), Encoding=Name("/WinAnsiEncoding")
             )
         )
     )
@@ -249,7 +272,7 @@ def tape_appearance(
     parts += ["ET", "Q"]
     resources = Dictionary(
         Font=Dictionary(
-            F1=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Courier)
+            F1=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Courier, Encoding=Name("/WinAnsiEncoding"))
         )
     )
     form = _make_form(

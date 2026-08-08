@@ -26,6 +26,7 @@ import json
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
+from .appearance import _esc
 from .geometry import PageGeom, appearance_matrix, visual_rect_to_user_rect
 from .shapes import SHAPE_COLORS, color_of
 
@@ -41,9 +42,6 @@ BORDER_DEFAULT = 4.0
 def _fmt(v: float) -> str:
     return f"{v:.3f}".rstrip("0").rstrip(".") or "0"
 
-
-def _esc(text: str) -> str:
-    return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
 
 
 def _rounded_rect(x0: float, y0: float, x1: float, y1: float, r: float) -> str:
@@ -108,8 +106,8 @@ def make_status_stamp(pdf: pikepdf.Pdf, geom: PageGeom, spec: dict, nm: str) -> 
 
     resources = Dictionary(
         Font=Dictionary(
-            F1=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Helvetica-Bold")),
-            F2=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica),
+            F1=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Helvetica-Bold"), Encoding=Name("/WinAnsiEncoding")),
+            F2=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name("/WinAnsiEncoding")),
         )
     )
     form = pdf.make_stream(" ".join(parts).encode("ascii"))
@@ -265,7 +263,7 @@ def make_page_number(pdf: pikepdf.Pdf, geom: PageGeom, spec: dict, nm: str) -> p
         form.Matrix = Array(m)
     form.Resources = Dictionary(
         Font=Dictionary(
-            F1=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica)
+            F1=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name("/WinAnsiEncoding"))
         )
     )
 

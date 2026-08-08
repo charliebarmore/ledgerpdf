@@ -23,7 +23,7 @@ import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
 from . import appearance
-from .appearance import _display_author
+from .appearance import _display_author, _esc
 from .geometry import PageGeom, appearance_matrix, visual_rect_to_user_rect
 
 # Named colors, so the app and the engine cannot drift into different reds.
@@ -59,9 +59,6 @@ KAPPA = 0.5523
 def _fmt(v: float) -> str:
     return f"{v:.3f}".rstrip("0").rstrip(".") or "0"
 
-
-def _esc(text: str) -> str:
-    return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
 
 
 def color_of(name: str) -> tuple[float, float, float]:
@@ -215,7 +212,7 @@ def make_shape(pdf: pikepdf.Pdf, geom: PageGeom, spec: dict, nm: str) -> pikepdf
         lines = wrap_text(text, max_chars) if text else [""]
         resources = Dictionary(
             Font=Dictionary(
-                F1=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica)
+                F1=Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name("/WinAnsiEncoding"))
             )
         )
         parts += [

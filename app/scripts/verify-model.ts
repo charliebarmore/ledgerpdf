@@ -1961,6 +1961,70 @@ async function main(): Promise<number> {
     )
   }
 
+  // --- a caption character must never take down a save
+  //
+  // The first Whitmore demo recording crashed binder_save with a
+  // UnicodeEncodeError: the tape was titled "Interest — Sch B" and the em dash
+  // could not encode into the ASCII content stream. Any CPA typing an em dash,
+  // a section sign, or an accented name into a caption would have hit the same
+  // wall — a SAVE crashed by punctuation. Text goes out as WinAnsi octal
+  // escapes now, with the encoding declared on the fonts, so the assertion is
+  // both halves: the export succeeds AND the character comes back out of the
+  // rendered page, because escaping that drew the wrong glyph would pass the
+  // first half while showing a reviewer the wrong text.
+  {
+    let s = newSession()
+    const probe = await runEngine({ cmd: 'probe', path: path.join(FIXTURES, 'fixture_a.pdf') })
+    s = addSource(s, probe.probe)
+    s = { ...s, reviewer: 'CJB' }
+    const pid = s.pages[0].id
+    s = addTape(s, {
+      page: pid, nx: 0.5, ny: 0.35,
+      entries: [{ value: 18742, op: '+' }, { value: 21487, op: '+' }],
+      title: 'Interest — Sch B'
+    }).session
+    s = addMark(s, { page: pid, kind: 'text', text: '§482', nx: 0.3, ny: 0.6, size: 24 }).session
+
+    const OUT_U = path.join(REPO, 'spike', 'out', 'unicode-captions.pdf')
+    const wrote = await runEngine({ cmd: 'export', binder: toExportSpec(s, OUT_U) })
+    check(
+      'an em dash in a tape title survives save instead of crashing it',
+      wrote.ok === true && wrote.result.check_problems.length === 0,
+      wrote.error ?? ''
+    )
+    if (wrote.ok) {
+      // Extracted from the FLATTENED copy, deliberately. Annotation appearance
+      // streams are invisible to text extraction — get_textpage() reads page
+      // content — so probing the annotated export would report "missing" no
+      // matter what the tape drew (the first draft of this check did exactly
+      // that). Flattening paints the appearance INTO the content, so pdfium's
+      // own parser decoding the em dash back out proves bytes and declared
+      // encoding agree end to end.
+      const OUT_UF = path.join(REPO, 'spike', 'out', 'unicode-captions-flat.pdf')
+      const flat = await runEngine({
+        cmd: 'export',
+        binder: toExportSpec(s, OUT_UF, { flatten: true })
+      })
+      const read = flat.ok
+        ? await runPython([
+            '-c',
+            [
+              'import sys, pypdfium2 as pdfium',
+              "d = pdfium.PdfDocument(sys.argv[1])",
+              't = d[0].get_textpage().get_text_range()',
+              "print('EMDASH' if '\u2014' in t else 'missing', 'SECTION' if '\u00a7' in t else 'missing')"
+            ].join('\n'),
+            OUT_UF
+          ])
+        : { out: `flatten failed: ${flat.error}` }
+      check(
+        'the em dash and section sign render as themselves, not as escapes',
+        /EMDASH SECTION/.test(read.out),
+        read.out.trim()
+      )
+    }
+  }
+
   // --- the agent outline
   //
   // Attribution has two halves. The author field says "CJB (AI)" in a comments
