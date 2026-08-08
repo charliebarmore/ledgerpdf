@@ -110,6 +110,14 @@ app.on('open-file', (event, filePath) => {
 })
 
 /**
+ * Printed to stderr when a scripted run cannot get the single-instance lock, so
+ * the verifier can name the cause instead of guessing from missing files.
+ * Matched literally in `app/scripts/smoke.mjs` — the two are bundled separately,
+ * so this is a shared literal by agreement rather than a shared import.
+ */
+const SINGLE_INSTANCE_LOCK_HELD = 'WPT_SINGLE_INSTANCE_LOCK_HELD'
+
+/**
  * A second launch hands its file to the running instance rather than starting
  * again.
  *
@@ -121,7 +129,23 @@ app.on('open-file', (event, filePath) => {
  */
 if (!packageSmoke) {
   if (!app.requestSingleInstanceLock()) {
-    app.quit()
+    // A human double-clicking a second PDF wants the running app to open it,
+    // and nothing needs saying. A VERIFIER is the other case, and silence has
+    // cost real coverage: this path quit with code 0 and no output, so the dev
+    // smoke's "app ran and exited cleanly" PASSED while the screenshot and the
+    // export never happened — two missing-file failures pointing at the export
+    // code, when the actual cause was an app already running. Three runs over
+    // two days reported themselves that way, and two commits shipped saying
+    // their GUI coverage "could not run".
+    //
+    // So when the environment says a scripted run is watching, say why and
+    // exit non-zero. The marker is matched literally in app/scripts/smoke.mjs.
+    if (process.env.WPT_DEV_EXIT || process.env.WPT_DEV_SHOT) {
+      process.stderr.write(`${SINGLE_INSTANCE_LOCK_HELD}\n`)
+      app.exit(1)
+    } else {
+      app.quit()
+    }
   } else {
     app.on('second-instance', (_e, argv) => {
       const target = argv.find((a) => a.toLowerCase().endsWith('.pdf'))

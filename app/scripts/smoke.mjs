@@ -104,6 +104,20 @@ const app = await run('npm', ['run', 'dev'], {
     WPT_DEV_EXIT: '1'
   }
 })
+// An app already running holds the single-instance lock, so the instance this
+// spawned quits without doing anything. That is not a product defect and must
+// not be reported as one: it used to surface as "window snapshot captured" and
+// "binder exported" failing with a bare path, while the one check that could
+// have named the cause passed on exit 0. Stop here instead, and say what to do.
+// Matched literally against the marker written in app/src/main/index.ts.
+if (app.err.includes('WPT_SINGLE_INSTANCE_LOCK_HELD')) {
+  console.error('\nCANNOT RUN — LedgerPDF is already running on this machine.')
+  console.error('The app it launched could not claim the single-instance lock, so it')
+  console.error('exited without drawing a window or exporting anything.')
+  console.error('\nClose LedgerPDF and run this again. Nothing was verified.')
+  process.exit(1)
+}
+
 check(
   'app ran and exited cleanly',
   app.code === 0,
