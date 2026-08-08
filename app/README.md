@@ -63,20 +63,36 @@ npm run verify:package
 distributable unless `WPT_SIGNED_RELEASE=true`; electron-builder then requires a
 valid platform identity and `forceCodeSigning` prevents an unsigned artifact.
 
-For macOS, use a Developer ID Application certificate plus ONE of these two
-credential sets, both checked before the build starts rather than at the
-notarize step at the end of it:
+For macOS, use a Developer ID Application certificate plus ONE of these three
+credential sets, all checked before the build starts rather than at the notarize
+step at the end of it:
 
 ```text
+APPLE_KEYCHAIN_PROFILE                                   # preferred — see below
 APPLE_ID  APPLE_APP_SPECIFIC_PASSWORD  APPLE_TEAM_ID     # an app-specific password
 APPLE_API_KEY  APPLE_API_KEY_ID  APPLE_API_ISSUER        # App Store Connect key
 ```
 
-The app-specific password is generated at appleid.apple.com under Sign-In and
-Security, named per app — LedgerPDF has never needed one because no notarized
-release has been cut: `package:dir` passes `-c.mac.notarize=false`, so
-`notarytool` has never run. The App Store Connect key is preferable for CI:
-revocable on its own, and not tied to one person's Apple ID.
+**Prefer the keychain profile.** Store the credential once:
+
+```bash
+xcrun notarytool store-credentials ledgerpdf-notary \
+  --apple-id you@example.com --team-id YOURTEAMID
+```
+
+It prompts for the app-specific password without echoing it, and the secret then
+lives in the login keychain. The build needs only
+`APPLE_KEYCHAIN_PROFILE=ledgerpdf-notary`. The other two sets put a live
+credential in the environment, where it is inherited by every child process of
+the build and recorded by any shell history that captured the command — for a
+credential that can submit software to Apple under your name, that is a
+meaningful difference.
+
+The app-specific password itself is generated at appleid.apple.com under
+Sign-In and Security, named per app. LedgerPDF needed none until now because no
+notarized release had been cut: `package:dir` passes `-c.mac.notarize=false`, so
+`notarytool` had never run. An App Store Connect key is the better choice for
+CI — revocable on its own, and not tied to one person's Apple ID.
 
 The release config enables hardened runtime, notarization, and the Electron JIT
 entitlements; verify the result with `codesign`, `spctl`, and `xcrun stapler
