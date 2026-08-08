@@ -63,11 +63,24 @@ npm run verify:package
 distributable unless `WPT_SIGNED_RELEASE=true`; electron-builder then requires a
 valid platform identity and `forceCodeSigning` prevents an unsigned artifact.
 
-For macOS, use a Developer ID Application certificate plus one of
-electron-builder's notarization credential sets (App Store Connect API key is
-preferred for CI). The release config enables hardened runtime, notarization,
-and the Electron JIT entitlements; verify the result with `codesign`, `spctl`,
-and `xcrun stapler validate` before distribution.
+For macOS, use a Developer ID Application certificate plus ONE of these two
+credential sets, both checked before the build starts rather than at the
+notarize step at the end of it:
+
+```text
+APPLE_ID  APPLE_APP_SPECIFIC_PASSWORD  APPLE_TEAM_ID     # an app-specific password
+APPLE_API_KEY  APPLE_API_KEY_ID  APPLE_API_ISSUER        # App Store Connect key
+```
+
+The app-specific password is generated at appleid.apple.com under Sign-In and
+Security, named per app — LedgerPDF has never needed one because no notarized
+release has been cut: `package:dir` passes `-c.mac.notarize=false`, so
+`notarytool` has never run. The App Store Connect key is preferable for CI:
+revocable on its own, and not tied to one person's Apple ID.
+
+The release config enables hardened runtime, notarization, and the Electron JIT
+entitlements; verify the result with `codesign`, `spctl`, and `xcrun stapler
+validate` before distribution.
 
 For Windows, create the release on Windows x64. The config uses Azure Trusted
 Signing when these product-specific values are set:

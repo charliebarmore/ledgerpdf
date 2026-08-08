@@ -9,6 +9,32 @@ const missingAzure = azureKeys.filter((key) => !process.env[key])
 if (signedRelease && process.platform === 'win32' && missingAzure.length) {
   throw new Error(`Signed Windows release is missing: ${missingAzure.join(', ')}`)
 }
+// Notarization credentials, checked BEFORE the build rather than at the end of
+// it. electron-builder does validate these — but not until the notarize step,
+// which runs after the frozen Python engine is rebuilt, the app is packaged and
+// the bundle is signed. On this project that is minutes of work thrown away to
+// learn that an environment variable was unset, and the error names one missing
+// var at a time.
+//
+// Two accepted paths, matching app-builder-lib's own MacTargetHelper: an Apple
+// ID with an app-specific password (what Charlie already keeps for ProBooks and
+// Cockpit — generate one more at appleid.apple.com and name it ledgerpdf-notary),
+// or an App Store Connect API key, which is the better choice for CI because it
+// is revocable per key and not tied to a person's Apple ID.
+const APPLE_PASSWORD_KEYS = ['APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID']
+const APPLE_API_KEYS = ['APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']
+if (signedRelease && process.platform === 'darwin') {
+  const has = (keys) => keys.every((key) => process.env[key])
+  if (!has(APPLE_PASSWORD_KEYS) && !has(APPLE_API_KEYS)) {
+    throw new Error(
+      'Signed macOS release needs notarization credentials, and neither set is complete.\n' +
+        `  App-specific password: ${APPLE_PASSWORD_KEYS.join(', ')}\n` +
+        `  or App Store Connect:  ${APPLE_API_KEYS.join(', ')}\n` +
+        'Generate an app-specific password at appleid.apple.com > Sign-In and Security.'
+    )
+  }
+}
+
 const azureSignOptions =
   signedRelease && process.platform === 'win32'
     ? {
