@@ -42,7 +42,16 @@ assert.match(installerHook, /!macro customInstallMode/)
 assert.match(installerHook, /HKCU "\$\{INSTALL_REGISTRY_KEY\}" InstallLocation/)
 assert.match(installerHook, /HKLM "\$\{INSTALL_REGISTRY_KEY\}" InstallLocation/)
 assert.match(installerHook, /\$\{FileExists\} "\$0\\\$\{APP_EXECUTABLE_FILENAME\}"/)
+assert.match(installerHook, /!macro customInstall/)
+assert.match(
+  installerHook,
+  /WriteRegStr SHELL_CONTEXT "\$\{UNINSTALL_REGISTRY_KEY\}" InstallLocation "\$INSTDIR"/
+)
+assert.match(installerHook, /ReadRegStr \$3 SHELL_CONTEXT "\$\{UNINSTALL_REGISTRY_KEY\}" DisplayName/)
+assert.match(installerHook, /ReadRegStr \$4 SHELL_CONTEXT "\$\{UNINSTALL_REGISTRY_KEY\}" InstallLocation/)
+assert.match(installerHook, /ReadRegStr \$5 SHELL_CONTEXT "\$\{UNINSTALL_REGISTRY_KEY\}" UninstallString/)
+assert.match(installerHook, /SetErrorLevel 1\s+Abort/)
 
 console.log(
-  'Release credentials, command spawning, complete Electron fuse policy, and NSIS install detection: OK'
+  'Release credentials, command spawning, complete Electron fuse policy, and NSIS install/uninstall registration: OK'
 )

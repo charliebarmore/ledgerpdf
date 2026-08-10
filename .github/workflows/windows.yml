@@ -133,6 +133,17 @@ jobs:
         working-directory: app
         run: npx electron-builder --win nsis --config electron-builder.config.cjs
 
+      # Package verification launches win-unpacked and therefore cannot detect
+      # whether the installer registered itself with Windows. A real release
+      # briefly shipped no Installed Apps entry while every app-level check was
+      # green. Exercise the EXE itself on the clean runner, require the registry
+      # metadata users and IT rely on, then prove its uninstaller removes it.
+      - name: Verify installer registration and uninstall
+        if: env.PACKAGE == 'true'
+        working-directory: app
+        shell: pwsh
+        run: ./scripts/verify-windows-installer.ps1 -InstallerPath release/LedgerPDF-0.1.0-win-x64.exe
+
       - name: Verify the packaged app
         if: env.PACKAGE == 'true'
         working-directory: app
