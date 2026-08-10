@@ -153,7 +153,12 @@ module.exports = {
   nsis: {
     oneClick: false,
     allowToChangeInstallationDirectory: true,
-    perMachine: false
+    perMachine: false,
+    // electron-builder's assisted installer treats a non-empty install-location
+    // registry value as proof that the app is present. A stale value therefore
+    // made a clean machine say "There is already a per-user installation."
+    // The hook requires the executable to exist before making that claim.
+    include: 'resources/installer.nsh'
   },
   // Never publish as a side effect of building. package.json now carries a
   // `repository`, from which electron-builder infers a GitHub publish provider

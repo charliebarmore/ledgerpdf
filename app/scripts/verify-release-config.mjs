@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
 import { FuseV1Options } from '@electron/fuses'
 import { commandNeedsShell } from './lib/command-shell.mjs'
 import { notaryCredentials } from './lib/notary-credentials.mjs'
 
 const require = createRequire(import.meta.url)
 const { expectedFuses, electronFuseConfig } = require('./lib/electron-fuses.cjs')
+const builderConfig = require('../electron-builder.config.cjs')
 
 assert.deepEqual(notaryCredentials({ APPLE_KEYCHAIN_PROFILE: 'ledgerpdf' }), [
   '--keychain-profile', 'ledgerpdf'
@@ -32,4 +34,15 @@ for (const [name, enabled] of Object.entries(expectedFuses)) {
   assert.equal(fuseConfig[FuseV1Options[name]], enabled, name)
 }
 
-console.log('Release credentials, command spawning, and complete Electron fuse policy: OK')
+assert.equal(builderConfig.nsis.oneClick, false)
+assert.equal(builderConfig.nsis.perMachine, false)
+assert.equal(builderConfig.nsis.include, 'resources/installer.nsh')
+const installerHook = readFileSync(new URL('../resources/installer.nsh', import.meta.url), 'utf8')
+assert.match(installerHook, /!macro customInstallMode/)
+assert.match(installerHook, /HKCU "\$\{INSTALL_REGISTRY_KEY\}" InstallLocation/)
+assert.match(installerHook, /HKLM "\$\{INSTALL_REGISTRY_KEY\}" InstallLocation/)
+assert.match(installerHook, /\$\{FileExists\} "\$0\\\$\{APP_EXECUTABLE_FILENAME\}"/)
+
+console.log(
+  'Release credentials, command spawning, complete Electron fuse policy, and NSIS install detection: OK'
+)

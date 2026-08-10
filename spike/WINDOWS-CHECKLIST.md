@@ -37,6 +37,18 @@ cannot fully reproduce.
 
 The thing CI cannot answer.
 
+SmartScreen **may** show a warning for the unsigned installer. Record whether it
+does; either outcome is valid. A missing prompt is not a failed gate, and a
+prompt is not evidence that Defender found malware. Verify the artifact hash
+before running it in either case.
+
+**Final-candidate gate, 2026-08-10:** the exact installer from Actions run
+`31429737884`, commit `d94d0ba`, passed on a physical ThinkPad at 1366×768. Its
+SHA-256 matched the recorded release hash; install was per-user without admin;
+the toolbar used two complete unclipped rows; PDF import, marks, tape, save,
+restart, recents and uninstall all passed. SmartScreen did not appear despite
+mark-of-the-web and Defender being enabled, which is an acceptable outcome.
+
 - [x] Run the **unsigned** installer. **Done 2026-08-07 on the ThinkPad.**
       Result: **no SmartScreen prompt at all.** The installer was copied to
       Downloads and manually stamped with mark-of-the-web, so the "came from
@@ -66,6 +78,10 @@ improves it but does **not** remove it immediately: SmartScreen reputation
 accrues per-certificate over downloads and time, so an early tester may
 still see a warning even once signing is in place. Worth knowing before someone
 else sees it.
+
+On a machine with no existing LedgerPDF executable, the install-mode page must
+describe a fresh install. It must not claim that it found an existing per-user
+or per-machine installation merely because a stale registry value exists.
 
 ## 3. Acrobat on Windows
 

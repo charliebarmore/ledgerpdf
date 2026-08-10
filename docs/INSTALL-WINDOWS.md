@@ -116,8 +116,13 @@ Windows, "Documents" is frequently not on the machine.
 ## Uninstalling
 
 **Settings → Apps → Installed apps → LedgerPDF → Uninstall.** Your binders are
-ordinary PDF files and are left alone. The app's own settings live in
-`%APPDATA%\LedgerPDF` and can be deleted by hand if you want no trace.
+ordinary PDF files and are left alone. The uninstaller removes the application,
+its Installed apps entry, and its shortcuts. It deliberately retains
+`%APPDATA%\LedgerPDF`, which contains preferences and the recent-binder list;
+that list includes the full paths of binders you opened. This makes preferences
+survive a reinstall, as most desktop applications do. Delete that folder by
+hand after uninstalling if you want to remove LedgerPDF's remembered settings
+and paths as well. Deleting it does not delete any binder PDFs.
 
 ## Telling us it went wrong
 

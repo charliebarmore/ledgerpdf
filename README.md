@@ -139,6 +139,11 @@ plainly what the prompt means rather than telling anyone to click through it. On
 a first real test (2026-08-07, Windows 11, Defender on, mark-of-the-web applied)
 it did not appear at all; a stricter machine may still show it.
 
+Uninstalling removes the application and shortcuts but retains preferences and
+the recent-binder list in `%APPDATA%\LedgerPDF`; see
+[`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md#uninstalling) for what that
+folder contains and how to remove it without touching binder PDFs.
+
 Two other ways to run it, in order of effort:
 
 1. **A test CI build**, if you have access to this repository. Go to the **Windows
