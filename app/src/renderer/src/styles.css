@@ -1,0 +1,2599 @@
+@font-face {
+  font-family: 'Inter';
+  src: url('/ui-fonts/Inter-Regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/ui-fonts/Inter-SemiBold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/ui-fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/ui-fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+/* Tokens from DESIGN.md. A professional instrument: dense, quiet, keyboard-first.
+   Verify legibility at 100% scale on a 1080p Windows monitor, not just Retina. */
+
+:root {
+  --bg: #f7f6f2;
+  --surface: #ffffff;
+  --border: #d4d1ca;
+  --text: #28251d;
+  --muted: #7a7974;
+  --primary: #1d434e; /* Ledger Labs Deep Teal */
+  --warning: #964219;
+  --error: #a12c7b;
+
+  --xs: 4px;
+  --sm: 8px;
+  --md: 12px;
+  --lg: 20px;
+
+  --r-sm: 4px;
+  --r-md: 8px;
+
+  --ui: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--ui);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+/* ------------------------------------------------------------------ toolbar */
+
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  row-gap: var(--xs);
+  gap: 0;
+  padding: var(--sm) var(--md);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.toolbar button {
+  white-space: nowrap;
+  /* The Windows frame leaves a 1400px row in a 1440px app window. At 8px
+     horizontal padding, Save was the lone control wrapping to row two. Two
+     pixels per side across the ribbon buys that row back without shrinking
+     the 28px control height or turning labels into unexplained icons. */
+  padding: 5px 6px;
+}
+
+/* One row, with wrap as a safety net on a narrow window.
+   The row has been at its width limit twice now — once when the Initials field
+   lived here, and again when Legend, connectors and grouped stamps arrived. The
+   gap is 5px rather than 6px because ~25 gaps buy back a control's worth of
+   width, which was the difference between Save sitting on this row and wrapping
+   onto its own. Anything added here needs to earn its place or find a menu. */
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: var(--xs);
+  gap: 5px;
+}
+
+
+.toolbar .sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+.toolbar .spacer {
+  flex: 1;
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 5px 10px;
+  cursor: default;
+}
+
+/* `:not(.primary)` is load-bearing, not tidiness. `button:hover:not(:disabled)`
+   outranks `button.primary`, so without it the hover background overrode the
+   primary button's fill while its white text stayed — a blank-looking button.
+   Excluding .primary means no future property can collide the same way. */
+button:hover:not(:disabled):not(.primary) {
+  background: #f1efe9;
+}
+
+button:active:not(:disabled):not(.primary) {
+  background: #e8e5dd;
+}
+
+button:disabled {
+  opacity: 0.4;
+}
+
+button.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  font-weight: 500;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--primary);
+  filter: brightness(1.08);
+}
+
+button.primary:active:not(:disabled) {
+  background: var(--primary);
+  filter: brightness(0.94);
+}
+
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------- body */
+
+/* Bookmarks left, page centre, thumbnails right — the bookmark tree is how you
+   navigate a 62-page binder, so it sits where a reader expects a contents pane. */
+.body {
+  display: grid;
+  grid-template-columns: var(--side-w, 300px) 5px minmax(0, 1fr) 172px;
+  min-height: 0;
+}
+
+/* draggable divider between the bookmark pane and the page */
+.splitter {
+  cursor: col-resize;
+  background: var(--border);
+}
+
+.splitter:hover,
+.splitter:active {
+  background: var(--primary);
+}
+
+.body:has(.dropzone) {
+  grid-template-columns: 1fr;
+}
+
+/* thumbnail rail */
+
+.rail {
+  overflow-y: auto;
+  padding: var(--sm);
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+}
+
+.thumb {
+  position: relative;
+  padding: var(--xs);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  margin-bottom: var(--sm);
+}
+
+.thumb.is-selected {
+  background: #e4efef;
+  border-color: #a9cccd;
+}
+
+.thumb.is-current {
+  border-color: var(--primary);
+}
+
+.thumb.drop-before::before,
+.thumb.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--primary);
+}
+
+.thumb.drop-before::before {
+  top: -5px;
+}
+
+.thumb.drop-after::after {
+  bottom: -5px;
+}
+
+.thumb-frame {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+}
+
+.thumb-img {
+  display: block;
+  max-width: 100%;
+}
+
+.thumb-placeholder {
+  width: 100%;
+  height: 170px;
+  background: repeating-linear-gradient(45deg, #fbfaf7, #fbfaf7 6px, #f3f1ec 6px, #f3f1ec 12px);
+}
+
+.thumb-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.thumb-num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.thumb-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--warning);
+}
+
+/* review coverage at a glance: where the marks are, and how many */
+
+.thumb-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.thumb-mark {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.85);
+}
+
+.thumb-marks-count {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--primary);
+}
+
+/* page view */
+
+.pageview {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+/* caption + zoom controls */
+.pageview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--md);
+  padding: var(--xs) var(--md);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.pageview-caption {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  gap: var(--sm);
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.zoom button {
+  padding: 2px 7px;
+  font-size: 12px;
+}
+
+.zoom button.on {
+  background: #e4efef;
+  border-color: #a9cccd;
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.zoom-pct {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 44px;
+  text-align: center;
+}
+
+/* the scrolling binder */
+.sheet-scroll {
+  overflow: auto;
+  padding: var(--lg);
+}
+
+/* Slots are absolutely positioned from a computed layout, so an unrendered
+   page still occupies its exact height and scrolling never reflows. */
+.sheet-column {
+  position: relative;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.page-slot {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.page-slot.is-current .sheet {
+  outline: 2px solid #a9cccd;
+  outline-offset: -1px;
+}
+
+.page-slot-num {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: -14px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* an unrendered page: the right size, visibly not yet drawn */
+.sheet-pending {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--warning);
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  padding: 0 3px;
+}
+
+.sheet {
+  background: #fff;
+  border: 1px solid var(--border);
+}
+
+.pageview-empty,
+.panel-empty {
+  color: var(--muted);
+  padding: var(--md);
+}
+
+/* page navigation */
+
+.pagenav {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+
+.pagenav button {
+  padding: 1px 8px;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.pagenum {
+  font: inherit;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  width: 46px;
+  text-align: right;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+}
+
+.pagenum:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.pagetotal {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.toolbar button.move {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* mark palette + overlay */
+
+.palette {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.palette button {
+  min-width: 30px;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 6px;
+}
+
+.palette button.on {
+  background: #e4efef;
+  border-color: var(--primary);
+}
+
+/* Keep tool: a worded toggle among glyph buttons, so it needs its own width and
+   a heavier ON state — this one is a MODE, and a mode that looks the same as an
+   armed tool is how you end up drawing when you meant to select. */
+.palette button.toollock {
+  min-width: auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.palette button.toollock.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  font-weight: 500;
+}
+
+/* the page canvas and its interactive overlay share one stacking box */
+.sheet-stack {
+  position: relative;
+  line-height: 0;
+}
+
+.marklayer {
+  position: absolute;
+  inset: 0;
+}
+
+.marklayer.is-armed {
+  cursor: crosshair;
+}
+
+.mark {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  line-height: 1;
+  font-weight: 700;
+  cursor: grab;
+  user-select: none;
+}
+
+.mark:active {
+  cursor: grabbing;
+}
+
+/* A connector's ring. Mirrors engine appearance.conn_appearance: a violet ring
+   with a white fill under the label, because a connector lands ON a figure in a
+   dense table and an unfilled ring leaves the digits underneath tangled with
+   its own. Border width is set inline — it scales with the mark. */
+.mark.is-conn {
+  border-style: solid;
+  border-color: currentColor;
+  border-radius: 50%;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+/* Machine-placed. Mirrors engine appearance.AGENT_OUTLINE_* — rgb(115,115,120)
+   at 0.5pt, drawn just inside the mark's own box so its position never shifts
+   with its provenance. Grey rather than a colour: colour on a mark already
+   carries its KIND, and often which procedure was performed. */
+.mark.is-agent {
+  box-shadow: inset 0 0 0 0.5px rgb(115 115 120);
+}
+
+.mark.is-selected {
+  outline: 1.5px solid var(--primary);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+/* reviewer initials — in the toolbar, beside the palette that uses them */
+
+.rev {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--xs);
+  flex: none;
+}
+
+.rev-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rev-input {
+  font: inherit;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  width: 58px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+}
+
+.rev-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* calculator tape — colors mirror engine appearance.TAPE_* (content, not theme) */
+
+/* links the source PDF already carried, made clickable over the canvas */
+
+.linklayer {
+  position: absolute;
+  inset: 0;
+  /* The container must never take a click: the mark layer below it is the whole
+     page's click target for placing marks. Only the regions themselves opt in. */
+  pointer-events: none;
+}
+
+/* Armed means the page is a canvas to mark, not a document to browse. Without
+   this, arming a tick and clicking a tab reference would navigate away instead
+   of placing the mark — the tool would look broken in exactly one spot. */
+.linklayer.is-armed .pdflink {
+  pointer-events: none;
+}
+
+.pdflink {
+  position: absolute;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  /* Invisible until hovered. The page already draws its own button art, and a
+     permanent overlay would print-preview as clutter the binder does not have. */
+  transition: background-color 90ms ease-out, border-color 90ms ease-out;
+}
+
+.pdflink:hover {
+  background: rgb(29 67 78 / 0.1);
+  border-color: rgb(29 67 78 / 0.45);
+}
+
+.pdflink:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* A link with no resolvable destination, or one pointing out of the document.
+   Shown as inert rather than hidden, so the reference is still discoverable. */
+.pdflink.is-dead {
+  cursor: default;
+}
+
+.pdflink.is-dead:hover {
+  background: rgb(120 120 120 / 0.08);
+  border-color: rgb(120 120 120 / 0.35);
+}
+
+.tapelayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.tape {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  /* Tinted, not white: a white card with a hairline border vanishes against
+     white statement paper. Mirrors engine appearance.TAPE_BG/BORDER exactly —
+     no drop shadow, because the exported PDF cannot draw one and the preview
+     must not promise a look the binder will not have. */
+  background: rgb(231 229 225);
+  border: 1px solid rgb(89 54 20);
+  color: rgb(26 26 31);
+  font-family: var(--mono);
+  white-space: pre;
+  cursor: grab;
+  outline: none;
+}
+
+.tape:active {
+  cursor: grabbing;
+}
+
+.tape.is-active {
+  box-shadow: 0 0 0 2px var(--primary), 0 2px 10px rgb(0 0 0 / 0.14);
+  z-index: 2;
+}
+
+.tape-line {
+  height: 1em;
+}
+
+.tape-title {
+  color: var(--muted);
+}
+
+.tape-rule {
+  overflow: hidden;
+}
+
+.tape-total {
+  font-weight: 700;
+}
+
+.tape-pending {
+  position: relative;
+  color: var(--primary);
+}
+
+/* a blinking caret so a tape mid-entry never looks like a finished one */
+.tape-caret {
+  display: inline-block;
+  width: 0.55em;
+  border-bottom: 1.5px solid var(--primary);
+  animation: tape-blink 1s step-end infinite;
+}
+
+@keyframes tape-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.tape-title-input {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-family: var(--mono);
+  color: var(--text);
+  background: #fffdf7;
+  border: 0;
+  border-bottom: 1px dotted var(--border);
+  padding: 0;
+  outline: none;
+}
+
+.tape-title-input::placeholder {
+  color: #b9b6ad;
+}
+
+/* Sits BELOW the card, positioned against it rather than inside its flow: the
+   card's on-screen size is a promise about the size it will be drawn in the
+   binder, so a UI-only hint must not add a pixel to it. */
+.tape-title-full {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 3px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  font-family: var(--sans);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.tape-close {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.tape-close:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+/* drawn annotations: shapes, highlights, text notes */
+
+.shapelayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.shapelayer.is-armed {
+  pointer-events: auto;
+  cursor: crosshair;
+  z-index: 3;
+}
+
+.shapesvg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+
+.shape {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.shape:active {
+  cursor: grabbing;
+}
+
+/* A hairline stroke is hard to grab, so widen the hit area without changing
+   what is drawn. */
+.shape > * {
+  vector-effect: non-scaling-stroke;
+}
+
+.shape.is-selected {
+  filter: drop-shadow(0 0 2px var(--primary));
+}
+
+/* grab handles on the selected shape */
+.shape-handle {
+  fill: var(--surface);
+  stroke: var(--primary);
+  stroke-width: 1.5;
+  pointer-events: all;
+  cursor: nwse-resize;
+}
+
+.shape-handle:hover {
+  fill: var(--primary);
+}
+
+.shape-draft {
+  opacity: 0.75;
+}
+
+.shape-text {
+  position: absolute;
+  font-family: var(--ui);
+  background: transparent;
+  border: 0;
+  resize: none;
+  outline: none;
+  overflow: hidden;
+}
+
+.shape-text.is-editing {
+  cursor: text;
+}
+
+.shape-text:focus {
+  background: rgb(255 255 255 / 0.65);
+}
+
+/* colour: one button and a popover, not six inline swatches */
+
+.colormenu {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.color-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 5px;
+}
+
+.color-chip {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgb(0 0 0 / 0.25);
+}
+
+.color-caret {
+  font-size: 8px;
+  color: var(--muted);
+}
+
+.color-pop {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 4px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+
+.color-pop .swatch {
+  width: 20px;
+  height: 20px;
+}
+
+/* colour swatches for new shapes */
+
+.swatches {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid rgb(0 0 0 / 0.25);
+}
+
+.swatch.on {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.sep-thin {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+  flex: none;
+}
+
+.glyph-note {
+  display: inline-block;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 3px;
+}
+
+/* the palette carries a lot of tools now — keep each one tight */
+.palette button {
+  padding: 3px 6px;
+}
+
+.palette .stamp-primary,
+.palette .stamp-caret,
+.palette .conn-primary,
+.palette .conn-caret {
+  padding: 3px 6px;
+}
+
+.swatch {
+  width: 13px;
+  height: 13px;
+}
+
+/* The one tool no glyph communicates. ✓ ✕ ▭ ◯ ➔ speak for themselves; a
+   calculator tape does not, and it had to be asked about twice. */
+.glyph-tape {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* The firm's own tickmarks, behind one split control: the left half arms the
+   stamp you used last, the caret opens the list. Loose in the ribbon these
+   filled it edge to edge as soon as the legend presets existed. */
+
+.stampmenu {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.stamp-primary {
+  font-family: var(--mono);
+  font-weight: 600;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stamp-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+  padding-left: 4px;
+  padding-right: 4px;
+  color: var(--muted);
+}
+
+.stampmenu .menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 40;
+  width: 340px;
+  max-height: 70vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sm) var(--md) var(--md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+
+.stampmenu .menu-title {
+  margin-top: var(--sm);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.stampmenu .menu-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.stamp-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.stamp-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.stamp-row.on .stamp-row-arm {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.stamp-row-arm {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  text-align: left;
+}
+
+.stamp-row-letters {
+  flex: none;
+  min-width: 30px;
+  font-family: var(--mono);
+  font-weight: 700;
+}
+
+.stamp-row-meaning {
+  flex: 1;
+  min-width: 0;
+  font-weight: 400;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Named, not an ×. Removal is rare and deliberate; a bare glyph beside a tool
+   clicked all day is a misfire waiting to happen. */
+.stamp-row-drop {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.stamp-row-drop:hover {
+  color: var(--error);
+}
+
+.stamp-add {
+  display: flex;
+  gap: 6px;
+}
+
+.stamp-add input {
+  font: inherit;
+  font-family: var(--mono);
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+}
+
+.stamp-add input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.stamp-add input::placeholder {
+  font-family: var(--ui);
+  color: var(--muted);
+}
+
+/* Connectors: same split-control shape as the stamps, for the same reason. */
+
+.connmenu {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.conn-primary {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.conn-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+  padding-left: 4px;
+  padding-right: 4px;
+  color: var(--muted);
+}
+
+.connmenu .menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 40;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sm) var(--md) var(--md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+
+.connmenu .menu-title {
+  margin-top: var(--sm);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.connmenu .menu-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.conn-series {
+  display: flex;
+  gap: 6px;
+}
+
+.conn-series button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.conn-series button.on {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.conn-open {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+/* mark inspector */
+
+.mi-delete {
+  padding: 1px 7px;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  flex: none;
+}
+
+.mi-delete:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.mi-id {
+  display: flex;
+  align-items: center;
+  gap: var(--sm);
+  padding: 0 var(--md) var(--sm);
+}
+
+.mi-glyph {
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 600;
+  min-width: 20px;
+  text-align: center;
+}
+
+.mi-kind {
+  color: var(--muted);
+}
+
+/* "tick" -> "Tick", but "Lettered stamp" keeps its lowercase second word */
+.mi-kind::first-letter {
+  text-transform: uppercase;
+}
+
+.mi-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--xs);
+  padding: 0 var(--md);
+}
+
+.mi-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sm);
+}
+
+.mi-row > span:first-child {
+  color: var(--muted);
+  width: 54px;
+  flex: none;
+}
+
+/* Agent attribution. --warning, not --primary: this is meant to be noticed
+   before someone signs the file, which is a different job from the app's
+   ordinary accent. Not --error either — automated work is not a fault. */
+.mi-agent > b,
+.ai-count {
+  color: var(--warning);
+}
+
+.mi-row input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+}
+
+.mi-row input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.mi-size {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--xs);
+}
+
+.mi-size button {
+  padding: 0 7px;
+}
+
+.mi-size-val {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  min-width: 22px;
+  text-align: center;
+}
+
+.mi-meta {
+  color: var(--muted);
+  padding-top: 2px;
+}
+
+.mi-meta > span:last-child {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* side panels */
+
+.side {
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel {
+  border-bottom: 1px solid var(--border);
+  padding: var(--sm) 0;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 0 var(--md) var(--sm);
+}
+
+.bm-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.bm-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sm);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  padding: 3px var(--md) 3px 8px;
+  width: 100%;
+}
+
+.bm-row:hover {
+  background: #f1efe9;
+}
+
+.bm-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.bm-row.is-renamed .bm-title {
+  font-style: italic;
+}
+
+.bm-add {
+  padding: 1px 7px;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+  flex: none;
+}
+
+.panel-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* user-added bookmarks read as editable rather than imported */
+.bm-row.is-user .bm-title {
+  color: var(--primary);
+}
+
+.bm-tools {
+  display: none;
+  gap: 2px;
+  flex: none;
+  color: var(--muted);
+}
+
+.bm-row.is-user:hover .bm-tools {
+  display: inline-flex;
+}
+
+.bm-tools > span {
+  padding: 0 3px;
+}
+
+.bm-tools > span:hover {
+  color: var(--primary);
+}
+
+.bm-assign {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--primary);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0 3px;
+  flex: none;
+  opacity: 0;
+}
+
+.bm-row:hover .bm-assign {
+  opacity: 1;
+}
+
+.bm-assign:hover {
+  border-color: var(--primary);
+  background: #e4efef;
+}
+
+.bm-revert {
+  flex: none;
+  color: var(--muted);
+  padding: 0 3px;
+}
+
+.bm-revert:hover {
+  color: var(--primary);
+}
+
+.bm-row.is-editing {
+  padding-top: 1px;
+  padding-bottom: 1px;
+  padding-right: var(--md);
+}
+
+.bm-input {
+  font: inherit;
+  width: 100%;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--primary);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+}
+
+.bm-page {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  flex: none;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  flex: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  cursor: default;
+}
+
+.toggle input {
+  margin: 0;
+}
+
+.toggle.flatten {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* counts in the status bar */
+.counts {
+  color: var(--muted);
+  white-space: nowrap;
+  flex: none;
+}
+
+.counts b {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* Excluded rather than out-specified: `.counts b` would otherwise win on
+   specificity and repaint the AI count as ordinary text — the same way
+   `button:hover` once beat `.primary` and blanked the Export button. */
+.counts b:not(.ai-count) {
+  color: var(--text);
+}
+
+.statusbar > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--sm);
+  margin: 0;
+  padding: 0 var(--md);
+}
+
+.stats dt {
+  color: var(--muted);
+}
+
+.stats dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* dropzone */
+
+.dropzone {
+  display: grid;
+  place-items: center;
+  padding: var(--lg);
+}
+
+.dropzone-inner {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  padding: 56px 72px;
+  text-align: center;
+}
+
+.dz-title {
+  margin: 0 0 var(--xs);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.dz-sub {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* status bar */
+
+.statusbar {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--md);
+  padding: var(--xs) var(--md);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.working {
+  color: var(--primary);
+}
+
+.error {
+  color: var(--error);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+
+/* ---------------------------------------------------------------- 10 key */
+
+.keypad {
+  position: fixed;
+  right: var(--lg);
+  bottom: 44px;
+  width: 340px;
+  z-index: 50;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.kp-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px var(--sm);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  cursor: grab;
+}
+
+.kp-close {
+  border: 0;
+  background: none;
+  padding: 0 4px;
+  color: var(--muted);
+}
+
+/* the tape's lines, editable */
+.kp-tape {
+  max-height: 160px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.kp-row {
+  display: grid;
+  grid-template-columns: 40px 1fr 68px 16px 68px 16px;
+  align-items: center;
+  gap: 2px;
+  padding: 1px var(--sm);
+}
+
+.kp-row:nth-child(even) {
+  background: #faf9f6;
+}
+
+.kp-head {
+  font-family: var(--ui);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+}
+
+.kp-label {
+  color: var(--muted);
+}
+
+.kp-amt,
+.kp-res {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* the running value after each line — what makes × and ÷ verifiable */
+.kp-res {
+  color: var(--muted);
+}
+
+.kp-res-total {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.kp-note {
+  font: inherit;
+  font-family: var(--ui);
+  border: 0;
+  background: transparent;
+  min-width: 0;
+  padding: 0 2px;
+  color: var(--text);
+}
+
+.kp-note:focus {
+  outline: none;
+  background: #fffdf7;
+}
+
+/* the amount, editable in place — the total recomputes as soon as it commits */
+.kp-amt-input {
+  font: inherit;
+  font-family: var(--mono);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.kp-amt-input:hover {
+  background: #f4f2ec;
+  border-radius: 2px;
+}
+
+.kp-amt-input:focus {
+  outline: 1px solid var(--primary);
+  border-radius: 2px;
+  background: #fffdf7;
+}
+
+.kp-op,
+.kp-del {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.kp-op {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.kp-del:hover {
+  color: var(--error);
+}
+
+.kp-total {
+  border-top: 1px solid var(--border);
+  font-weight: 700;
+  background: var(--surface);
+}
+
+.kp-note-static,
+.kp-op-static {
+  color: var(--muted);
+  padding: 0 2px;
+}
+
+.kp-display {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: var(--sm);
+  font-family: var(--mono);
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  padding: 6px var(--sm);
+  background: #f4f6f4;
+  border-bottom: 1px solid var(--border);
+}
+
+.kp-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: var(--sm);
+}
+
+.kp-key {
+  padding: 9px 0;
+  font-size: 14px;
+}
+
+.kp-wide {
+  grid-column: span 2;
+}
+
+.kp-op-key {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.kp-pending {
+  font-size: 16px;
+  color: var(--primary);
+  font-weight: 700;
+  min-width: 12px;
+}
+
+.kp-enter {
+  grid-column: span 4;
+  font-size: 18px;
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  font-weight: 500;
+}
+
+.kp-enter:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.kp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sm);
+  padding: 0 var(--sm) var(--sm);
+}
+
+.kp-hint {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+
+/* export options */
+
+.exportmenu {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+/* Anchored LEFT because Options leads the toolbar row. It was `right: 0` from
+   when the button sat beside Save at the far right — correct there, and the
+   moment the button moved to the left edge that same rule sent a 268px panel
+   off the left of the window. A dropdown's anchor belongs to where its button
+   IS, so moving a button means checking the menu under it. */
+.ex-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 40;
+  width: 268px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: var(--sm) var(--md) var(--md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+
+.ex-top {
+  padding-top: var(--sm);
+  border-top: 1px solid var(--border);
+}
+
+.ex-menu select,
+.ex-menu input[type='text'],
+.ex-menu .mi-row input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+}
+
+.ex-num {
+  font-family: var(--mono);
+  max-width: 70px;
+}
+
+/* -------------------------------------------------------- tickmark legend */
+
+.legendmenu {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.legendmenu .menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 40;
+  width: 380px;
+  max-height: 70vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sm) var(--md) var(--md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+
+.legendmenu .menu-title {
+  margin-top: var(--sm);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.legendmenu .menu-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.legend-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-row input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Wide enough for "GL" and "UD" so the meaning fields all start on one line —
+   a ragged left edge makes a legend look like a list of unrelated things. */
+.legend-glyph {
+  flex: none;
+  min-width: 26px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.legend-count {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* The preset list scrolls INSIDE the panel rather than growing it. Thirteen
+   presets pushed "Add legend page" — the whole point of the panel — below the
+   bottom of the window, where a scroll bar on the panel as a whole was not
+   enough to make it findable. Caught by screenshotting the window; every
+   automated check was green. */
+.legend-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.legend-preset {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.legend-preset-name {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.legend-addpage {
+  align-self: flex-start;
+}
+
+/* The connector's ring in the TOOLBAR, showing the next label. Sized in px
+   rather than scaled like the mark: this one is a button, not content. */
+.conn-ring {
+  display: inline-grid;
+  place-items: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 2px;
+  border: 1.6px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ------------------------------------------------------------ page status */
+
+.statusmenu {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.statusmenu > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* the current page's status, so the button reports as well as acts */
+.st-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+}
+
+.st-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 40;
+  width: 292px;
+  padding-bottom: var(--sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+
+.st-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px var(--md);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.st-menu .st-list {
+  padding-top: var(--xs);
+}
+
+.st-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--md);
+}
+
+.st-row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto 16px;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.st-row.is-current {
+  background: #f1efe9;
+  border-radius: var(--r-sm);
+}
+
+.st-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgb(0 0 0 / 0.25);
+  padding: 0;
+}
+
+.st-swatch-none {
+  background: repeating-linear-gradient(45deg, #fff, #fff 3px, #e4e1d9 3px, #e4e1d9 6px);
+}
+
+.st-label {
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 2px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st-label:hover:not(:disabled) {
+  color: var(--primary);
+  background: none;
+  text-decoration: underline;
+}
+
+.st-count {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.st-drop {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.st-drop:hover {
+  color: var(--error);
+  background: none;
+}
+
+.st-unset .st-label {
+  color: var(--muted);
+}
+
+.st-new {
+  display: flex;
+  gap: var(--xs);
+  padding: var(--sm) var(--md) 0;
+}
+
+.st-label-input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+}
+
+.st-label-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.st-parts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--sm) var(--md) 0;
+  border-top: 1px solid var(--border);
+  margin-top: var(--sm);
+}
+
+.st-parts select {
+  font: inherit;
+  flex: 1;
+}
+
+.st-note {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 2px 0 0;
+}
+
+/* status colour on the thumbnail */
+.thumb-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+/* ------------------------------------------------------------ AI history */
+
+.hist-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sm);
+}
+
+.hist-run {
+  padding: 0 var(--md);
+}
+
+.hist-run-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  padding-bottom: 2px;
+}
+
+.hist-row {
+  display: flex;
+  gap: var(--sm);
+  padding: 2px 0;
+  align-items: baseline;
+}
+
+.hist-when {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  flex: none;
+}
+
+.hist-what {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  /* Wrapped, not truncated: the sentence IS the record, and an ellipsis in an
+     audit trail hides exactly what a reviewer came to read. */
+  overflow-wrap: anywhere;
+}
+
+.hist-structural {
+  color: var(--warning);
+  font-style: normal;
+  font-size: 11px;
+}
+
+/* The status-bar count is the way in, so it has to read as a control. */
+button.ai-count {
+  font: inherit;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/* Live agent access is a security-relevant mode, so it reads as a state in the
+   status bar rather than hiding in a menu. Off is quiet; on is unmissable. */
+.live-toggle {
+  font-size: 11px;
+  padding: 1px 7px;
+  color: var(--muted);
+  flex: none;
+}
+
+.live-toggle.is-on {
+  color: #fff;
+  background: var(--warning);
+  border-color: var(--warning);
+  font-weight: 600;
+}
+
+.live-toggle.is-on:hover:not(:disabled) {
+  background: var(--warning);
+  filter: brightness(1.08);
+}
+
+/* ------------------------------------------------ bookmark section drag */
+
+.bm-row[draggable='true'] {
+  cursor: grab;
+}
+
+.bm-row.is-dragging {
+  opacity: 0.45;
+}
+
+/* The line lands ABOVE the row you are over, matching where the section goes. */
+.bm-row.drop-before {
+  box-shadow: inset 0 2px 0 0 var(--primary);
+}
+
+.bm-drop-end {
+  min-height: 22px;
+  margin: 2px var(--md) 0;
+  padding: 2px 0;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 2px solid transparent;
+}
+
+.bm-drop-end.is-over {
+  border-top-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Word labels need room the arrows did not. */
+.bm-tools > span {
+  padding: 0 4px;
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------- recent binders */
+
+.recents {
+  margin-top: var(--lg);
+  border-top: 1px solid var(--border);
+  padding-top: var(--md);
+  text-align: left;
+}
+
+.recents-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding-bottom: var(--xs);
+}
+
+.recent {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--md);
+  width: 100%;
+  border: 0;
+  background: none;
+  border-radius: var(--r-sm);
+  padding: 5px var(--sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent:hover:not(:disabled) {
+  background: #f1efe9;
+}
+
+.recent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--primary);
+}
+
+.recent-when {
+  font-size: 11px;
+  color: var(--muted);
+  flex: none;
+}
+
+/* A binder that moved is shown, not hidden — that is worth noticing. */
+.recent.is-missing .recent-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.recent.is-missing .recent-when {
+  color: var(--warning);
+}
+
+/* ---------------------------------------------------- the initials question
+   Asked once, the first time a mark would otherwise be recorded with a blank
+   author. Positioned over the workspace rather than at the click point: the
+   mark layer lives two components down, and threading pixel coordinates
+   through it to save one glance is not a trade worth making. */
+/* Covers the workspace so a click cannot reach the page underneath and move
+   the mark this question is about. The tint is what tells the eye the binder
+   is not accepting clicks right now. */
+.initials-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 0.18);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 22vh;
+}
+.initials-ask {
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, #d8d6cf);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.22);
+  padding: 18px 20px;
+  min-width: 340px;
+}
+.initials-ask .ia-q {
+  font-weight: 700;
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+.initials-ask .ia-why {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  opacity: 0.75;
+  max-width: 34ch;
+}
+.initials-ask .ia-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.initials-ask .ia-input {
+  width: 88px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  text-align: center;
+}
+/* The uppercase transform above applies to the placeholder too, which rendered
+   the hint as "E.G. ABC". The example is meant to read as an example. */
+.initials-ask .ia-input::placeholder {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+.initials-ask .ia-later {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  opacity: 0.6;
+}
+
+/* ------------------------------------------------------------- save + where
+   A split button: Save acts on click, the caret opens the one other
+   destination. Two buttons visually joined, so the row reads as ONE Save
+   rather than the two that used to sit here both beginning with the word. */
+.savemenu {
+  position: relative;
+  display: inline-flex;
+}
+
+.savemenu .sm-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.savemenu .sm-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  /* A hairline so the two halves read as one control with a divider, rather
+     than as two buttons that happen to touch. */
+  border-left: 1px solid rgb(255 255 255 / 0.35);
+  padding-left: 7px;
+  padding-right: 7px;
+}
+
+.sm-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  /* Anchored to its RIGHT edge, like .ex-menu beside it, because this button
+     sits near the right of the window. Anchored left, a 300px panel ran off
+     the edge — and an absolutely-positioned child still counts toward the
+     scroll width, so the whole app gained a horizontal scrollbar and the menu
+     was only readable by scrolling to it. */
+  right: 0;
+  z-index: 40;
+  width: 300px;
+  /* Belt for a narrow window: whatever the anchor, it cannot exceed the
+     viewport and reintroduce the scrollbar. */
+  max-width: calc(100vw - 2 * var(--md));
+  padding: var(--xs);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+
+.sm-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: var(--sm);
+  border-radius: var(--r-sm);
+}
+
+.sm-item:hover:not(:disabled) {
+  background: #f1efe9;
+}
+
+.sm-item-name {
+  display: block;
+  font-weight: 500;
+}
+
+/* The consequence, carried on the item itself rather than in a tooltip nobody
+   hovers. This is the one save in the app that saving again cannot undo. */
+.sm-item-why {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* Tape size, in the keypad's title bar beside the close button. A tape is the
+   largest object placed on a page and was the only annotation with no size
+   control — marks have carried one all along. */
+.kp-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  margin-right: var(--sm);
+}
+
+.kp-size-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.kp-size button {
+  padding: 1px 6px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.kp-size-val {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  min-width: 16px;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------ agent access
+   Reuses .initials-backdrop for the scrim, so there is one dimming treatment
+   in the app rather than two that drift apart. */
+
+.agent-panel {
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, #d8d6cf);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.22);
+  padding: 18px 20px;
+  width: 620px;
+  max-width: calc(100vw - 48px);
+  max-height: 78vh;
+  overflow-y: auto;
+}
+
+.ap-title {
+  font-weight: 700;
+  font-size: 15px;
+  margin: 0 0 12px;
+}
+
+.ap-section {
+  border-top: 1px solid var(--line, #e6e4dd);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+.ap-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.ap-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.ap-label {
+  font-weight: 600;
+  font-size: 13px;
+  margin: 0 0 6px;
+}
+
+/* Explanatory copy, not a warning box: this app tells you what happens and
+   trusts you to decide, rather than shouting and being clicked past. */
+.ap-why {
+  font-size: 12.5px;
+  color: var(--ink-gray, #46565c);
+  line-height: 1.5;
+  margin: 6px 0 0;
+}
+
+.ap-empty {
+  font-size: 12.5px;
+  color: var(--ink-gray, #46565c);
+  margin: 6px 0;
+}
+
+.ap-roots {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+.ap-roots li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line, #f0eee7);
+}
+
+/* The path is the evidence of what was approved, so it is never abbreviated in
+   the middle — a truncated root reads as a different folder. It wraps instead. */
+.ap-path {
+  font-family: var(--mono, ui-monospace, Menlo, monospace);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  flex: 1;
+}
+
+.ap-command {
+  display: block;
+  font-family: var(--mono, ui-monospace, Menlo, monospace);
+  font-size: 11.5px;
+  background: #f6f5ef;
+  border: 1px solid var(--line, #e6e4dd);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.ap-toggle.is-on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.ap-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.live-settings {
+  font-size: 11.5px;
+  padding: 2px 7px;
+}

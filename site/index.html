@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LedgerPDF: the workpaper binder for accountants working alongside AI agents</title>
+  <meta name="description" content="A workpaper binder built for tax and accounting professionals to use alongside AI agents. Assemble, tick, tie and review, locally, with client data never leaving your machine. Open source, built by a practising CPA." />
+  <link rel="canonical" href="https://ledgerpdf.com/" />
+
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <meta name="theme-color" content="#1D434E" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="LedgerPDF: the workpaper binder for accountants working alongside AI agents" />
+  <meta property="og:description" content="Built for tax and accounting professionals to use alongside AI agents. Assemble, tick, tie and review workpaper binders locally. No cloud, no telemetry. Open source under GPL-3.0." />
+  <meta property="og:image" content="https://ledgerpdf.com/og-image.png" />
+  <meta property="og:url" content="https://ledgerpdf.com/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://ledgerpdf.com/og-image.png" />
+
+  <style>
+    /* ---------------------------------------------------------------- fonts
+       LedgerPDF Brand Guidelines v2.0 §03: Playfair Display carries the
+       editorial voice, JetBrains Mono carries the record, Inter serves the
+       interface copy in between.
+
+       Self-hosted, not Google Fonts. This page used to pull the three families
+       from fonts.googleapis.com and carry a comment apologising for it — one
+       external request on the site of a product whose whole pitch is that it
+       makes none. All three are SIL Open Font License, the kit ships the TTFs,
+       so they are converted to woff2 and served from this origin. The page now
+       makes zero third-party requests, which is the same claim the copy below
+       makes about the app. See fonts/OFL.md for the licence. */
+    @font-face {
+      font-family: "Playfair Display"; font-style: normal; font-weight: 600;
+      font-display: swap; src: url("fonts/PlayfairDisplay-SemiBold.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: Inter; font-style: normal; font-weight: 400;
+      font-display: swap; src: url("fonts/Inter-Regular.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: Inter; font-style: normal; font-weight: 600;
+      font-display: swap; src: url("fonts/Inter-SemiBold.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: "JetBrains Mono"; font-style: normal; font-weight: 400;
+      font-display: swap; src: url("fonts/JetBrainsMono-Regular.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: "JetBrains Mono"; font-style: normal; font-weight: 700;
+      font-display: swap; src: url("fonts/JetBrainsMono-Bold.woff2") format("woff2");
+    }
+
+    /* ---------------------------------------------------------------- tokens
+       LedgerPDF Brand Guidelines v2.0 §02 — the whole eight-colour palette,
+       under its brand names. Source of truth: the brand kit's
+       colors/ledgerpdf-colors.css (the kit is a design asset, not in this repo).
+       The guide's mix is roughly 40% vellum, 20% ink, 15% deep teal, 10% green,
+       10% orange, 5% amber — which is why vellum is the page surface here and
+       paper cream is reserved for the panels sitting on it. */
+    :root {
+      --vellum:      #F5ECD6;  /* soft surface — page background            */
+      --paper-cream: #FDFCEA;  /* light panels, body text on dark           */
+      --ink:         #0B1A1F;  /* maximum contrast text and rules           */
+      --abyss:       #0F2A31;  /* deeper backgrounds — agent band, footer   */
+      --teal:        #1D434E;  /* primary surface, links, references        */
+      --green:       #2D9148;  /* calls to action, verified states          */
+      --orange:      #E8913A;  /* the mark — tabs, accents, the PDF         */
+      --amber:       #E6A532;  /* highlight stop, secondary tabs            */
+      --ink-gray:    #46565C;  /* secondary text                            */
+
+      --display: "Playfair Display", Georgia, serif;
+      --body: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+      --rule: rgb(11 26 31 / 0.14);
+      --rule-dark: rgb(253 252 234 / 0.16);
+    }
+    * { box-sizing: border-box; margin: 0; }
+    /* Deliberately NO `overflow-x: hidden` here. It was added while chasing the
+       hero-shot overflow below and removed once that was actually fixed: it
+       hides the next such bug rather than preventing it, and on `html` it also
+       defeats the `scroll-behavior: smooth` this page relies on for its anchor
+       nav. Measured at a real 390px viewport, the document is 390px wide with
+       zero overflowing elements — so there is nothing to hide. */
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--body);
+      font-size: 16px;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--vellum);
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; }
+    img, svg { max-width: 100%; display: block; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+    /* ------------------------------------------------------ brand furniture */
+    /* The three index tabs off the mark's right edge, reused as a rule. Guide
+       §01 forbids re-ordering or recolouring them, so the order here is fixed:
+       Signal Orange, Amber Gold, Ledger Green. */
+    .tabs {
+      display: inline-block; width: 34px; height: 6px; flex: none;
+      background: linear-gradient(90deg,
+        var(--orange) 0 10px, transparent 10px 12px,
+        var(--amber) 12px 22px, transparent 22px 24px,
+        var(--green) 24px 34px);
+    }
+    /* Guide §03: labels and eyebrows are JetBrains Mono Bold, all caps,
+       tracking +20%. */
+    .eyebrow {
+      display: flex; align-items: center; gap: 12px;
+      font-family: var(--mono); font-weight: 700; font-size: 11.5px;
+      letter-spacing: 0.2em; text-transform: uppercase;
+      color: var(--ink-gray); margin-bottom: 16px;
+    }
+    .on-dark .eyebrow, .eyebrow.on-dark { color: var(--orange); }
+    /* Figures never re-flow between rows: guide §03, tabular, never rounded. */
+    .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .tick { width: 15px; height: 15px; flex: none; color: var(--green); }
+
+    /* The lockup, set live rather than as the kit's lockup SVG — that SVG sets
+       the wordmark as <text>, which silently falls back to Georgia anywhere the
+       fonts are not installed. With the faces self-hosted above, real HTML text
+       reproduces the lockup exactly and stays selectable. */
+    .lockup { display: flex; align-items: center; gap: 11px; text-decoration: none; }
+    .lockup svg, .lockup img { width: 30px; height: 30px; }
+    .lockup .word {
+      font-family: var(--display); font-weight: 600; font-size: 22px;
+      letter-spacing: -0.01em; line-height: 1;
+    }
+    .lockup .word .pdf {
+      font-family: var(--mono); font-weight: 700; font-size: 18px;
+      color: var(--orange); margin-left: 4px;
+    }
+
+    /* ------------------------------------------------------------- header */
+    header { background: var(--teal); color: var(--paper-cream); }
+    .nav { display: flex; align-items: center; gap: 28px; padding: 18px 0; }
+    .nav nav { margin-left: auto; display: flex; gap: 22px; }
+    .nav nav a {
+      text-decoration: none; font-size: 13.5px; opacity: 0.85;
+      padding-bottom: 2px; border-bottom: 2px solid transparent;
+    }
+    .nav nav a:hover { opacity: 1; border-bottom-color: var(--orange); }
+
+    /* --------------------------------------------------------------- hero */
+    /* No overflow:hidden here — the screenshot deliberately overhangs into the
+       section below via a negative margin, and hiding overflow clips the
+       overhang flat at the section boundary. */
+    .hero { background: var(--teal); color: var(--paper-cream); padding: 56px 0 0; }
+    /* Wider and a size down from the original 760px / 54px. The headline names
+       the audience now instead of just the category, which costs it about
+       thirty characters — at the old size that wrapped to four lines and pushed
+       the product shot off the fold, so the first thing a visitor saw was type.
+       Three lines and the top of the app is the right trade. */
+    .hero-inner { max-width: 880px; }
+    h1 {
+      font-family: var(--display);
+      font-size: clamp(31px, 4.2vw, 46px);
+      line-height: 1.12;
+      font-weight: 600;          /* guide §03: H1 is Playfair SemiBold */
+      letter-spacing: -0.01em;
+      margin-bottom: 20px;
+    }
+    .hero p.lede { font-size: 19px; line-height: 1.55; color: rgb(253 252 234 / 0.9); max-width: 640px; }
+    .cta-row { display: flex; gap: 14px; margin: 30px 0 0; flex-wrap: wrap; }
+    .btn {
+      display: inline-block; padding: 12px 22px; border-radius: 8px;
+      font-size: 15px; font-weight: 600; text-decoration: none;
+      border: 1px solid transparent;
+    }
+    .btn-primary { background: var(--green); color: #fff; }
+    .btn-primary:hover { filter: brightness(1.07); }
+    .btn-ghost { border-color: rgb(253 252 234 / 0.4); color: var(--paper-cream); }
+    .btn-ghost:hover { border-color: rgb(253 252 234 / 0.8); }
+    .hero-shot {
+      margin: 52px auto -80px;
+      /* `width` matters as much as `max-width` here. This is a class rule, so
+         it outranks the global `img { max-width: 100% }` on specificity — and
+         without a width the 1200px-wide poster rendered at its 980px cap on a
+         390px phone, pushing the BODY 590px wide. Every heading on the page
+         was then clipped mid-word. */
+      width: 100%;
+      max-width: 980px;
+      border-radius: 10px 10px 0 0;
+      box-shadow: 0 18px 60px rgb(11 26 31 / 0.45);
+      border: 1px solid rgb(253 252 234 / 0.15);
+      border-bottom: 0;
+    }
+    .under-hero { height: 110px; background: var(--vellum); }
+
+    /* ------------------------------------------------------------ sections */
+    section { padding: 72px 0; }
+    .section-title {
+      font-family: var(--display); font-size: clamp(26px, 3.4vw, 36px);
+      font-weight: 600; letter-spacing: -0.01em; margin-bottom: 14px;
+    }
+    .section-sub { max-width: 640px; color: var(--ink-gray); margin-bottom: 40px; }
+
+    /* the "replaces" strip */
+    .replaces {
+      background: var(--paper-cream);
+      padding: 30px 0;
+      border-top: 2px solid var(--ink);
+      border-bottom: 1px solid var(--rule);
+    }
+    .replaces .wrap { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+    .replaces b { font-family: var(--mono); font-weight: 700; font-size: 15px; }
+    .replaces span { color: var(--ink-gray); font-size: 15px; }
+
+    /* feature grid */
+    /* `min(290px, 100%)` rather than a bare 290px: an auto-fit track cannot
+       shrink below its stated minimum, so on a container narrower than 290px
+       (a 320px phone, once its scrollbar is taken off) the cards overran the
+       page. The min() lets the track collapse to the container instead. */
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(290px, 100%), 1fr)); gap: 20px; }
+    .card {
+      background: var(--paper-cream);
+      border: 1px solid var(--rule);
+      border-radius: 10px;
+      padding: 24px;
+    }
+    .card h3 {
+      display: flex; align-items: center; gap: 9px;
+      font-size: 16.5px; font-weight: 600; margin-bottom: 8px;
+    }
+    .card p { font-size: 14.5px; color: var(--ink-gray); }
+
+    /* agent section */
+    .agent { background: var(--abyss); color: var(--paper-cream); }
+    .agent .section-sub { color: rgb(253 252 234 / 0.75); }
+    .agent-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 44px; align-items: start; }
+    @media (max-width: 800px) { .agent-cols { grid-template-columns: 1fr; } }
+    .agent-cols ul { list-style: none; display: grid; gap: 16px; }
+    .agent-cols li { padding-left: 26px; position: relative; font-size: 15.5px; }
+    /* The tick is drawn, not typed. U+2713 is absent from all three brand faces
+       (they are Latin-subset), so a literal ✓ silently fell back to whatever
+       system font had one — a different tick on every OS, in the one mark this
+       product is named for. */
+    .agent-cols li::before {
+      content: ""; position: absolute; left: 0; top: 0.34em;
+      width: 15px; height: 15px;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 8.6 6 12.6 14 3.6' fill='none' stroke='%232D9148' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / contain;
+    }
+    .journal {
+      font-family: var(--mono); font-variant-numeric: tabular-nums;
+      font-size: 12.5px; line-height: 1.75;
+      background: rgb(253 252 234 / 0.06);
+      border: 1px solid var(--rule-dark);
+      border-radius: 10px; padding: 20px 22px;
+      overflow-x: auto; white-space: pre;
+    }
+    .journal .ai { color: var(--orange); }
+    .journal .ok { color: #6fcf8b; }
+
+    /* data section */
+    .data-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+    @media (max-width: 800px) { .data-cols { grid-template-columns: 1fr; } }
+    .data-cols h3 { font-size: 17px; margin-bottom: 10px; }
+    .data-cols p { font-size: 15px; color: var(--ink-gray); }
+    .data-cols .honest { border-left: 3px solid var(--orange); padding-left: 18px; }
+    .honest.wide { border-left: 3px solid var(--orange); padding-left: 18px; margin-top: 34px; max-width: 720px; }
+    .honest.wide h3 { font-size: 17px; margin-bottom: 10px; }
+    .honest.wide p { font-size: 15px; color: var(--ink-gray); }
+    /* Two lists of plain facts, marked so the eye can tell a capability from a
+       limit without reading the heading twice. Green tick for what it does, an
+       amber bar for what it does not: a red cross would read as a fault, and
+       every line in that column is a deliberate boundary rather than a gap. */
+    .facts { list-style: none; display: grid; gap: 11px; }
+    .facts li {
+      position: relative; padding-left: 24px;
+      font-size: 15px; color: var(--ink-gray);
+    }
+    .facts li::before {
+      content: ""; position: absolute; left: 0; top: 0.34em; width: 15px; height: 15px;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 8.6 6 12.6 14 3.6' fill='none' stroke='%232D9148' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / contain;
+    }
+    .facts.not li::before {
+      background: none; left: 2px; top: 0.5em; width: 11px; height: 3px;
+      border-radius: 2px; background-color: var(--amber);
+    }
+    /* The regime cards sit on vellum, so they take the same paper-cream panel as
+       the feature grid rather than inventing a third surface. */
+    /* Two up, not three. There are four regimes, and an auto-fit track sized for
+       three leaves the fourth stranded alone on a second row, which reads as an
+       afterthought rather than a peer of the other three. */
+    .regs {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+      gap: 20px; margin-top: 44px;
+    }
+    .regs .card h3 { display: block; font-size: 15px; margin-bottom: 10px; color: var(--teal); }
+    /* The consideration reads as the question; the facts underneath read as the
+       answer to a different, smaller question. Keeping them visually distinct is
+       the point of the section: one is the practitioner's to settle, the other
+       is ours to state and be held to. */
+    .regs .card .consider {
+      color: var(--ink); border-left: 2px solid var(--amber);
+      padding-left: 12px; margin-bottom: 12px;
+    }
+
+    /* download */
+    .dl { background: var(--paper-cream); border-top: 1px solid var(--rule); }
+    .dl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 20px; }
+    .dl-card {
+      background: #fff; border: 1px solid var(--rule); border-radius: 10px;
+      padding: 28px 24px; text-align: center; display: flex; flex-direction: column; gap: 12px;
+    }
+    .dl-card .os { font-weight: 600; font-size: 17px; }
+    .dl-card .note { font-size: 13.5px; color: var(--ink-gray); flex: 1; }
+    .pill {
+      font-family: var(--mono); font-weight: 700; font-size: 11px;
+      letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+      border: 1px solid var(--amber); background: rgb(230 165 50 / 0.14);
+      border-radius: 99px; padding: 6px 14px; align-self: center;
+    }
+    .dl-card .btn-primary { align-self: center; }
+    .dl-fine { margin-top: 26px; font-size: 13.5px; color: var(--ink-gray); max-width: 720px; }
+    /* The security note runs to three paragraphs; keep them one block, not three. */
+    .dl-fine + .dl-fine { margin-top: 12px; }
+
+    /* footer — guide §02 puts the footer on Abyss */
+    footer { background: var(--abyss); color: var(--paper-cream); padding: 44px 0; font-size: 14px; }
+    footer .wrap { display: flex; gap: 24px; flex-wrap: wrap; align-items: center; }
+    footer a { opacity: 0.85; }
+    footer a:hover { opacity: 1; }
+    footer .spacer { flex: 1; }
+    footer .fine { color: rgb(253 252 234 / 0.6); font-size: 12.5px; width: 100%; margin-top: 4px; }
+    footer .rule { width: 100%; height: 1px; background: var(--rule-dark); margin: 8px 0 4px; }
+
+    /* ------------------------------------------------------------- phones */
+    /* A landing page for accountants gets opened from LinkedIn on a phone as
+       often as from a desktop. Until the hero-shot width was fixed above, this
+       page scrolled sideways and clipped every heading there. */
+    @media (max-width: 720px) {
+      .nav { flex-wrap: wrap; gap: 12px; padding: 14px 0; }
+      .nav nav { margin-left: 0; gap: 18px; flex-wrap: wrap; row-gap: 8px; }
+      .hero { padding-top: 36px; }
+      .hero-shot { margin: 32px auto -40px; }
+      .under-hero { height: 56px; }
+      section { padding: 48px 0; }
+      .journal { font-size: 11px; padding: 16px; }
+      .cta-row { gap: 10px; }
+      .btn { padding: 11px 18px; }
+      .eyebrow { font-size: 10.5px; letter-spacing: 0.16em; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="lockup" href="/">
+      <img src="brand/mark-on-dark.svg" alt="" width="30" height="30" />
+      <span class="word">Ledger<span class="pdf">PDF</span></span>
+    </a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#agents">Agents</a>
+      <a href="#data">Your data</a>
+      <a href="#download">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="hero-inner">
+      <p class="eyebrow on-dark"><span class="tabs" aria-hidden="true"></span>Open source · Local-first · Built by a practising CPA</p>
+      <h1>A workpaper binder built for tax and accounting professionals to use alongside AI&nbsp;agents.</h1>
+      <p class="lede">
+        Drag in what you actually have. Tax-software PDFs, Excel trial balances, scans,
+        phone photos. Get back one ordered, bookmarked binder. Tick it, tape it, tie it
+        out. Or have an agent do the prep while you review, in the same file.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#download">Get LedgerPDF</a>
+        <a class="btn btn-ghost" href="#agents">How it works</a>
+      </div>
+    </div>
+    <!-- A recording of the real app being driven by a real agent over the MCP
+         live socket — app/scripts/record-demo.mjs re-records it when the UI
+         changes. Browsers without animated-WebP get the finished-binder poster,
+         which is also deliberately the loop's opening frame. -->
+    <picture>
+      <source type="image/webp" srcset="demo.webp" />
+      <img class="hero-shot" src="poster.png"
+           alt="An AI agent filling an empty LedgerPDF binder: files import, tick marks land beside the figures it found, a calculator tape foots the interest, an open item is flagged, and the binder saves." />
+    </picture>
+  </div>
+</div>
+<div class="under-hero"></div>
+
+<div class="replaces">
+  <div class="wrap">
+    <b>Replaces Acrobat + TicTie Calculate.</b>
+    <span>Firms pay about $400 per seat, per year, for two tools to do one bounded job, and the add-on requires the other to run. This is that job, in one tool you can read the source of.</span>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <p class="eyebrow"><span class="tabs" aria-hidden="true"></span>01 / Features</p>
+    <h2 class="section-title">A binder, not a project file</h2>
+    <p class="section-sub">The binder PDF <em>is</em> the document. Save overwrites it; an editable
+    session rides inside the file itself. Nothing to lose, nothing to explain to the next preparer.</p>
+    <div class="grid">
+      <div class="card"><h3>
+        <svg class="tick" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8.6 6 12.6 14 3.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Marks that survive</h3>
+        <p>Tick marks, stamps, tapes, shapes and notes export as standard PDF annotations and render
+        in Acrobat, Edge, Chrome and macOS Preview. Every mark's position is pixel-verified in two
+        independent render engines.</p></div>
+      <div class="card"><h3>
+        <svg class="tick" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8.6 6 12.6 14 3.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Bookmarks that follow pages</h3>
+        <p>Reorder anything; the outline moves with it. Drag a bookmark and its whole section of
+        pages moves. Imported outlines nest and retarget instead of breaking.</p></div>
+      <div class="card"><h3>
+        <svg class="tick" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8.6 6 12.6 14 3.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Calculator tapes with addends</h3>
+        <p>A ten-key adding machine on the page. Whole-cent arithmetic, never floating point, and a
+        total always carries the entries behind it, so a reviewer sees the work, not just the answer.</p></div>
+      <div class="card"><h3>
+        <svg class="tick" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8.6 6 12.6 14 3.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Real inputs</h3>
+        <p>PDFs, .xlsx / .csv, .md / .docx, and images. A spreadsheet becomes pages whose cells are
+        real text, so a figure off a trial balance is read exactly rather than OCR'd and guessed.</p></div>
+      <div class="card"><h3>
+        <svg class="tick" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8.6 6 12.6 14 3.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Scans, read honestly</h3>
+        <p>On-device OCR gives agents eyes on photographed documents, labelled as a machine reading
+        with per-word confidence, never presented as the document's own text. Built in on macOS.
+        On Windows today it needs Tesseract installed alongside, and says so rather than
+        guessing.</p></div>
+      <div class="card"><h3>
+        <svg class="tick" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8.6 6 12.6 14 3.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        One portable file out</h3>
+        <p>Send a copy with the marks printed on permanently for whoever needs it. The working
+        binder, with its editable session, stays yours.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="agent on-dark" id="agents">
+  <div class="wrap">
+    <p class="eyebrow on-dark"><span class="tabs" aria-hidden="true"></span>02 / Agents</p>
+    <h2 class="section-title">The agent preps. You review. Same binder.</h2>
+    <p class="section-sub">Not a chat box bolted onto a GUI. It is an MCP server exposing the same
+    model the app drives, so an agent works in the binder you have open, and you watch it happen.</p>
+    <div class="agent-cols">
+      <ul>
+        <li>An agent reads the actual pages, including embedded text, exact cell values and OCR'd scans, then finds a figure by name and marks it where it sits.</li>
+        <li>It has the whole toolbar, not a subset: ticks, stamps, calculator tapes and notes, plus rectangles, ellipses, arrows, highlights and text boxes. Anything you can draw, it can draw.</li>
+        <li>Its marks are outlined on the page, so a first pass by an agent and your own review read apart at a glance, not only in the comments pane. Every action is attributed to the AI, journalled in order, and revertible in one step.</li>
+        <li>Agent file access is off by default and scoped to folders you name. The tool never decides what an agent may read. You do.</li>
+        <li>Works with Claude and any MCP client, against a live window or headless.</li>
+      </ul>
+      <div class="journal" aria-label="Example agent journal">
+14:32:07  <span class="ai">AI</span>  Imported 12 file(s) from “2025 Binder”
+14:32:19  <span class="ai">AI</span>  Bookmarked 12 sections by document type
+14:32:31  <span class="ai">AI</span>  Tied W-2 wages to the summary — <span class="ok">agrees</span>
+14:32:31  <span class="ai">AI</span>  Placed tick on p.4 at 84,200.00
+14:32:44  <span class="ai">AI</span>  Flagged p.9: interest differs by 80.00
+14:35:02  ABC Reviewed p.9 — adjustment posted
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="data">
+  <div class="wrap">
+    <p class="eyebrow"><span class="tabs" aria-hidden="true"></span>03 / Your data</p>
+    <h2 class="section-title">What this software does, and what it does not do</h2>
+    <p class="section-sub">No claims here about what any of that means for your obligations. The
+    regimes further down are raised because a tax or accounting professional will have to think
+    about them, not because a PDF tool can settle them. Whether this application fits a given
+    standard in your practice is your call, made against your own policies.</p>
+    <div class="data-cols">
+      <div>
+        <h3>What it does</h3>
+        <ul class="facts">
+          <li>Runs entirely on your machine and makes no network calls. No telemetry, no accounts,
+          no cloud, no auto-update.</li>
+          <li>Keeps binders, working copies and recovery files in the engagement folder you chose,
+          not a temp directory or a vendor's storage. Owner-only on macOS and Linux; on Windows
+          they inherit that folder's permissions.</li>
+          <li>Opens your source documents read-only and records a SHA-256 of each, checked again on
+          reopen and around every export.</li>
+          <li>Attributes every agent action to the AI, journals it in order, and reverts it in one
+          step. Agent marks are outlined on the page.</li>
+          <li>Publishes its full source under GPL-3.0, so everything on this page can be checked
+          instead of believed.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>What it does not do</h3>
+        <ul class="facts not">
+          <li>Encrypt your files, enforce a retention schedule, or guarantee secure erasure.</li>
+          <li>Provide access control, engagement locking, reviewer sign-off, an immutable audit
+          log, or any central administration.</li>
+          <li>Decide what an agent may read. Agent file access stays off until you name folders
+          yourself, and reads outside them are refused.</li>
+          <li>Control what your AI client does with what it reads. That program is separate, and
+          under your control rather than ours.</li>
+          <li>Make any determination about §7216, your WISP, Circular 230, or anything else you
+          answer to. It cannot, and does not try.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="honest wide">
+      <h3>The one thing that can leave the machine</h3>
+      <p>Connecting an AI agent. Even then LedgerPDF is not what reaches the network: your MCP
+      client is a separate program under your control, and what it reads goes wherever that program
+      sends it. A locally-run model keeps it all on the machine. A hosted one does not, and that
+      difference is yours to weigh.</p>
+    </div>
+
+    <div class="regs">
+      <div class="card"><h3>IRC §7216 and §6713</h3>
+        <p class="consider">To consider: whether anything you do here involves a disclosure or use
+        of return information, and if so what consent that calls for and in what form
+        (Treas. Reg. §301.7216-3).</p>
+        <p>The facts: the application makes no network calls. Agent file access is off until you
+        name folders yourself, and once you do, an agent can read page text, which on a 1040
+        includes the SSN.</p></div>
+      <div class="card"><h3>FTC Safeguards Rule and your WISP</h3>
+        <p class="consider">To consider: how a local tool fits the written information security
+        program you maintain, and which controls it supplies against which ones it leaves to
+        you.</p>
+        <p>The facts: binders, working copies and recovery files sit in the engagement folder you
+        chose, not a temp directory or a vendor's storage, and are owner-only on macOS and Linux.
+        The application does not encrypt files itself, enforce retention, or provide access control
+        or administration. Those stay with your device and your firm.</p></div>
+      <div class="card"><h3>Circular 230</h3>
+        <p class="consider">To consider: how you supervise machine-produced work, and how a
+        reviewer can tell it from your own.</p>
+        <p>The facts: every agent action is attributed to the AI, journalled in order and
+        revertible in one step, and agent marks are outlined on the page. The tool reaches no
+        conclusions and signs nothing.</p></div>
+      <div class="card"><h3>AICPA Code of Professional Conduct</h3>
+        <p class="consider">To consider: whether connecting an agent brings a model provider into
+        your engagement as a third party for confidentiality purposes, and what consent or
+        agreement you would want in place first.</p>
+        <p>The facts: with no agent connected there is no vendor account, telemetry endpoint or
+        support tunnel in the software. Connect one and what it reads goes wherever that program
+        sends it.</p></div>
+    </div>
+
+    <p class="dl-fine">This list is not complete and is not meant to be. State board rules and
+    breach-notification statutes vary, engagement letters differ, and your firm's own analysis
+    governs all of it. What LedgerPDF can offer is a boundary small enough to check: the source is
+    published under GPL-3.0, so you or your IT reviewer can verify the factual half above against
+    the code rather than take it from us, and DATA-FLOW.md sets out where every file goes. IRS
+    Pubs 4557 and 5708 are useful starting points if your WISP is not written yet.</p>
+  </div>
+</section>
+
+<section class="dl" id="download">
+  <div class="wrap">
+    <p class="eyebrow"><span class="tabs" aria-hidden="true"></span>04 / Download</p>
+    <h2 class="section-title">Get LedgerPDF</h2>
+    <p class="section-sub">Free and open source under GPL-3.0, published by Ledger&nbsp;Labs&nbsp;LLC.
+    Releases begin when the repository opens. macOS builds are signed and notarized; Windows code
+    signing follows as an update.</p>
+    <div class="dl-grid">
+      <div class="dl-card">
+        <div class="os">Windows</div>
+        <p class="note">x64 installer. The primary platform: every change is tested on Windows in
+        CI, and it ships first.</p>
+        <span class="pill">Coming soon</span>
+      </div>
+      <div class="dl-card">
+        <div class="os">macOS</div>
+        <p class="note">Apple&nbsp;silicon build, signed and notarized. Follows the Windows
+        release.</p>
+        <span class="pill">Coming soon</span>
+      </div>
+      <div class="dl-card">
+        <div class="os">Build from source</div>
+        <p class="note">Builds on macOS and Windows in about five minutes on a machine with Node
+        and Python. The repository goes public under GPL-3.0 with the first release.</p>
+        <span class="pill">Coming soon</span>
+      </div>
+    </div>
+    <p class="dl-fine">A note on the security prompts, since this is a tool you are being asked to
+    trust with client files. <strong>macOS</strong> builds are signed with a Developer&nbsp;ID
+    certificate issued to Ledger&nbsp;Labs&nbsp;LLC, notarized by Apple and stapled, so they open
+    without a Gatekeeper warning.</p>
+    <p class="dl-fine"><strong>Windows</strong> builds are not signed yet, so Windows may show a
+    SmartScreen warning. It did not appear on our own first install test, on Windows&nbsp;11 with
+    Defender on and the file marked as downloaded from the internet, but a stricter machine, an
+    enterprise policy or Smart&nbsp;App&nbsp;Control still can. That prompt is worth reading
+    properly. It says Windows does not recognise this file <em>yet</em>, which is a statement about
+    reputation rather than about safety. Signing improves it without removing it, because reputation
+    accrues per certificate over downloads and time. That is why signing ships as an update instead
+    of holding up the release.</p>
+    <p class="dl-fine">What a certificate cannot give you is the rest of it: the full source under
+    GPL-3.0, Windows installers built by CI rather than on someone's laptop, and install
+    instructions that explain the prompt instead of telling you to click past it.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <a class="lockup" href="/">
+      <img src="brand/mark-on-dark.svg" alt="" width="30" height="30" />
+      <span class="word">Ledger<span class="pdf">PDF</span></span>
+    </a>
+    <span class="spacer"></span>
+    <a href="https://ledgerlabs.co">A Ledger Labs product</a>
+    <a href="https://www.gnu.org/licenses/gpl-3.0.en.html">GPL-3.0</a>
+    <a href="https://cbarmorecpa.com">Built by Charlie Barmore, CPA/CFE</a>
+    <div class="rule"></div>
+    <p class="fine">© 2026 Ledger Labs LLC. LedgerPDF is not tax software, renders no tax advice,
+    and is not a certification of compliance with any standard. It is a workpaper tool. Professional
+    judgment stays with the practitioner, and so does the decision about whether it meets the
+    obligations you work under.</p>
+  </div>
+</footer>
+
+</body>
+</html>

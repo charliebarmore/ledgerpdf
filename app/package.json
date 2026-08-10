@@ -1,0 +1,73 @@
+{
+  "name": "workpaper-tool",
+  "version": "0.1.0",
+  "private": true,
+  "author": "Ledger Labs LLC",
+  "description": "Tax workpaper binder — organize, mark up, and export PDF binders locally",
+  "homepage": "https://ledgerpdf.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/charliebarmore/ledgerpdf.git"
+  },
+  "bugs": {
+    "url": "https://github.com/charliebarmore/ledgerpdf/issues"
+  },
+  "engines": {
+    "node": ">=22.12 <27"
+  },
+  "main": "out/main/index.js",
+  "scripts": {
+    "postinstall": "install-electron",
+    "dev": "electron-vite dev",
+    "clean:out": "node scripts/clean-out.mjs",
+    "build": "npm run clean:out && electron-vite build && npm run build:mcp",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "verify:security": "esbuild scripts/verify-security.ts --bundle --platform=node --format=cjs --outfile=out/verify-security.cjs --log-level=warning && node out/verify-security.cjs",
+    "verify:persistence": "esbuild scripts/verify-persistence.ts --bundle --platform=node --format=cjs --outfile=out/verify-persistence.cjs --log-level=warning && node out/verify-persistence.cjs",
+    "verify:release-config": "node scripts/verify-release-config.mjs",
+    "verify:model": "esbuild scripts/verify-model.ts --bundle --platform=node --format=cjs --outfile=out/verify-model.cjs --log-level=warning && node out/verify-model.cjs",
+    "prepare:assets": "node scripts/copy-pdfjs-assets.mjs",
+    "predev": "npm run prepare:assets",
+    "prebuild": "npm run prepare:assets",
+    "build:engine": "node scripts/build-engine.mjs",
+    "release:metadata": "node scripts/generate-release-metadata.mjs",
+    "prepackage:dir": "npm run build:icon && npm run build:engine && npm run build && npm run release:metadata",
+    "package:dir": "electron-builder --dir --config electron-builder.config.cjs -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false",
+    "verify:package": "node scripts/verify-package.mjs",
+    "dist": "node scripts/build-release.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --outfile=out/mcp-server.cjs --log-level=warning",
+    "mcp": "npm run build:mcp && node out/mcp-server.cjs",
+    "verify:mcp": "npm run build:mcp && node scripts/mcp-check.mjs",
+    "verify": "npm run typecheck && npm run verify:release-config && npm run verify:security && npm run verify:teardown && npm run verify:icon && npm run verify:persistence && npm run verify:model && npm run verify:text && npm run verify:mcp && npm run smoke && npm run verify:closed-window && npm run verify:live",
+    "verify:viewers": "node scripts/verify-viewers.mjs",
+    "verify:text": "node scripts/verify-text.mjs",
+    "verify:live": "npm run build:mcp && node scripts/live-check.mjs",
+    "verify:teardown": "node scripts/stop-app-check.mjs",
+    "verify:icon": "node scripts/check-icon.mjs",
+    "build:icon": "node scripts/build-icon.mjs",
+    "verify:closed-window": "npm run build:mcp && node scripts/closed-window-check.mjs",
+    "verify:finder-open": "node scripts/finder-open-check.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "pdfjs-dist": "^6.2.108",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@electron/fuses": "2.1.3",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^43.2.0",
+    "electron-builder": "26.15.7",
+    "electron-vite": "^5.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
+  },
+  "license": "GPL-3.0-or-later"
+}

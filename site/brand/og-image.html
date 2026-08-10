@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>LedgerPDF — Open Graph card source</title>
+<!--
+  Source for site/og-image.png (1200×630, Open Graph + Twitter card).
+
+  The brand kit ships a rendered og-image.png, but it has the pre-domain URL
+  "workpaper-tool.vercel.app" baked into the pixels — which is the single most
+  visible string on the card when the link is pasted into LinkedIn or Slack.
+  Rather than patch a PNG, the card is rebuilt here from the same brand tokens
+  and the same self-hosted OFL faces the site uses, so the next copy change is
+  an edit rather than a redraw.
+
+  Regenerate:
+    cd site && python3 -m http.server 8731 &
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+      --headless --disable-gpu --hide-scrollbars --window-size=1200,630 \
+      --virtual-time-budget=4000 --screenshot=og-image.png \
+      http://localhost:8731/brand/og-image.html
+-->
+<style>
+  @font-face { font-family: "Playfair Display"; font-weight: 600; src: url("../fonts/PlayfairDisplay-SemiBold.woff2") format("woff2"); }
+  @font-face { font-family: Inter; font-weight: 400; src: url("../fonts/Inter-Regular.woff2") format("woff2"); }
+  @font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url("../fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
+  @font-face { font-family: "JetBrains Mono"; font-weight: 700; src: url("../fonts/JetBrainsMono-Bold.woff2") format("woff2"); }
+
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    background: #F5ECD6;
+    /* the faint ledger grid off the brand guide's cover */
+    background-image:
+      repeating-linear-gradient(90deg, rgb(11 26 31 / 0.045) 0 1px, transparent 1px 30px),
+      repeating-linear-gradient(0deg, rgb(11 26 31 / 0.045) 0 1px, transparent 1px 30px);
+    font-family: Inter, sans-serif;
+    color: #0B1A1F;
+  }
+  .frame {
+    position: absolute; inset: 36px;
+    border: 3px solid #0B1A1F;
+    padding: 56px 60px;
+    display: flex; flex-direction: column;
+  }
+  .lockup { display: flex; align-items: center; gap: 34px; }
+  .lockup svg { width: 104px; height: 104px; flex: none; }
+  .word { font-family: "Playfair Display", serif; font-weight: 600; font-size: 112px; line-height: 1; letter-spacing: -0.015em; }
+  .word .pdf { font-family: "JetBrains Mono", monospace; font-weight: 700; font-size: 88px; color: #E8913A; margin-left: 26px; }
+  .rule { height: 2px; background: #0B1A1F; margin: 44px 0 34px; }
+  .eyebrow { font-family: "JetBrains Mono", monospace; font-weight: 700; font-size: 27px; letter-spacing: 0.12em; text-transform: uppercase; color: #2D9148; }
+  .copy { margin-top: 26px; font-size: 33px; line-height: 1.45; color: #46565C; max-width: 940px; }
+  .url { margin-top: auto; align-self: flex-end; font-family: "JetBrains Mono", monospace; font-size: 26px; color: #46565C; border-bottom: 2px solid rgb(70 86 92 / 0.45); padding-bottom: 3px; }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="lockup">
+      <!-- ledgerpdf-mark.svg, verbatim -->
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+        <rect x="8" y="9" width="42" height="47" fill="none" stroke="#0B1A1F" stroke-width="4"/>
+        <line x1="18" y1="9" x2="18" y2="56" stroke="#0B1A1F" stroke-width="2.5"/>
+        <circle cx="18" cy="18" r="1.8" fill="#0B1A1F"/>
+        <circle cx="18" cy="47" r="1.8" fill="#0B1A1F"/>
+        <line x1="24" y1="24" x2="45" y2="24" stroke="#0B1A1F" stroke-width="2" opacity="0.35"/>
+        <line x1="24" y1="31" x2="45" y2="31" stroke="#0B1A1F" stroke-width="2" opacity="0.35"/>
+        <line x1="24" y1="38" x2="45" y2="38" stroke="#0B1A1F" stroke-width="2" opacity="0.35"/>
+        <rect x="46" y="14" width="12" height="8" fill="#E8913A"/>
+        <rect x="46" y="28" width="12" height="8" fill="#E6A532"/>
+        <rect x="46" y="42" width="12" height="8" fill="#2D9148"/>
+      </svg>
+      <div class="word">Ledger<span class="pdf">PDF</span></div>
+    </div>
+    <div class="rule"></div>
+    <div class="eyebrow">Built for accountants and their agents</div>
+    <p class="copy">Drag in PDFs, trial balances, scans and receipt photos. Get one
+    ordered, bookmarked binder a human and an AI agent can work in at the same time.</p>
+    <div class="url">ledgerpdf.com</div>
+  </div>
+</body>
+</html>

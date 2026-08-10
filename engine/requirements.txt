@@ -1,0 +1,30 @@
+# Engine runtime
+pikepdf>=10.10        # MPL-2.0 — PDF assembly, outlines, annotations (bundles qpdf, Apache-2.0)
+pillow>=10            # HPND — image sources: dimensions, EXIF orientation, decode
+                      #   (promoted from test-only when images became binder pages)
+pypdfium2>=4          # BSD-3/Apache-2.0 — pdfium, the Chrome/Edge PDF engine.
+                      #   Promoted from test-only when text extraction shipped:
+                      #   it reads the text layer with per-character boxes, which
+                      #   is what lets an agent address a figure by name. Still
+                      #   also the render engine for the conformance harness.
+openpyxl>=3.1        # MIT - reads .xlsx/.xlsm. Excel IS the workpaper format
+                      #   for trial balances and lead sheets; without this the
+                      #   documents a preparer actually has cannot enter a binder.
+reportlab>=4         # BSD-3 - typesets Markdown/Word into readable pages.
+                      #   Prose needs real font metrics to wrap; the sheet
+                      #   renderer dodges that with monospace, which is right
+                      #   for figures and wrong for a paragraph.
+markdown-it-py>=3    # MIT - CommonMark parsing
+python-docx>=1.1     # MIT - reads .docx paragraphs, styles and tables
+pyobjc-framework-Vision>=10; sys_platform == "darwin"
+                      # macOS on-device OCR for scanned pages. Preferred over
+                      #   tesseract on a Mac: better accuracy, ~5x faster, and
+                      #   nothing to bundle, sign or notarize. Darwin-only by
+                      #   marker so a Windows/Linux install is unaffected.
+# Spike / test harness only (not shipped in the sidecar)
+numpy>=1.26           # BSD — pixel comparison of rendered pages. Was always
+                      #   imported by the render checks and never declared; a
+                      #   Mac with Anaconda supplied it, a clean venv does not.
+# LICENSE GUARD: never add MuPDF/mutool/PyMuPDF without an explicit project-wide
+# licensing decision. Its AGPL terms would change LedgerPDF's distribution
+# obligations; pikepdf and pypdfium2 are the approved PDF dependencies here.

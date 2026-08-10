@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
+import { FuseV1Options } from '@electron/fuses'
+import { commandNeedsShell } from './lib/command-shell.mjs'
+import { notaryCredentials } from './lib/notary-credentials.mjs'
+
+const require = createRequire(import.meta.url)
+const { expectedFuses, electronFuseConfig } = require('./lib/electron-fuses.cjs')
+
+assert.deepEqual(notaryCredentials({ APPLE_KEYCHAIN_PROFILE: 'ledgerpdf' }), [
+  '--keychain-profile', 'ledgerpdf'
+])
+assert.deepEqual(
+  notaryCredentials({ APPLE_API_KEY: '/key.p8', APPLE_API_KEY_ID: 'KEY', APPLE_API_ISSUER: 'ISSUER' }),
+  ['--key', '/key.p8', '--key-id', 'KEY', '--issuer', 'ISSUER']
+)
+assert.deepEqual(
+  notaryCredentials({ APPLE_ID: 'release@example.com', APPLE_APP_SPECIFIC_PASSWORD: 'secret', APPLE_TEAM_ID: 'TEAM' }),
+  ['--apple-id', 'release@example.com', '--password', 'secret', '--team-id', 'TEAM']
+)
+assert.throws(() => notaryCredentials({ APPLE_API_KEY: '/incomplete.p8' }), /no complete/)
+assert.equal(commandNeedsShell('npm.cmd', 'win32'), true)
+assert.equal(commandNeedsShell('electron-builder.BAT', 'win32'), true)
+assert.equal(commandNeedsShell('python.exe', 'win32'), false)
+assert.equal(commandNeedsShell('npm', 'darwin'), false)
+
+const knownFuseNames = Object.values(FuseV1Options).filter((value) => typeof value === 'string')
+assert.deepEqual(Object.keys(expectedFuses).sort(), knownFuseNames.sort())
+const fuseConfig = electronFuseConfig()
+assert.equal(fuseConfig.strictlyRequireAllFuses, true)
+for (const [name, enabled] of Object.entries(expectedFuses)) {
+  assert.equal(fuseConfig[FuseV1Options[name]], enabled, name)
+}
+
+console.log('Release credentials, command spawning, and complete Electron fuse policy: OK')

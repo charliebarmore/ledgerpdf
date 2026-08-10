@@ -1,0 +1,74 @@
+name: macOS
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'references/**'
+      - 'site/**'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'references/**'
+      - 'site/**'
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify and package on macOS
+    runs-on: macos-15
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install viewer tools
+        run: brew install poppler tesseract
+
+      - name: Create the engine venv
+        run: |
+          python -m venv engine/.venv
+          engine/.venv/bin/python -m pip install --upgrade pip
+          engine/.venv/bin/pip install --require-hashes -r engine/requirements.lock
+          engine/.venv/bin/pip install --require-hashes -r engine/requirements-build.lock
+
+      - name: Generate synthetic fixtures
+        run: engine/.venv/bin/python spike/run_spike.py
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Verify application
+        working-directory: app
+        run: npm run verify
+
+      - name: Cross-viewer conformance
+        working-directory: app
+        run: npm run verify:viewers
+
+      - name: Package and verify clean app
+        working-directory: app
+        run: |
+          npm run package:dir
+          npm run verify:package

@@ -1,0 +1,198 @@
+name: Windows x64
+
+permissions:
+  contents: read
+
+# Windows is the primary platform, so it is tested on every change to code —
+# not only when someone remembers to ask. Two sessions of manual runs found
+# eight problems invisible from macOS (path separators, named pipes, POSIX file
+# modes, GUI-subsystem stdout), every one of them latent for days.
+#
+# Docs-only pushes are skipped: a README cannot break a build, and a full run
+# bills at 2x for the Windows runner.
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Also upload the packaged app and installer as artifacts'
+        type: boolean
+        default: true
+  # NB: the two lists are duplicated on purpose. GitHub Actions does not support
+  # YAML anchors, so `&docs` / `*docs` is a workflow parse error, not a tidy-up.
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'references/**'
+      - 'templates/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'site/**'   # the website cannot break the app build
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'references/**'
+      - 'templates/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'site/**'   # the website cannot break the app build
+
+# Pushing three commits in a row should test the third, not all three. The
+# in-flight run for a superseded commit is cancelled rather than finished.
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build and verify on Windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    env:
+      # Packaging runs on EVERY trigger. It is ~2 minutes of the ~6, and it is
+      # where the interesting Windows failures actually live: a GUI-subsystem
+      # binary whose stdout never reaches the parent, a smoke run defeated by
+      # the single-instance lock. Verifying only the unpackaged app would have
+      # caught none of them.
+      PACKAGE: ${{ github.event_name != 'workflow_dispatch' || inputs.package }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      # The engine runs from a venv on every platform, so CI builds the same
+      # shape a developer has rather than a special CI-only arrangement.
+      - name: Create the engine venv
+        run: |
+          python -m venv engine\.venv
+          engine\.venv\Scripts\python -m pip install --upgrade pip
+          engine\.venv\Scripts\pip install --require-hashes -r engine\requirements.lock
+          engine\.venv\Scripts\pip install --require-hashes -r engine\requirements-build.lock
+
+      # Fixtures are deliberately gitignored — synthetic, never committed — so
+      # they are regenerated here.
+      - name: Generate fixtures
+        run: engine\.venv\Scripts\python spike\make_fixtures.py
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      # The whole suite: typecheck, durable persistence, the binder model
+      # against the real engine, the MCP server, and the Electron GUI smoke.
+      # This is the first time the win32 branches in path resolution, the
+      # sidecar name and the engine spawn have ever executed.
+      - name: Verify
+        working-directory: app
+        run: npm run verify
+
+      # No `continue-on-error`. It used to carry one "because poppler is not
+      # installed on the runner" — and the script died at the pdftoppm check
+      # before rendering anything, so this step FAILED on every Windows run
+      # and was reported green every time. It never verified a single mark.
+      # A step that cannot fail is not a check; one named "(pdfium)" that never
+      # reached pdfium is worse than no step, because the tick reads as
+      # coverage nobody has.
+      #
+      # It now runs the pdfium half for real and fails the job if a mark moves.
+      # That is worth having on Windows precisely because this binder carries
+      # the hostile geometries — rotation, CropBox != MediaBox, legal with
+      # existing annotations — which the smoke's single-page check does not.
+      # Cross-engine agreement still needs poppler and still runs on macOS.
+      - name: Viewer conformance (pdfium half — cross-engine needs poppler, macOS)
+        run: engine\.venv\Scripts\python spike\verify_viewers.py --engines pdfium
+
+      # `npm run dist` deliberately refuses to build without signing
+      # credentials, which is the right default. This is explicitly a TEST
+      # build: electron-builder is invoked directly so an unsigned installer
+      # can be produced for SmartScreen and install-experience testing on real
+      # hardware, without weakening that guard.
+      - name: Build the frozen engine and the app
+        if: env.PACKAGE == 'true'
+        working-directory: app
+        run: |
+          npm run build:engine
+          npm run build
+          npm run release:metadata
+
+      - name: Package (unpacked + unsigned NSIS installer, for TESTING)
+        if: env.PACKAGE == 'true'
+        working-directory: app
+        run: npx electron-builder --win nsis --config electron-builder.config.cjs
+
+      - name: Verify the packaged app
+        if: env.PACKAGE == 'true'
+        working-directory: app
+        run: npm run verify:package
+
+      # The point of the whole job for someone with no Windows machine: a
+      # screenshot of the packaged app actually running on Windows, and an
+      # artifact an external tester could install.
+      - name: Upload evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-evidence
+          if-no-files-found: warn
+          # 3 days, not 14. Nobody downloads a CI build a week later, and these
+          # are large: the installer is ~139 MB and the unpacked app ~191 MB, so
+          # a few runs filled the account's artifact storage and the UPLOAD step
+          # started failing on runs whose work was entirely green. A red build
+          # for a storage reason trains people to ignore red builds.
+          retention-days: 3
+          path: |
+            app/build/package-smoke.png
+            spike/out/*.png
+            spike/out/*.pdf
+
+      # Two artifacts on purpose. The unpacked folder runs with no install and
+      # no SmartScreen prompt — use it to test the APP. The installer is the
+      # only way to see what an external tester meets, warning and all.
+      # always(): packaging can succeed while a later check fails, and the whole
+      # point of this job for someone with no Windows machine is to come away
+      # with something runnable. A red check should not also mean empty hands.
+      #
+      # workflow_dispatch only: these two are ~315 MB a run. Uploading them on
+      # every push would fill the storage quota in days — 2.11 GB had already
+      # accumulated from one afternoon of manual runs. Pushes still BUILD and
+      # verify the package, which is where the bugs are; they just do not keep
+      # the output. Ask for a build when you want one to install.
+      - name: Upload the unpacked app (run it directly, no install)
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.package
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ledgerpdf-win-unpacked
+          if-no-files-found: warn
+          retention-days: 3
+          path: app/release/win-unpacked
+
+      # Deliberately NOT labelled "unsigned": released Windows installers are
+      # unsigned too until a certificate lands, so that word would imply a
+      # distinction that does not exist and suggest releases are signed. What
+      # makes this one unfit to hand out is that it is a CI build of whatever
+      # commit was dispatched, verified by this run alone, gone in three days.
+      # The installer people should actually use is on the releases page.
+      - name: Upload the installer (CI build — not a release artifact)
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.package
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ledgerpdf-win-installer-ci
+          if-no-files-found: warn
+          retention-days: 3
+          path: app/release/*.exe
