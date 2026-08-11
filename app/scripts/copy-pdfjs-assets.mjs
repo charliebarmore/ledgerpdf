@@ -17,10 +17,9 @@ import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const app = path.resolve(here, '..')
-const repo = path.resolve(app, '..')
 const pdfjsFrom = path.join(app, 'node_modules', 'pdfjs-dist')
 const pdfjsTo = path.join(app, 'src', 'renderer', 'public', 'pdfjs')
-const fontsFrom = path.join(repo, 'site', 'fonts')
+const fontsFrom = path.join(app, 'assets', 'ui-fonts')
 const fontsTo = path.join(app, 'src', 'renderer', 'public', 'ui-fonts')
 
 const DIRS = ['wasm', 'cmaps', 'standard_fonts', 'iccs']
@@ -51,8 +50,8 @@ for (const [src, dest] of FILES) {
 
 // The UI names Inter and JetBrains Mono explicitly. Depending on whatever font
 // happens to be installed changes button widths and can wrap the toolbar on a
-// clean Windows machine. These are already the OFL-licensed site/brand fonts;
-// copy the exact same files and their licence into the app build.
+// clean Windows machine. Keep the OFL-licensed source files app-owned so a
+// website repository change cannot alter or break an application build.
 await rm(fontsTo, { recursive: true, force: true })
 await mkdir(fontsTo, { recursive: true })
 for (const file of FONT_FILES) await cp(path.join(fontsFrom, file), path.join(fontsTo, file))

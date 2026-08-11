@@ -10,10 +10,10 @@ fi
 SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DESTINATION="$1"
 PUBLIC_ROOTS=(
-  .github .gitignore .node-version .nvmrc .vercelignore
+  .github .gitignore .node-version .nvmrc
   CHANGELOG.md CODE_OF_CONDUCT.md CONTRIBUTING.md COPYRIGHT.md DATA-FLOW.md
   DESIGN-PRINCIPLES.md DESIGN.md LICENSE README.md RELEASING.md SECURITY.md
-  THIRD-PARTY-NOTICES.md app docs engine site spike tools vercel.json
+  THIRD-PARTY-NOTICES.md app docs engine spike tools
 )
 PRIVATE_ROOTS=(CLAUDE.md PROJECT.md ROADMAP.md references templates)
 
