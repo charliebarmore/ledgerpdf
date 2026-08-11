@@ -30,6 +30,7 @@ const RUN_SPIKE =
     : 'engine/.venv/bin/python spike/run_spike.py'
 const FIXTURES = path.join(REPO, 'spike', 'fixtures')
 const SERVER = path.join(APP, 'out', 'mcp-server.cjs')
+const PACKAGE_VERSION = JSON.parse(readFileSync(path.join(APP, 'package.json'), 'utf8')).version
 const OUT_PDF = path.join(REPO, 'spike', 'out', 'mcp_binder.pdf')
 const OUT_BINDER = path.join(REPO, 'spike', 'out', 'mcp_binder_saved.pdf')
 const EXISTING_BINDER = path.join(REPO, 'spike', 'out', 'mcp_existing.pdf')
@@ -91,6 +92,12 @@ const transport = new StdioClientTransport({
 })
 const client = new Client({ name: 'wpt-mcp-check', version: '1.0.0' })
 await client.connect(transport)
+
+check(
+  'server advertises the package version',
+  client.getServerVersion()?.version === PACKAGE_VERSION,
+  `${client.getServerVersion()?.version ?? 'missing'} vs package ${PACKAGE_VERSION}`
+)
 
 const instructions = client.getInstructions() ?? ''
 check(

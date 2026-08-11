@@ -33,6 +33,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import packageJson from '../../package.json'
 import { existsSync, readdirSync, realpathSync, statSync, type Dirent } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -285,7 +286,7 @@ function summary(s: Session): string {
 // ------------------------------------------------------------------- server
 
 const server = new McpServer(
-  { name: 'ledgerpdf', version: '0.1.0' },
+  { name: 'ledgerpdf', version: packageJson.version },
   {
     instructions: [
       'Build tax workpaper binders: import PDFs, order pages, bookmark, place review',
