@@ -5,6 +5,10 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-11
+
+Initial public alpha.
+
 ### Security
 
 - Disabled PDF-embedded scripting and upgraded PDF.js to a patched release.
@@ -19,6 +23,5 @@ Versioning once a stable compatibility promise is published.
 - Added platform-independent MCP registration and complete macOS notarization
   credential handling.
 
-## [0.1.0] - Unreleased
-
-- Initial public alpha.
+[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.0
