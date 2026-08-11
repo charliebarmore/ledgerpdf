@@ -5,20 +5,16 @@ permissions:
 
 on:
   workflow_dispatch:
+  # Skip documentation-only pushes, but always report the required check on a
+  # pull request so branch protection cannot deadlock waiting for a skipped job.
   push:
     branches: [main]
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
       - 'references/**'
-      - 'site/**'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'references/**'
-      - 'site/**'
 
 concurrency:
   group: macos-${{ github.ref }}

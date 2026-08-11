@@ -8,8 +8,8 @@
  * Launches the dev app empty, attaches an agent, and runs the story a CPA
  * should see: files land in an empty binder, the agent finds a figure by name
  * and ticks it, keys a tape that foots, flags an open item, saves. Frames go
- * to spike/out/demo_frames/ with a durations.json; tools/make-demo-webp.py
- * assembles them.
+ * to spike/out/demo_frames/ with a durations.json; the separate ledgerpdf-site
+ * repository's tools/make-demo-webp.py assembles them into website assets.
  *
  * macOS-only by design (screencapture -l), same as the icon pipeline.
  */
@@ -21,7 +21,6 @@ import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { stopApp as stopAppTree } from './lib/stop-app.mjs'
-import { buildPython } from './lib/build-python.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const APP = path.resolve(here, '..')
@@ -255,10 +254,9 @@ rolling = false
 await camera
 writeFileSync(path.join(FRAMES, 'durations.json'), JSON.stringify(stamps))
 console.log(`${frame} frames -> ${FRAMES}`)
-// Print the interpreter this machine actually has, not the POSIX one: a hint
-// that does not run is worse than no hint. (Recording is macOS-only today, but
-// the resolver is free and this cannot go stale.)
-console.log(`next: ${buildPython()} tools/make-demo-webp.py`)
+console.log(
+  `next: from ledgerpdf-site, run .venv/bin/python tools/make-demo-webp.py ${JSON.stringify(FRAMES)}`
+)
 } finally {
   rolling = false
   await client?.close().catch(() => {})

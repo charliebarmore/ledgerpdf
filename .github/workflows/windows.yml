@@ -9,7 +9,9 @@ permissions:
 # modes, GUI-subsystem stdout), every one of them latent for days.
 #
 # Docs-only pushes are skipped: a README cannot break a build, and a full run
-# bills at 2x for the Windows runner.
+# bills at 2x for the Windows runner. Pull requests still run this required
+# check, even when documentation-only; otherwise branch protection waits for a
+# status that GitHub never creates and the PR cannot be merged normally.
 on:
   workflow_dispatch:
     inputs:
@@ -17,8 +19,6 @@ on:
         description: 'Also upload the packaged app and installer as artifacts'
         type: boolean
         default: true
-  # NB: the two lists are duplicated on purpose. GitHub Actions does not support
-  # YAML anchors, so `&docs` / `*docs` is a workflow parse error, not a tidy-up.
   push:
     branches: [main]
     paths-ignore:
@@ -28,17 +28,8 @@ on:
       - 'templates/**'
       - 'LICENSE'
       - '.gitignore'
-      - 'site/**'   # the website cannot break the app build
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'references/**'
-      - 'templates/**'
-      - 'LICENSE'
-      - '.gitignore'
-      - 'site/**'   # the website cannot break the app build
 
 # Pushing three commits in a row should test the third, not all three. The
 # in-flight run for a superseded commit is cancelled rather than finished.
