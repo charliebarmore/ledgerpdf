@@ -133,7 +133,9 @@ jobs:
         if: env.PACKAGE == 'true'
         working-directory: app
         shell: pwsh
-        run: ./scripts/verify-windows-installer.ps1 -InstallerPath release/LedgerPDF-0.1.0-win-x64.exe
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          ./scripts/verify-windows-installer.ps1 -InstallerPath "release/LedgerPDF-$version-win-x64.exe"
 
       - name: Verify the packaged app
         if: env.PACKAGE == 'true'

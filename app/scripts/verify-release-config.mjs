@@ -8,6 +8,17 @@ import { notaryCredentials } from './lib/notary-credentials.mjs'
 const require = createRequire(import.meta.url)
 const { expectedFuses, electronFuseConfig } = require('./lib/electron-fuses.cjs')
 const builderConfig = require('../electron-builder.config.cjs')
+const packageJson = require('../package.json')
+const packageLock = require('../package-lock.json')
+
+assert.equal(packageLock.version, packageJson.version)
+assert.equal(packageLock.packages[''].version, packageJson.version)
+const windowsWorkflow = readFileSync(
+  new URL('../../.github/workflows/windows.yml', import.meta.url),
+  'utf8'
+)
+assert.match(windowsWorkflow, /ConvertFrom-Json\)\.version/)
+assert.doesNotMatch(windowsWorkflow, /LedgerPDF-\d+\.\d+\.\d+-win-x64\.exe/)
 
 assert.deepEqual(notaryCredentials({ APPLE_KEYCHAIN_PROFILE: 'ledgerpdf' }), [
   '--keychain-profile', 'ledgerpdf'

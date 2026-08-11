@@ -5,6 +5,8 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-11
+
 ### Security
 
 - Made the visible approved-folder list authoritative and removed environment
@@ -42,5 +44,6 @@ Initial public alpha.
 - Added platform-independent MCP registration and complete macOS notarization
   credential handling.
 
-[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.1
 [0.1.0]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.0
