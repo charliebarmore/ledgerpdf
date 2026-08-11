@@ -152,10 +152,14 @@ def ocr_page(page) -> tuple[list[dict], str | None, str | None]:
     AS DISPLAYED — pdfium's render applies /Rotate — which is the same space
     marks use, so a word's centre can be handed straight to a mark.
     """
-    chosen = engine_name()
-    if not chosen:
+    forced = os.environ.get("WPT_OCR_ENGINE")
+    candidates = [
+        (name, read)
+        for name, is_available, read in _BACKENDS
+        if (not forced or name == forced) and is_available()
+    ]
+    if not candidates:
         return [], "no OCR backend: install tesseract, or set WPT_TESSERACT", None
-    read = next(fn for name, _avail, fn in _BACKENDS if name == chosen)
 
     bitmap = page.render(scale=_scale_for(page))
     image = bitmap.to_pil().convert("L")
@@ -165,12 +169,24 @@ def ocr_page(page) -> tuple[list[dict], str | None, str | None]:
     with tempfile.TemporaryDirectory() as tmp:
         png = os.path.join(tmp, "page.png")
         image.save(png)
-        words, problem = read(png)
-    if problem:
-        return [], problem, chosen
-    # Applied here, not per backend, so the floor means the same thing whichever
-    # engine produced the number.
-    return [w for w in words if w.get("conf", 100.0) >= MIN_CONFIDENCE], None, chosen
+        problems: list[str] = []
+        for chosen, read in candidates:
+            words, problem = read(png)
+            if problem:
+                problems.append(f"{chosen}: {problem}")
+                # A forced backend is a diagnostic request: never hide its
+                # failure by silently returning another engine's answer.
+                if forced:
+                    break
+                continue
+            # Applied here, not per backend, so the floor means the same thing
+            # whichever engine produced the number.
+            return (
+                [w for w in words if w.get("conf", 100.0) >= MIN_CONFIDENCE],
+                None,
+                chosen,
+            )
+    return [], "; ".join(problems) or "OCR produced no result", candidates[0][0]
 
 
 def ocr_lines(words: list[dict]) -> str:

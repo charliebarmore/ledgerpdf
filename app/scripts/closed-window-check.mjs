@@ -40,12 +40,17 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { isolatedAgentAccess } from './lib/isolated-agent-access.mjs'
 import { stopApp } from './lib/stop-app.mjs'
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const REPO = path.resolve(APP, '..')
 const SERVER = path.join(APP, 'out', 'mcp-server.cjs')
 const ENDPOINT = path.join(REPO, 'spike', 'out', 'closed-window-endpoint.json')
+const CLOSED_ACCESS = isolatedAgentAccess(
+  path.join(REPO, 'spike', 'out', 'agent-profile-closed-window'),
+  [path.join(REPO, 'spike')]
+)
 
 // Closing the last window quits LedgerPDF on Windows and Linux. Only macOS
 // keeps an app running with no windows and later recreates one on activation,
@@ -72,6 +77,7 @@ const app = spawn('npm', ['run', 'dev'], {
   detached: process.platform !== 'win32',
   env: {
     ...process.env,
+    ...CLOSED_ACCESS.env,
     WPT_LIVE_ENDPOINT: ENDPOINT,
     WPT_DEV_LIVE: '1',
     // NO binder opened, on purpose. An open binder is DIRTY, and win.close()
@@ -81,7 +87,10 @@ const app = spawn('npm', ['run', 'dev'], {
     // window did not respond" — which is what the first version of this check
     // produced, and it tested the guard rather than the fix.
     WPT_DEV_USERDATA: path.join(REPO, 'spike', 'out', 'userdata-closedwin'),
-    WPT_DEV_CLOSE_WINDOW_MS: '60000'
+    WPT_DEV_CLOSE_WINDOW_MS: '60000',
+    // Forward the renderer's authoritative live-state pull so this check proves
+    // the REOPENED window's indicator, not merely that the socket still works.
+    ELECTRON_ENABLE_LOGGING: '1'
   }
 })
 let log = ''
@@ -104,7 +113,11 @@ await client.connect(
   new StdioClientTransport({
     command: process.execPath,
     args: [SERVER],
-    env: { ...process.env, WPT_LIVE_ENDPOINT: ENDPOINT, WPT_MCP_ROOTS: path.join(REPO, 'spike') }
+    env: {
+      ...process.env,
+      ...CLOSED_ACCESS.env,
+      WPT_LIVE_ENDPOINT: ENDPOINT,
+    }
   })
 )
 const call = async (name, args = {}) => {
@@ -153,6 +166,19 @@ check(
   'the window is reopened, so the very next request succeeds',
   !retry.isError && /page\(s\)/.test(retry.text),
   retry.text.split('\n')[0]
+)
+
+// The first renderer and the renderer recreated after ⌘W each pull state.
+// Before the fix, the second started at false and no event ever corrected it.
+let indicatorSyncs = (log.match(/\[live-indicator\] on/g) ?? []).length
+for (let attempt = 0; attempt < 20 && indicatorSyncs < 2; attempt++) {
+  await new Promise((r) => setTimeout(r, 100))
+  indicatorSyncs = (log.match(/\[live-indicator\] on/g) ?? []).length
+}
+check(
+  'the reopened window visibly reports live access as on',
+  indicatorSyncs >= 2,
+  `${indicatorSyncs} renderer(s) reported on`
 )
 
 await client.close()

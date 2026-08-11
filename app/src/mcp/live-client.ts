@@ -27,6 +27,7 @@ interface Reply {
   session?: unknown
   path?: string | null
   currentPage?: string | null
+  revision?: number
 }
 
 const MAX_REPLY_BYTES = 32 * 1024 * 1024
@@ -140,14 +141,19 @@ export async function attachToRunningApp(): Promise<SessionOwner | null> {
       return {
         session: reply.session as Session,
         path: reply.path ?? null,
-        currentPage: reply.currentPage ?? null
+        currentPage: reply.currentPage ?? null,
+        revision: reply.revision
       }
     },
-    push: async (session, focus) => {
+    push: async (session, focus, expectedRevision) => {
       // `focus` rides the envelope beside the session, never inside it: the
       // payload stays a pure Session, so an older app that predates following
       // simply ignores the extra key.
-      const reply = await link.send('push', { session, ...(focus ? { focus } : {}) })
+      const reply = await link.send('push', {
+        session,
+        ...(focus ? { focus } : {}),
+        ...(typeof expectedRevision === 'number' ? { expectedRevision } : {})
+      })
       if (!reply.ok) throw new Error(reply.error ?? 'push failed')
     }
   }

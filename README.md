@@ -48,9 +48,11 @@ network. Your MCP client is a separate program under your control, and the page
 content it reads goes wherever that program sends it. With a hosted model that is
 a disclosure of client information; with a locally-run model nothing leaves at
 all. Either way it is your decision, and LedgerPDF does not make it for you.
-Agent filesystem access is disabled unless you explicitly name approved
-engagement folders — in the app, under Agent access — and reads outside them are
-refused.
+Standalone agent filesystem access is disabled unless you explicitly approve
+engagement folders in the app under Agent access. That approval permits reading
+documents and creating or updating LedgerPDF files inside those folders, and it
+persists when live access to the open binder is off. Operations outside the
+approved folders are refused.
 
 ### What it does not do
 
@@ -58,10 +60,12 @@ Stated as plainly as the list above, because the absences matter more than the
 features when you are deciding whether to put client data in something:
 
 - Encrypt your files, enforce a retention schedule, or guarantee secure erasure.
-- Provide access control, engagement locking, reviewer sign-off, an immutable
-  audit log, or any central administration.
-- Decide what an agent may read. Agent file access stays off until you name
-  folders yourself, and reads outside them are refused.
+- Provide central access control, reviewer sign-off, an immutable audit log, or
+  any central administration. It does prevent two local LedgerPDF/agent
+  processes from writing the same binder at once; that is a file-integrity lock,
+  not a firm-wide permissions system.
+- Decide what an agent may read or write. Standalone file access stays off until
+  you approve folders yourself, and operations outside them are refused.
 - Control what your AI client does with what it reads. That program is separate
   and under your control rather than ours.
 - Make any determination about §7216, your WISP, Circular 230, or anything else
@@ -78,8 +82,8 @@ facts are ours to state and be held to.
   disclosure or use of return information, and if so what consent that calls for
   and in what form (Treas. Reg. §301.7216-3). *The facts:* the application makes
   no network calls; agent file access is off until you name folders in
-  Agent access; once you do, an agent can read page text, which on a 1040
-  includes the SSN.
+  Agent access; once you do, a standalone agent can read documents and create or
+  update LedgerPDF files there. Page text can include the SSN on a 1040.
 - **FTC Safeguards Rule (16 CFR Part 314) and the WISP it requires.**
   *To consider:* how a local tool fits the written information security program
   you maintain, and which controls it supplies against which it leaves to you.

@@ -5,6 +5,25 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+### Security
+
+- Made the visible approved-folder list authoritative and removed environment
+  overrides for it from the shipped application.
+- Added cross-process binder leases and live revision checks so concurrent
+  agents or a user-and-agent race fail safely instead of replacing newer work.
+- Prevented standalone agents from silently overwriting unrelated existing
+  binders, exports, or cover memos.
+
+### Fixed
+
+- Made every new/reopened window query authoritative live-agent state so the
+  indicator cannot display "off" while the local socket is active.
+- Clarified that the status-bar switch controls only the binder on screen and
+  that approved folders grant persistent standalone read/write access.
+- Made long mark and shape notes wrap in the inspector instead of clipping.
+- Made OCR fall back to Tesseract when macOS Vision is installed but fails at
+  runtime, while still reporting which engine produced the reading.
+
 ## [0.1.0] - 2026-08-11
 
 Initial public alpha.

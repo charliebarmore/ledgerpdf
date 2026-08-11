@@ -185,7 +185,8 @@ else:
         try:
             if ocr_backend.engine_name() != engine:
                 return None
-            return extract_text({"path": str(scan), "pages": [0], "ocr": True})["pages"][0]
+            page_read = extract_text({"path": str(scan), "pages": [0], "ocr": True})["pages"][0]
+            return page_read if page_read.get("source") == "ocr" else None
         finally:
             if before is None:
                 os.environ.pop("WPT_OCR_ENGINE", None)

@@ -20,6 +20,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { isolatedAgentAccess } from './lib/isolated-agent-access.mjs'
 import { stopApp as stopAppTree } from './lib/stop-app.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -49,6 +50,10 @@ const WORKPAPER = path.join(
 )
 const FRAMES = path.join(REPO, 'spike', 'out', 'demo_frames')
 const SERVER = path.join(APP, 'out', 'mcp-server.cjs')
+const DEMO_ACCESS = isolatedAgentAccess(
+  path.join(REPO, 'spike', 'out', 'agent-profile-demo'),
+  [path.join(REPO, 'spike'), DEMO_DOCS]
+)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -79,7 +84,7 @@ const app = spawn('npm', ['run', 'dev'], {
   cwd: APP,
   stdio: ['ignore', 'pipe', 'pipe'],
   detached: true,
-  env: { ...process.env, WPT_DEV_LIVE: '1' }
+  env: { ...process.env, ...DEMO_ACCESS.env, WPT_DEV_LIVE: '1' }
 })
 // Bounded, cross-platform teardown — see scripts/lib/stop-app.mjs. This file
 // used to carry its own copy, and that copy still ended in an unbounded
@@ -145,7 +150,10 @@ await client.connect(
   new StdioClientTransport({
     command: process.execPath,
     args: [SERVER],
-    env: { ...process.env, WPT_MCP_ROOTS: [path.join(REPO, 'spike'), DEMO_DOCS].join(path.delimiter) }
+    env: {
+      ...process.env,
+      ...DEMO_ACCESS.env
+    }
   })
 )
 const call = async (name, args = {}) => {

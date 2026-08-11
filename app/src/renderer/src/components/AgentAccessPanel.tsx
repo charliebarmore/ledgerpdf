@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react'
  * Everything about agent access, in one place.
  *
  * It lives behind the status-bar indicator rather than in the export Options
- * menu, because it is one concept and the two halves are not separable: whether
- * an agent may connect, and what it may then read. Splitting them would put the
+ * menu, because it is one concept and the two halves are not separable: live
+ * access to the binder on screen, and what a standalone agent may do in approved
+ * folders. Splitting them would put the
  * consequential half — the folders — somewhere nobody looks, and that half is
  * the one with IRC §7216 attached.
  *
@@ -66,25 +67,26 @@ export function AgentAccessPanel({
         <section className="ap-section">
           <div className="ap-row">
             <span className="ap-label">
-              {liveOn ? 'Working in this binder now' : 'Not connected to this binder'}
+              {liveOn ? 'Live access to this binder is on' : 'Live access to this binder is off'}
             </span>
             <button className={liveOn ? 'ap-toggle is-on' : 'ap-toggle'} onClick={onToggleLive}>
               {liveOn ? 'Stop' : 'Let an agent in'}
             </button>
           </div>
           <p className="ap-why">
-            With this on, an agent you have connected can read and change the binder you have open,
-            and you watch it happen. Everything it does is attributed to the AI and can be undone.
-            Off by default, and off again every time the app starts.
+            This switch controls only the binder currently on screen. With it on, an agent you have
+            connected can read and change this binder while you watch. Everything it does is
+            attributed to the AI and can be undone. Off by default, and off again every time the app
+            starts.
           </p>
         </section>
 
         <section className="ap-section">
-          <p className="ap-label">Folders an agent may read</p>
+          <p className="ap-label">Folders available to standalone agents</p>
           {roots.length === 0 ? (
             <p className="ap-empty">
-              None. An agent can work on the binder you have open, but it cannot open a document
-              from disk until you approve the folder it lives in.
+              None. An agent can work on the binder currently open when live access is on, but it
+              cannot independently open or save files on disk.
             </p>
           ) : (
             <ul className="ap-roots">
@@ -122,12 +124,13 @@ export function AgentAccessPanel({
               than no text at all. The SSN sentence stays verbatim — it is the one
               that actually informs. */}
           <p className="ap-why">
-            An agent you connect can read every document in an approved folder, including the text
-            on the page — which on a 1040 includes the taxpayer's SSN. Where that text then goes
-            depends on the agent, not on LedgerPDF: a locally-run model keeps it on this machine, a
-            hosted one does not. Whether to send client return information to a third party is
-            yours to decide — in the US, IRC §7216 and your firm's WISP are where that starts.
-            Changes here apply to the agent's next request.
+            This approval remains in effect when live binder access is off and when LedgerPDF is
+            closed. A standalone agent can read every document in an approved folder and create or
+            update LedgerPDF binders and exports there. Page text can include a taxpayer's SSN.
+            Where that text then goes depends on the agent, not on LedgerPDF: a locally-run model
+            keeps it on this machine, a hosted one does not. Whether to send client return
+            information to a third party is yours to decide — in the US, IRC §7216 and your firm's
+            WISP are where that starts. Changes here apply to the agent's next request.
           </p>
         </section>
 

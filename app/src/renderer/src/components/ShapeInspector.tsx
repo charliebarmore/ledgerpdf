@@ -85,19 +85,23 @@ export function ShapeInspector({
           </label>
         )}
 
-        <label className="mi-row">
+        <label className="mi-row mi-row-note">
           <span>Note</span>
-          <input
+          <textarea
             value={note}
+            rows={3}
             placeholder="Why this is here…"
-            title="Shown as the annotation's comment in any PDF viewer"
+            title="Shown as the annotation's comment in any PDF viewer. Command/Ctrl+Enter saves."
             onChange={(e) => setNote(e.target.value)}
             onBlur={() => note.trim() !== (shape.note ?? '') && onChange({ note: note.trim() })}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                e.currentTarget.blur()
+              }
               if (e.key === 'Escape') {
                 setNote(shape.note ?? '')
-                ;(e.target as HTMLInputElement).blur()
+                e.currentTarget.blur()
               }
             }}
           />

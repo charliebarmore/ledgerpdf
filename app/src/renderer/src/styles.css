@@ -1255,7 +1255,8 @@ button.link {
   color: var(--warning);
 }
 
-.mi-row input {
+.mi-row input,
+.mi-row textarea {
   font: inherit;
   flex: 1;
   min-width: 0;
@@ -1266,9 +1267,27 @@ button.link {
   padding: 2px 6px;
 }
 
-.mi-row input:focus {
+.mi-row input:focus,
+.mi-row textarea:focus {
   outline: none;
   border-color: var(--primary);
+}
+
+.mi-row-note {
+  align-items: flex-start;
+}
+
+.mi-row-note > span:first-child {
+  padding-top: 3px;
+}
+
+.mi-row-note textarea {
+  field-sizing: content;
+  min-height: 54px;
+  max-height: 160px;
+  line-height: 1.35;
+  overflow-y: auto;
+  resize: vertical;
 }
 
 .mi-size {

@@ -249,6 +249,13 @@ export default function App(): React.JSX.Element {
     (session.tapes ?? []).filter((t) => t.by === 'agent').length +
     (session.shapes ?? []).filter((x) => x.by === 'agent').length
   const serializedSession = useMemo(() => JSON.stringify(session), [session])
+  /** Monotonic guard against a stale agent replacing newer user/agent work. */
+  const liveRevision = useRef(0)
+  const liveRevisionSession = useRef(serializedSession)
+  if (liveRevisionSession.current !== serializedSession) {
+    liveRevisionSession.current = serializedSession
+    liveRevision.current += 1
+  }
   const dirty = serializedSession !== lastSaved.current
   const current = useMemo(
     () => pages.find((p) => p.id === currentId) ?? pages[0] ?? null,
@@ -324,8 +331,8 @@ export default function App(): React.JSX.Element {
    * change would drop requests already in flight.
    */
   const openRef = useRef<(target?: string) => Promise<void>>(async () => {})
-  const liveRefs = useRef({ session, binderPath, apply, currentId })
-  liveRefs.current = { session, binderPath, apply, currentId }
+  const liveRefs = useRef({ session, binderPath, apply, currentId, revision: liveRevision.current })
+  liveRefs.current = { session, binderPath, apply, currentId, revision: liveRevision.current }
   /**
    * When the person last touched the app, for follow-the-agent. A live agent's
    * change carries the page it acted on, and the view follows it there — that
@@ -379,7 +386,15 @@ export default function App(): React.JSX.Element {
     void window.wpt.consumePendingOpen().then((target) => {
       if (target) void openRef.current(target)
     })
-    window.wpt.onLiveState((state) => setLiveOn(state.on))
+    const applyLiveState = (state: { on: boolean; socketPath?: string }): void => {
+      setLiveOn(state.on)
+      if (import.meta.env.DEV) console.info(`[live-indicator] ${state.on ? 'on' : 'off'}`)
+    }
+    // Subscribe first, then pull. The event covers future transitions and the
+    // pull covers broadcasts sent before this renderer existed — especially a
+    // new macOS window after ⌘W while the live socket stayed open.
+    window.wpt.onLiveState(applyLiveState)
+    void window.wpt.getLive().then(applyLiveState)
     window.wpt.onLiveRequest((req) => {
       if (req.kind === 'pull') {
         window.wpt.liveReply(req.id, {
@@ -387,7 +402,21 @@ export default function App(): React.JSX.Element {
           path: liveRefs.current.binderPath,
           // What the person is actually looking at, so "why did you flag this
           // one?" resolves without them reading a page id off the screen.
-          currentPage: liveRefs.current.currentId
+          currentPage: liveRefs.current.currentId,
+          revision: liveRefs.current.revision
+        })
+        return
+      }
+      if (
+        typeof req.expectedRevision !== 'number' ||
+        req.expectedRevision !== liveRefs.current.revision
+      ) {
+        window.wpt.liveReply(req.id, {
+          ok: false,
+          error:
+            typeof req.expectedRevision !== 'number'
+              ? 'This agent connection is outdated. Restart the agent, then retry.'
+              : 'The binder changed after the agent read it. Its stale change was refused; retry against the current binder.'
         })
         return
       }
@@ -395,6 +424,11 @@ export default function App(): React.JSX.Element {
       // autosaves exactly like a click, so a person can take it back with the
       // undo they already know and never sees a change they cannot reverse.
       const pushed = req.payload as Session
+      // Close the race before React renders the pushed state. A second agent
+      // holding the same prior revision must fail even if its IPC event arrives
+      // in this narrow gap.
+      liveRevision.current += 1
+      liveRefs.current.revision = liveRevision.current
       liveRefs.current.apply(pushed, 'The agent changed this binder.')
       // A pin outlives its page if the agent's NEXT change deletes it. Only
       // arrival or real input clears one, and arrival is impossible once the
@@ -1309,6 +1343,14 @@ export default function App(): React.JSX.Element {
   const openBinder = useCallback(async (target?: string, fromDevSeam = false) => {
     if (!fromDevSeam && dirty && !(await window.wpt.confirmDiscard())) return
 
+    const previousBinder = binderPath
+    const releasePrevious = async (next: string | null): Promise<void> => {
+      if (previousBinder && previousBinder !== next) await window.wpt.releaseBinder(previousBinder)
+    }
+    const releaseFailedNext = async (next: string): Promise<void> => {
+      if (previousBinder !== next) await window.wpt.releaseBinder(next)
+    }
+
     const res = await window.wpt.openBinder(target)
     if (!res) return
 
@@ -1333,6 +1375,7 @@ export default function App(): React.JSX.Element {
       // the unsaved-changes guard at the top of this function already protected
       // anything the person had not saved.
       const fresh = addSource(newSession(), probed.probe as ProbeWire)
+      await releasePrevious(null)
       adoptSession(
         fresh,
         null,
@@ -1346,15 +1389,18 @@ export default function App(): React.JSX.Element {
     if (res.kind === 'binder') {
       const parsed = parseSession(res.session)
       if ('error' in parsed) {
+        await releaseFailedNext(res.path)
         return setStatus(`Cannot open ${baseName(res.path)} — ${parsed.error}`)
       }
       if (!res.payloadIntact) {
+        await releaseFailedNext(res.path)
         return setStatus(
           `Cannot open ${baseName(res.path)} — the saved marks inside it are damaged.`
         )
       }
       const probed = await window.wpt.probe(res.workingPath)
       if (!probed.ok || !probed.probe) {
+        await releaseFailedNext(res.path)
         return setStatus(`Cannot read ${baseName(res.path)} — ${probed.error ?? 'unreadable'}`)
       }
       const rebound = rebindToBinder(
@@ -1364,6 +1410,7 @@ export default function App(): React.JSX.Element {
         baseName(res.path)
       )
       if (rebound.error) {
+        await releaseFailedNext(res.path)
         return setStatus(`Cannot open ${baseName(res.path)} — ${rebound.error}`)
       }
 
@@ -1373,6 +1420,7 @@ export default function App(): React.JSX.Element {
       const moved = !res.geometryMatches
       const stale = res.pendingAutosave !== undefined
 
+      await releasePrevious(res.path)
       adoptSession(
         rebound.session,
         res.path,
@@ -1443,6 +1491,7 @@ export default function App(): React.JSX.Element {
     const openedSession = { ...parsed.session, sources: resolvedSources }
     // Converting: the old file stays exactly where it is and is never written
     // to again. There is no binder yet, so the next Save asks where to put one.
+    await releasePrevious(null)
     adoptSession(
       openedSession,
       null,
@@ -1451,7 +1500,7 @@ export default function App(): React.JSX.Element {
         : `Opened ${baseName(res.path)} — ${openedSession.pages.length} pages, source identity verified. This is the older two-file format — Save will convert it to a single binder.`,
       false
     )
-  }, [dirty, adoptSession])
+  }, [dirty, binderPath, adoptSession])
   openRef.current = openBinder
 
   // Dev seam (WPT_DEV_OPEN / WPT_DEV_EXPORT): drive the whole Phase 1 flow —
@@ -2567,8 +2616,8 @@ export default function App(): React.JSX.Element {
             const res = await window.wpt.setLive(!liveOn)
             setStatus(
               res.on
-                ? 'Live agent access ON — an agent can now read and change this binder.'
-                : 'Live agent access off.'
+                ? 'Live access to this binder ON — an agent can now read and change it.'
+                : 'Live access to this binder off.'
             )
           }}
           onClose={() => setAgentPanelOpen(false)}
@@ -2640,17 +2689,17 @@ export default function App(): React.JSX.Element {
             const res = await window.wpt.setLive(!liveOn)
             setStatus(
               res.on
-                ? 'Live agent access ON — an agent can now read and change this binder.'
-                : 'Live agent access off.'
+                ? 'Live access to this binder ON — an agent can now read and change it.'
+                : 'Live access to this binder off.'
             )
           }}
           title={
             liveOn
-              ? 'An agent can read and change this binder right now. Click to stop.'
-              : 'Let an agent work on this binder while you have it open. Off by default.'
+              ? 'An agent can read and change this open binder right now. Click to stop.'
+              : 'Let an agent work on the binder currently on screen. Off by default.'
           }
         >
-          {liveOn ? 'Live agent access: ON' : 'Live agent access: off'}
+          {liveOn ? 'Open binder access: ON' : 'Open binder access: off'}
         </button>
         {/* Beside the toggle rather than replacing it. One click to let an agent
             in stays right; what an agent may READ is a separate, longer-lived

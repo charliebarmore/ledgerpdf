@@ -98,13 +98,21 @@ const api = {
    */
   setLive: (on: boolean): Promise<{ on: boolean; socketPath?: string }> =>
     ipcRenderer.invoke('live:set', on),
+  /** Pull the authoritative state on every renderer mount; broadcasts can race. */
+  getLive: (): Promise<{ on: boolean; socketPath?: string }> => ipcRenderer.invoke('live:get'),
   onLiveRequest: (
-    cb: (req: { id: number; kind: 'pull' | 'push'; payload?: unknown; focus?: string | null }) => void
+    cb: (req: {
+      id: number
+      kind: 'pull' | 'push'
+      payload?: unknown
+      focus?: string | null
+      expectedRevision?: number
+    }) => void
   ): void => {
     ipcRenderer.on('live:request', (_e, req) => cb(req))
   },
   liveReply: (id: number, payload: unknown): void => ipcRenderer.send('live:reply', id, payload),
-  /** Main announces every change, so the indicator cannot drift from reality. */
+  /** Main announces changes after the initial authoritative pull. */
   onLiveState: (cb: (state: { on: boolean; socketPath?: string }) => void): void => {
     ipcRenderer.on('live:state', (_e, state) => cb(state))
   },
@@ -123,9 +131,9 @@ const api = {
   setPreparerInitials: (value: string): Promise<string> =>
     ipcRenderer.invoke('prefs:initials:set', value),
   /**
-   * Folders an agent may read. `addAgentRoot` takes no argument on purpose — the
-   * folder is chosen in a dialog owned by main, so a renderer cannot widen agent
-   * access by passing a path.
+   * Folders a standalone agent may read and write. `addAgentRoot` takes no
+   * argument on purpose — the folder is chosen in a dialog owned by main, so a
+   * renderer cannot widen agent access by passing a path.
    */
   agentRoots: (): Promise<string[]> => ipcRenderer.invoke('agent:roots:get'),
   addAgentRoot: (): Promise<string[]> => ipcRenderer.invoke('agent:roots:add'),
