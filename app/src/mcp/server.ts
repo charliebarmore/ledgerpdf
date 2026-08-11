@@ -23,10 +23,10 @@
  * Now a model can be handed the figures off a return: wages, balances, and on a
  * 1040 the taxpayer's SSN. Pointing this at real client documents is an IRC
  * §7216 disclosure decision about *content*, not just metadata, and the tool
- * does not make it for you. It stays gated behind WPT_MCP_ROOTS, which is
- * empty by default, so text can only be read out of folders the user named on
- * purpose. Whether the model on the other end is local or hosted is the part
- * only the user knows.
+ * does not make it for you. It stays gated behind the folders approved in the
+ * app, which are empty by default, so text can only be read out of folders the
+ * user named on purpose. Whether the model on the other end is local or hosted
+ * is the part only the user knows.
  *
  * Runs on stdio, locally, and talks to nothing but the local engine.
  */
@@ -40,6 +40,7 @@ import { isPathInsideRoot, readAgentRootsSync } from '../shared/agent-roots'
 import { z } from 'zod'
 import { runEngine } from './engine'
 import { workingCopyPathFor } from '../main/persistence'
+import { acquireBinderLock, withBinderLock, type BinderLease } from '../shared/binder-lock'
 import {
   addBookmark,
   addLink,
@@ -92,6 +93,14 @@ import {
 /** The working binder. One per server process, like one open document. */
 let session: Session = newSession()
 let sessionPath: string | null = null
+/** Held only in standalone mode; the desktop app owns the lease in live mode. */
+let sessionLease: BinderLease | null = null
+
+async function releaseSessionLease(): Promise<void> {
+  const lease = sessionLease
+  sessionLease = null
+  if (lease) await lease.release().catch(() => {})
+}
 
 /**
  * Where the binder actually lives.
@@ -107,8 +116,13 @@ let sessionPath: string | null = null
  * only find in front of a client.
  */
 export interface SessionOwner {
-  pull: () => Promise<{ session: Session; path: string | null; currentPage?: string | null }>
-  push: (session: Session, focus?: string | null) => Promise<void>
+  pull: () => Promise<{
+    session: Session
+    path: string | null
+    currentPage?: string | null
+    revision?: number
+  }>
+  push: (session: Session, focus?: string | null, expectedRevision?: number) => Promise<void>
 }
 
 let owner: SessionOwner | null = null
@@ -176,16 +190,12 @@ const SOURCE_EXTS = [
 
 /**
  * MCP is an agent boundary, not part of the local desktop app. It gets no file
- * access unless the user explicitly scopes one or more roots when registering
- * the server: WPT_MCP_ROOTS=/engagements/client-a (path-delimited).
+ * access unless the user explicitly approves one or more folders in LedgerPDF.
  */
 /**
- * Two sources, and the environment wins: `WPT_MCP_ROOTS` (path-delimited) for CI
- * and the verification harnesses, otherwise the list the app writes when someone
- * picks folders in the agent-access panel. See shared/agent-roots.ts for why the
- * file exists — an env var made the §7216 decision something you paste into a
- * config, which is both a wall for the people this is built for and a poorer
- * record of a deliberate choice.
+ * The list the app writes when someone picks folders in the agent-access panel
+ * is authoritative. There is no environment override, so a normal MCP
+ * configuration cannot silently disagree with the visible list.
  *
  * Read PER CALL, not once at startup, so approving a folder applies to the
  * agent's next request rather than after restarting the MCP client.
@@ -198,7 +208,7 @@ function resolveAllowedPath(p: string, options: { mustExist: boolean; purpose: s
     throw new Error(
       `MCP file access is disabled: no folder has been approved, so ${options.purpose} is refused. ` +
         'In LedgerPDF, click the agent-access indicator in the status bar and add the engagement ' +
-        'folder this agent may read. WPT_MCP_ROOTS still overrides.'
+        'folder this agent may read and write.'
     )
   }
   const requested = path.resolve(p)
@@ -213,7 +223,7 @@ function resolveAllowedPath(p: string, options: { mustExist: boolean; purpose: s
   }
   if (!roots.some((root) => isPathInsideRoot(root, canonical))) {
     throw new Error(
-      `${options.purpose} is outside WPT_MCP_ROOTS: ${canonical}\n` +
+      `${options.purpose} is outside the approved folders: ${canonical}\n` +
         `Approved folders: ${roots.join(', ')}`
     )
   }
@@ -299,11 +309,13 @@ const server = new McpServer(
 /** Register a tool, synchronizing with the owner around it when there is one. */
 const registerTool: typeof server.registerTool = (name, config, handler) =>
   server.registerTool(name, config, (async (...args: unknown[]) => {
+    let pulledRevision: number | undefined
     if (owner) {
       const pulled = await owner.pull()
       session = pulled.session
       sessionPath = pulled.path
       currentPage = pulled.currentPage ?? null
+      pulledRevision = pulled.revision
     }
     const before = session
     try {
@@ -311,7 +323,7 @@ const registerTool: typeof server.registerTool = (name, config, handler) =>
     } finally {
       // Push only on a real change, so a read-only tool never marks a person's
       // binder dirty or lands on their undo stack.
-      if (owner && session !== before) await owner.push(session, focusPage)
+      if (owner && session !== before) await owner.push(session, focusPage, pulledRevision)
       focusPage = null
     }
   }) as never)
@@ -375,6 +387,7 @@ registerTool(
     inputSchema: {}
   },
   async () => {
+    if (!owner) await releaseSessionLease()
     session = newSession()
     sessionPath = null
     return text('New empty binder.')
@@ -390,8 +403,18 @@ registerTool(
     inputSchema: { path: z.string().describe('Path to a binder .pdf') }
   },
   async ({ path: p }) => {
+    if (owner) {
+      return fail(
+        'binder_open is unavailable during live access. Open the binder in LedgerPDF so the app ' +
+          'owns its working copy, then ask again.'
+      )
+    }
+    let nextLease: BinderLease | null = null
+    let keepNextLease = false
     try {
       const target = resolveAllowedPath(p, { mustExist: true, purpose: 'opening a binder' })
+      const sameLease = sessionLease && sessionPath === target ? sessionLease : null
+      nextLease = sameLease ?? (await acquireBinderLock(target))
       const opened = await runEngine({ cmd: 'open_binder', path: target })
       if (!opened.ok) return fail(`cannot open binder — ${opened.error}`)
       const info = opened.binder as {
@@ -428,7 +451,11 @@ registerTool(
       if (rebound.error) return fail(`cannot open binder — ${rebound.error}`)
 
       session = rebound.session
+      const previousLease = sessionLease
       sessionPath = target
+      sessionLease = nextLease
+      keepNextLease = true
+      if (previousLease && previousLease !== nextLease) await previousLease.release().catch(() => {})
       const moved = info.geometry_matches === false
       return text(
         `Opened ${baseName(target)} — ${summary(session)}` +
@@ -442,6 +469,10 @@ registerTool(
       )
     } catch (e) {
       return fail(String((e as Error).message))
+    } finally {
+      if (nextLease && !keepNextLease && nextLease !== sessionLease) {
+        await nextLease.release().catch(() => {})
+      }
     }
   }
 )
@@ -468,13 +499,43 @@ registerTool(
       return fail(`a binder is a .pdf — got ${baseName(target)}`)
     }
     if (!session.pages.length) return fail('nothing to save — this binder is empty')
+    if (owner && target !== sessionPath) {
+      return fail(
+        'During live access, binder_save may save only the binder open in LedgerPDF. ' +
+          'Use Save As in the app, or turn live access off and start a standalone binder.'
+      )
+    }
+    if (existsSync(target) && target !== sessionPath) {
+      return fail(
+        `Refusing to overwrite an existing file: ${target}. Choose a new binder path instead.`
+      )
+    }
+    let nextLease: BinderLease | null = null
+    let keepNextLease = false
     try {
+      if (!owner) {
+        nextLease = sessionLease && sessionPath === target ? sessionLease : await acquireBinderLock(target)
+        // A non-cooperating process could create the destination between the
+        // initial refusal and our lock acquisition. Check again while we own
+        // the path so Save never silently replaces an unrelated binder.
+        if (target !== sessionPath && existsSync(target)) {
+          return fail(
+            `Refusing to overwrite an existing file: ${target}. Choose a new binder path instead.`
+          )
+        }
+      }
       // The same call the app's Save makes. One definition, so an agent and a
       // person cannot produce different artifacts from the same binder.
       const spec = toExportSpec(session, target, { pageCounts: true, embedSession: true })
       const res = await runEngine({ cmd: 'export', binder: spec })
       if (!res.ok) return fail(`save failed: ${res.error}`)
       const r = res.result as { pages: number; check_problems: string[] }
+      if (!owner && nextLease) {
+        const previousLease = sessionLease
+        sessionLease = nextLease
+        keepNextLease = true
+        if (previousLease && previousLease !== nextLease) await previousLease.release().catch(() => {})
+      }
       sessionPath = target
       return text(
         `Saved ${summary(session)}\n→ ${target}\n` +
@@ -485,6 +546,10 @@ registerTool(
       )
     } catch (e) {
       return fail(String((e as Error).message))
+    } finally {
+      if (nextLease && !keepNextLease && nextLease !== sessionLease) {
+        await nextLease.release().catch(() => {})
+      }
     }
   }
 )
@@ -930,11 +995,28 @@ registerTool(
   async ({ output, pageCounts, flatten }) => {
     if (session.pages.length === 0) return fail('nothing to export — the binder is empty')
     const out = resolveAllowedPath(output, { mustExist: false, purpose: 'exporting a binder' })
+    if (existsSync(out)) {
+      return fail(`Refusing to overwrite an existing export: ${out}. Choose a new path instead.`)
+    }
     const spec = toExportSpec(session, out, {
       pageCounts: pageCounts ?? false,
       flatten: flatten ?? false
     })
-    const res = await runEngine({ cmd: 'export', binder: spec })
+    let res
+    try {
+      res = await withBinderLock(out, () => {
+        // Recheck after acquiring the lease. This closes the race between the
+        // first existence check and a separate process creating the file.
+        if (existsSync(out)) {
+          throw new Error(
+            `Refusing to overwrite an existing export: ${out}. Choose a new path instead.`
+          )
+        }
+        return runEngine({ cmd: 'export', binder: spec })
+      })
+    } catch (e) {
+      return fail(String((e as Error).message))
+    }
     if (!res.ok) return fail(`export failed: ${res.error}`)
     const r = res.result as { pages: number; marks: number; check_problems: string[] }
     return text(
@@ -1772,12 +1854,19 @@ registerTool(
     }
   },
   async ({ path: out, narrative }) => {
+    let coverLease: BinderLease | null = null
     try {
       const target = resolveAllowedPath(out, { mustExist: false, purpose: 'writing the cover memo' })
+      coverLease = await acquireBinderLock(target)
       // Refreshing after a reorder should not need the reasoning retyped.
       const story = narrative ?? (session.cover?.path === target ? session.cover.narrative : undefined)
       if (!/\.(md|markdown)$/i.test(target)) return fail('the cover must be a .md file')
       if (!session.pages.length) return fail('nothing to summarize — this binder is empty')
+      if (existsSync(target) && session.cover?.path !== target) {
+        return fail(
+          `Refusing to overwrite an existing memo: ${target}. Choose a new path instead.`
+        )
+      }
 
       // Replace rather than stack: a binder with three covers has none.
       const existing = session.sources.find((x) => path.resolve(x.path) === target)
@@ -1831,6 +1920,8 @@ registerTool(
       )
     } catch (e) {
       return fail(String((e as Error).message))
+    } finally {
+      await coverLease?.release().catch(() => {})
     }
   }
 )

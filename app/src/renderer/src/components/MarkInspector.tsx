@@ -42,11 +42,18 @@ export function MarkInspector({
     onChange({ [field]: value })
   }
 
-  const onKey = (field: 'text' | 'author' | 'note') => (e: React.KeyboardEvent): void => {
-    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+  const onKey =
+    (field: 'text' | 'author' | 'note') =>
+    (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
+    // A note is real prose: plain Enter belongs to the text. The modified
+    // shortcut still gives keyboard users an explicit way to commit it.
+    if (e.key === 'Enter' && (field !== 'note' || e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      e.currentTarget.blur()
+    }
     if (e.key === 'Escape') {
       setDraft((d) => ({ ...d, [field]: mark[field] ?? '' }))
-      ;(e.target as HTMLInputElement).blur()
+      e.currentTarget.blur()
     }
   }
 
@@ -132,12 +139,13 @@ export function MarkInspector({
           </div>
         ) : null}
 
-        <label className="mi-row">
+        <label className="mi-row mi-row-note">
           <span>Note</span>
-          <input
+          <textarea
             value={draft.note}
+            rows={3}
             placeholder="Agreed to source…"
-            title="Shown as the annotation's comment in any PDF viewer"
+            title="Shown as the annotation's comment in any PDF viewer. Command/Ctrl+Enter saves."
             onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}
             onBlur={commit('note')}
             onKeyDown={onKey('note')}

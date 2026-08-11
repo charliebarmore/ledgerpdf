@@ -32,6 +32,7 @@ import {
 } from '../shared/agent-roots'
 import { toSaved, type Session } from '../renderer/src/session'
 import { agentConnectCommand } from '../shared/agent-connect'
+import { acquireBinderLock, type BinderLease } from '../shared/binder-lock'
 import {
   RENDERER_ENTRY_URL,
   RENDERER_SCHEME,
@@ -246,6 +247,25 @@ const allowedOutputs = new Set<string>()
 const allowedSessions = new Set<string>()
 /** binder path -> its de-marked working copy, for cleanup on close. */
 const openWorkingCopies = new Map<string, string>()
+/** binder path -> the cross-process lease held for as long as it is open. */
+const binderLocks = new Map<string, BinderLease>()
+
+async function claimBinder(binder: string): Promise<{ lease: BinderLease; acquired: boolean }> {
+  const absolute = path.resolve(binder)
+  const existing = binderLocks.get(absolute)
+  if (existing) return { lease: existing, acquired: false }
+  const lease = await acquireBinderLock(absolute)
+  binderLocks.set(absolute, lease)
+  return { lease, acquired: true }
+}
+
+async function releaseBinderLease(binder: string): Promise<void> {
+  const absolute = path.resolve(binder)
+  const lease = binderLocks.get(absolute)
+  if (!lease) return
+  binderLocks.delete(absolute)
+  await lease.release().catch(() => {})
+}
 
 /**
  * Drop the sibling files a binder needs only while it is open.
@@ -256,15 +276,17 @@ const openWorkingCopies = new Map<string, string>()
  * goes too, because a clean save means there is nothing left to recover.
  */
 async function releaseBinder(binder: string): Promise<void> {
-  // Only a binder opened by this main process has derived siblings to release.
-  // A trusted-but-compromised renderer must not turn this into a generic
-  // "delete the recovery-shaped sibling of any path" capability.
-  if (!openWorkingCopies.has(binder)) return
-  const working = openWorkingCopies.get(binder)
-  openWorkingCopies.delete(binder)
+  const absolute = path.resolve(binder)
+  // Only a binder opened or saved by this main process has siblings or a lease
+  // to release. A trusted-but-compromised renderer must not turn this into a
+  // generic "delete the recovery-shaped sibling of any path" capability.
+  if (!openWorkingCopies.has(absolute) && !binderLocks.has(absolute)) return
+  const working = openWorkingCopies.get(absolute)
+  openWorkingCopies.delete(absolute)
   await Promise.all([
     working ? rm(working, { force: true }).catch(() => {}) : Promise.resolve(),
-    rm(binderRecoveryPathFor(binder), { force: true }).catch(() => {})
+    rm(binderRecoveryPathFor(absolute), { force: true }).catch(() => {}),
+    releaseBinderLease(absolute)
   ])
 }
 let rendererDirty = false
@@ -347,7 +369,12 @@ let liveWindow: BrowserWindow | null = null
 let liveSeq = 0
 const livePending = new Map<number, (payload: unknown) => void>()
 
-function askRenderer(kind: 'pull' | 'push', payload?: unknown, focus?: string | null): Promise<unknown> {
+function askRenderer(
+  kind: 'pull' | 'push',
+  payload?: unknown,
+  focus?: string | null,
+  expectedRevision?: number
+): Promise<unknown> {
   const win = liveWindow
   if (!win || win.isDestroyed()) {
     /**
@@ -393,7 +420,13 @@ function askRenderer(kind: 'pull' | 'push', payload?: unknown, focus?: string | 
       clearTimeout(timer)
       resolve(value)
     })
-    win.webContents.send('live:request', { id, kind, payload, ...(focus ? { focus } : {}) })
+    win.webContents.send('live:request', {
+      id,
+      kind,
+      payload,
+      ...(focus ? { focus } : {}),
+      ...(typeof expectedRevision === 'number' ? { expectedRevision } : {})
+    })
   })
 }
 
@@ -463,13 +496,30 @@ async function setLiveAccess(on: boolean): Promise<{ on: boolean; socketPath?: s
         path: string | null
         currentPage?: string | null
       },
-    push: async (session, focus) => {
+    push: async (session, focus, expectedRevision) => {
       // Before the renderer is asked to draw it.
       authorizeSessionSources(session)
-      await askRenderer('push', session, focus)
+      const reply = (await askRenderer('push', session, focus, expectedRevision)) as {
+        ok?: boolean
+        error?: string
+      }
+      if (reply?.ok !== true) throw new Error(reply?.error ?? 'the binder rejected the change')
     }
   })
   return announce({ on: true, socketPath: started.socketPath })
+}
+
+/**
+ * The renderer must be able to PULL this security-relevant state.
+ *
+ * A broadcast is not durable: one sent before React subscribes is lost, and a
+ * window recreated after ⌘W starts with fresh renderer state. Never expose the
+ * live handle itself here because it also carries the authentication token.
+ */
+async function currentLiveAccess(): Promise<{ on: boolean; socketPath?: string }> {
+  const { liveStatus } = await import('./live-host')
+  const status = liveStatus()
+  return status ? { on: true, socketPath: status.socketPath } : { on: false }
 }
 
 async function openBinderAt(target: string): Promise<unknown> {
@@ -499,8 +549,19 @@ async function openBinderAt(target: string): Promise<unknown> {
     // Saving writes back over this same file, so it is an authorized output too.
     allowedOutputs.add(target)
 
+    let claimed: { lease: BinderLease; acquired: boolean }
+    try {
+      claimed = await claimBinder(target)
+    } catch (error) {
+      return { kind: 'error' as const, path: target, error: String((error as Error).message) }
+    }
+    const releaseFailedOpen = async (): Promise<void> => {
+      if (claimed.acquired) await releaseBinderLease(target)
+    }
+
     const opened = await runEngine({ cmd: 'open_binder', path: target })
     if (!opened.ok) {
+      await releaseFailedOpen()
       return { kind: 'error' as const, path: target, error: (opened as EngineErr).error }
     }
     const info = (opened as EngineOk).binder as {
@@ -514,12 +575,14 @@ async function openBinderAt(target: string): Promise<unknown> {
     // A PDF with no session is an ordinary file someone wants to work on, which
     // is the normal way a binder starts. Hand it back for import, not an error.
     if (!info.found) {
+      await releaseFailedOpen()
       return { kind: 'plain' as const, path: target, reason: info.reason }
     }
 
     const working = workingCopyPathFor(target)
     const cleaned = await runEngine({ cmd: 'clean_copy', path: target, output: working })
     if (!cleaned.ok) {
+      await releaseFailedOpen()
       return { kind: 'error' as const, path: target, error: (cleaned as EngineErr).error }
     }
     await hideFromUser(working)
@@ -565,6 +628,11 @@ function registerIpc(): void {
   ipcMain.handle('live:set', async (e, on: unknown) => {
     assertTrustedIpc(e)
     return setLiveAccess(on === true)
+  })
+
+  ipcMain.handle('live:get', async (e) => {
+    assertTrustedIpc(e)
+    return currentLiveAccess()
   })
 
   ipcMain.handle('engine:ping', (event) => {
@@ -693,7 +761,23 @@ function registerIpc(): void {
     // Sources must all be user-authorized inputs.
     const sources = (s.sources ?? {}) as Record<string, unknown>
     for (const v of Object.values(sources)) assertAllowed(allowedInputs, v, 'source file')
-    const result = await runEngine({ cmd: 'export', binder: { ...s, output } })
+    let claimed: { lease: BinderLease; acquired: boolean }
+    try {
+      claimed = await claimBinder(output)
+    } catch (error) {
+      return { ok: false, error: String((error as Error).message) }
+    }
+    const retain = s.session !== undefined && s.flatten !== true
+    let result: Awaited<ReturnType<typeof runEngine>>
+    let succeeded = false
+    try {
+      result = await runEngine({ cmd: 'export', binder: { ...s, output } })
+      succeeded = result.ok
+    } finally {
+      // A working binder keeps its lease until it is closed. Flattened copies
+      // and failed Save As attempts need only a write-duration lock.
+      if (claimed.acquired && (!retain || !succeeded)) await releaseBinderLease(output)
+    }
     // A binder you just saved is one you will want back. A flattened copy is
     // not — it cannot be reopened for editing, so offering it later would be
     // offering a dead end.
@@ -738,7 +822,7 @@ function registerIpc(): void {
   })
 
   /**
-   * The folders an agent may read.
+   * The folders a standalone agent may read and write.
    *
    * NOT stored in Electron's userData with the other preferences, and that is
    * deliberate: the MCP server is a separate process that must not import
@@ -762,7 +846,8 @@ function registerIpc(): void {
     assertTrustedIpc(e)
     const res = await dialog.showOpenDialog({
       title: 'Approve a folder for agent access',
-      message: 'An agent you connect will be able to read every document in this folder.',
+      message:
+        'A standalone agent will be able to read documents and create or update LedgerPDF files in this folder.',
       buttonLabel: 'Approve folder',
       properties: ['openDirectory', 'createDirectory']
     })
@@ -1241,20 +1326,6 @@ app.whenReady().then(async () => {
   if (!isDev) registerRendererProtocol()
   registerIpc()
   createWindow()
-  // The live pill re-syncs on every load: the state broadcast is fire-and-
-  // forget, and one sent before the renderer mounts its listener is simply
-  // lost — which is how the pill said "off" over a live socket when live
-  // access was started at ready rather than by the button. Security-relevant
-  // indicator, so it re-announces rather than trusting the first send.
-  liveWindow?.webContents.on('did-finish-load', async () => {
-    const { liveStatus } = await import('./live-host')
-    const s = liveStatus()
-    // Same shape announce() sends — on + socketPath only. The handle also
-    // carries the access token, which must never reach the renderer.
-    if (s && liveWindow && !liveWindow.isDestroyed()) {
-      liveWindow.webContents.send('live:state', { on: true, socketPath: s.socketPath })
-    }
-  })
   // Dev seam, empty-start case: WPT_DEV_LIVE with nothing preloading brings
   // live access up at launch — an app started empty never fires dev:rendered,
   // which is where the preloading case starts it (see registerIpc; ordering
@@ -1303,7 +1374,6 @@ app.on('before-quit', () => {
   // Not an async handler: a rejection from one has nothing to catch it, which
   // surfaces as an unhandled-rejection warning and, with a dead stderr, as a
   // crash dialog. Failing to tidy up is not worth interrupting a quit.
-  void Promise.all([...openWorkingCopies.keys()].map((binder) => releaseBinder(binder))).catch(
-    () => {}
-  )
+  const openBinders = new Set([...openWorkingCopies.keys(), ...binderLocks.keys()])
+  void Promise.all([...openBinders].map((binder) => releaseBinder(binder))).catch(() => {})
 })

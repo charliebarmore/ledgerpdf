@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { listPackage } from '@electron/asar'
 import { FuseState, FuseV1Options, getCurrentFuseWire } from '@electron/fuses'
+import { isolatedAgentAccess } from './lib/isolated-agent-access.mjs'
 
 const require = createRequire(import.meta.url)
 const { expectedFuses } = require('./lib/electron-fuses.cjs')
@@ -29,6 +30,10 @@ const screenshot = path.join(appDir, 'build', 'package-smoke.png')
 const exported = path.join(appDir, 'build', 'package-smoke-binder.pdf')
 const smokeReport = path.join(appDir, 'build', 'package-smoke.txt')
 const smokeUserData = path.join(appDir, 'build', 'userdata-package')
+const PACKAGE_ACCESS = isolatedAgentAccess(
+  path.resolve(appDir, '..', 'spike', 'out', 'agent-profile-package'),
+  [path.resolve(appDir, '..', 'spike')]
+)
 
 await access(executable, constants.X_OK)
 
@@ -95,7 +100,12 @@ for (const legal of [
   await access(path.join(resources, legal))
 }
 const licenses = await readFile(path.join(resources, 'THIRD-PARTY-LICENSES.txt'), 'utf8')
-for (const dependency of ['NODE PACKAGE: react@', 'NODE PACKAGE: pdfjs-dist@', 'PYTHON PACKAGE: pikepdf@']) {
+for (const dependency of [
+  'NODE PACKAGE: react@',
+  'NODE PACKAGE: pdfjs-dist@',
+  'NODE PACKAGE: proper-lockfile@',
+  'PYTHON PACKAGE: pikepdf@'
+]) {
   if (!licenses.includes(dependency)) {
     throw new Error(`Packaged third-party license bundle is missing ${dependency}`)
   }
@@ -292,7 +302,7 @@ console.log(
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
   const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
   const mcpBundle = path.join(asarPath, 'out', 'mcp-server.cjs')
-  // Inside the roots on purpose. WPT_MCP_ROOTS gates WRITES as well as reads, so
+  // Inside the test roots on purpose. The roots gate WRITES as well as reads, so
   // a destination in app/build/ is refused — which is correct, and cost a failed
   // run to notice. The binder therefore lands beside the fixtures it came from.
   const mcpBinder = path.resolve(appDir, '..', 'spike', 'out', 'package-mcp-binder.pdf')
@@ -305,9 +315,8 @@ console.log(
       args: [mcpBundle],
       env: {
         ...process.env,
+        ...PACKAGE_ACCESS.env,
         ELECTRON_RUN_AS_NODE: '1',
-        // Scoped to the synthetic fixtures, never a real engagement folder.
-        WPT_MCP_ROOTS: path.resolve(appDir, '..', 'spike')
       }
     })
   )
@@ -340,7 +349,7 @@ console.log(
   const refused = await mcp('binder_add_pdfs', { paths: [outsideRoots] })
   if (!/Added 0 file\(s\)/.test(refused.text)) {
     throw new Error(
-      `Packaged MCP added a file outside WPT_MCP_ROOTS — the roots guard is not holding: ${refused.text}`
+      `Packaged MCP added a file outside the approved roots — the guard is not holding: ${refused.text}`
     )
   }
 

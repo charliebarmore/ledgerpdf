@@ -11,8 +11,8 @@
  * SECURITY. This opens a listening endpoint in an app that holds client tax
  * documents, so it is deliberately narrow:
  *
- *  - OFF unless the user turns it on. Same default-deny posture as
- *    WPT_MCP_ROOTS; an app that is merely running is not reachable.
+ *  - OFF unless the user turns it on. Same default-deny posture as the approved
+ *    folders list; an app that is merely running is not reachable.
  *  - A unix socket (POSIX) or named pipe (Windows) — never a TCP port, so
  *    there is no network surface at all, not even loopback.
  *  - On POSIX the socket file is chmod 0600. On Windows the randomized named
@@ -41,8 +41,13 @@ export interface LiveHandle {
 }
 
 export interface LiveHooks {
-  pull: () => Promise<{ session: unknown; path: string | null; currentPage?: string | null }>
-  push: (session: unknown, focus?: string | null) => Promise<void>
+  pull: () => Promise<{
+    session: unknown
+    path: string | null
+    currentPage?: string | null
+    revision?: number
+  }>
+  push: (session: unknown, focus?: string | null, expectedRevision?: number) => Promise<void>
 }
 
 let server: NetServer | null = null
@@ -105,7 +110,14 @@ export async function startLive(hooks: LiveHooks): Promise<LiveHandle> {
         cut = buffer.indexOf('\n')
         if (!line.trim()) continue
 
-        let msg: { id?: number; verb?: string; token?: string; session?: unknown; focus?: string }
+        let msg: {
+          id?: number
+          verb?: string
+          token?: string
+          session?: unknown
+          focus?: string
+          expectedRevision?: number
+        }
         try {
           msg = JSON.parse(line)
         } catch {
@@ -136,10 +148,15 @@ export async function startLive(hooks: LiveHooks): Promise<LiveHandle> {
                 ok: true,
                 session: got.session,
                 path: got.path,
-                currentPage: got.currentPage ?? null
+                currentPage: got.currentPage ?? null,
+                revision: got.revision
               })
             } else if (msg.verb === 'push') {
-              await hooks.push(msg.session, typeof msg.focus === 'string' ? msg.focus : null)
+              await hooks.push(
+                msg.session,
+                typeof msg.focus === 'string' ? msg.focus : null,
+                typeof msg.expectedRevision === 'number' ? msg.expectedRevision : undefined
+              )
               reply({ id: msg.id, ok: true })
             } else {
               reply({ id: msg.id, ok: false, error: `unknown verb: ${String(msg.verb)}` })

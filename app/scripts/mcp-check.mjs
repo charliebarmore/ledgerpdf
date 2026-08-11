@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isolatedAgentAccess } from './lib/isolated-agent-access.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const APP = path.resolve(here, '..')
@@ -31,6 +32,12 @@ const FIXTURES = path.join(REPO, 'spike', 'fixtures')
 const SERVER = path.join(APP, 'out', 'mcp-server.cjs')
 const OUT_PDF = path.join(REPO, 'spike', 'out', 'mcp_binder.pdf')
 const OUT_BINDER = path.join(REPO, 'spike', 'out', 'mcp_binder_saved.pdf')
+const EXISTING_BINDER = path.join(REPO, 'spike', 'out', 'mcp_existing.pdf')
+const IMAGE_OUT = path.join(REPO, 'spike', 'out', 'mcp_images.pdf')
+const MAIN_ACCESS = isolatedAgentAccess(
+  path.join(REPO, 'spike', 'out', 'agent-profile-mcp'),
+  [path.join(REPO, 'spike')]
+)
 
 const checks = []
 const check = (name, ok, detail = '') => checks.push([name, !!ok, detail])
@@ -67,6 +74,8 @@ if (!existsSync(SERVER)) {
 }
 rmSync(OUT_PDF, { force: true })
 rmSync(OUT_BINDER, { force: true })
+rmSync(EXISTING_BINDER, { force: true })
+rmSync(IMAGE_OUT, { force: true })
 
 const transport = new StdioClientTransport({
   command: process.execPath,
@@ -74,7 +83,11 @@ const transport = new StdioClientTransport({
   // WPT_NO_LIVE keeps this harness on its own binder. Without it, running the
   // suite while the app is open with live access redirects every check at the
   // app's binder and they fail in ways that look like model bugs.
-  env: { ...process.env, WPT_MCP_ROOTS: path.join(REPO, 'spike'), WPT_NO_LIVE: '1' }
+  env: {
+    ...process.env,
+    ...MAIN_ACCESS.env,
+    WPT_NO_LIVE: '1'
+  }
 })
 const client = new Client({ name: 'wpt-mcp-check', version: '1.0.0' })
 await client.connect(transport)
@@ -268,6 +281,15 @@ check(
   !exported.isError && exported.text.includes('validation: clean') && existsSync(OUT_PDF),
   exported.text
 )
+const refusedExportOverwrite = await call('binder_export', {
+  output: OUT_PDF,
+  pageCounts: true
+})
+check(
+  'binder_export refuses to overwrite an existing PDF',
+  refusedExportOverwrite.isError && /Refusing to overwrite/.test(refusedExportOverwrite.text),
+  refusedExportOverwrite.text.split('\n')[0]
+)
 
 const probe = await engine({ cmd: 'probe', path: OUT_PDF })
 check('the exported binder parses', probe.ok === true)
@@ -317,7 +339,49 @@ check(
   (await call('binder_save', { path: path.join(REPO, 'spike', 'out', 'nope.wptsession.json') })).isError
 )
 
+writeFileSync(EXISTING_BINDER, 'keep this file')
+const refusedOverwrite = await call('binder_save', { path: EXISTING_BINDER })
+check(
+  'binder_save refuses to overwrite an unrelated existing file',
+  refusedOverwrite.isError && readFileSync(EXISTING_BINDER, 'utf8') === 'keep this file',
+  refusedOverwrite.text.split('\n')[0]
+)
+
+// A second standalone agent cannot open the binder while this process owns it.
+const secondTransport = new StdioClientTransport({
+  command: process.execPath,
+  args: [SERVER],
+  env: {
+    ...process.env,
+    ...MAIN_ACCESS.env,
+    WPT_NO_LIVE: '1'
+  }
+})
+const secondClient = new Client({ name: 'wpt-mcp-lock-check', version: '1.0.0' })
+await secondClient.connect(secondTransport)
+const secondCall = async (name, args = {}) => {
+  const res = await secondClient.callTool({ name, arguments: args })
+  return {
+    text: (res.content ?? []).map((c) => c.text ?? '').join('\n'),
+    isError: !!res.isError
+  }
+}
+const lockedOpen = await secondCall('binder_open', { path: OUT_BINDER })
+check(
+  'a second standalone agent cannot open a binder already in use',
+  lockedOpen.isError && /already open/i.test(lockedOpen.text),
+  lockedOpen.text.split('\n')[0]
+)
+
 await call('binder_new')
+const afterRelease = await secondCall('binder_open', { path: OUT_BINDER })
+check(
+  'closing the first session releases the binder for another agent',
+  !afterRelease.isError && /Opened/.test(afterRelease.text),
+  afterRelease.text.split('\n')[0]
+)
+await secondCall('binder_new')
+await secondClient.close()
 const reopened = await call('binder_open', { path: OUT_BINDER })
 check(
   'a saved binder reopens with its pages, marks and tapes intact',
@@ -358,8 +422,7 @@ check(
   imgAdd.text.includes('Added 2 file(s)') && imgAdd.text.includes('2 page(s)'),
   imgAdd.text.split('\n')[0]
 )
-const imgOut = path.join(REPO, 'spike', 'out', 'mcp_images.pdf')
-const imgExport = await call('binder_export', { output: imgOut })
+const imgExport = await call('binder_export', { output: IMAGE_OUT })
 check(
   'a binder of images exports and validates',
   !imgExport.isError && imgExport.text.includes('validation: clean'),
@@ -378,7 +441,7 @@ check(
   // README exists in both the private engineering tree and the sanitized
   // public tree; keep this fixture anchored to a file every release includes.
   (await call('probe_pdf', { path: path.join(REPO, 'README.md') })).text.includes(
-    'outside WPT_MCP_ROOTS'
+    'outside the approved folders'
   )
 )
 
@@ -510,13 +573,17 @@ check(
   writeFileSync(path.join(ENG, '2 - Deductions', '.DS_Store'), 'x')
   writeFileSync(path.join(ENG, 'empty.pdf'), '')
   writeFileSync(path.join(ENG, 'notes.py'), 'print(1)')
+  const folderAccess = isolatedAgentAccess(
+    path.join(REPO, 'spike', 'out', 'agent-profile-folder'),
+    [ENG]
+  )
 
   const folderClient = new Client({ name: 'wpt-folder-check', version: '1.0.0' })
   await folderClient.connect(
     new StdioClientTransport({
       command: process.execPath,
       args: [SERVER],
-      env: { ...process.env, WPT_MCP_ROOTS: ENG, WPT_NO_LIVE: '1' }
+      env: { ...process.env, ...folderAccess.env, WPT_NO_LIVE: '1' }
     })
   )
   const fcall = async (name, args = {}) => {
@@ -1024,22 +1091,20 @@ await client.close()
 const lockedTransport = new StdioClientTransport({
   command: process.execPath,
   args: [SERVER],
+  // An isolated blank profile proves default deny without depending on the
+  // developer's real approval list.
   env: {
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([key, value]) => key !== 'WPT_MCP_ROOTS' && value !== undefined
-      )
-    ),
+    ...process.env,
+    ...isolatedAgentAccess(path.join(REPO, 'spike', 'out', 'agent-profile-locked')).env,
     // Isolated like the main client: attaching to a live app would make this
     // check exercise that app's binder instead of a default-deny server.
     WPT_NO_LIVE: '1',
-    // Roots now also come from a FILE the app writes, so unsetting the env var
-    // is no longer enough to prove default-deny. Point the server at a path that
-    // does not exist. Without this, the check passes until the developer approves
-    // a folder in the app and then fails forever for a reason that has nothing to
-    // do with the code — the same trap persisted initials set for the placement
-    // smoke, and the same fix.
-    WPT_AGENT_ROOTS_FILE: path.join(REPO, 'spike', 'out', 'no-such-agent-roots.json')
+    // The former production override must stay inert. Before the access-model
+    // correction this silently outranked the list visible in LedgerPDF.
+    WPT_MCP_ROOTS: path.join(REPO, 'spike'),
+    WPT_TEST_MODE: '1',
+    WPT_TEST_ROOTS: path.join(REPO, 'spike'),
+    WPT_AGENT_ROOTS_FILE: path.join(REPO, 'spike', 'out', 'fake-agent-roots.json')
   }
 })
 const lockedClient = new Client({ name: 'wpt-mcp-locked-check', version: '1.0.0' })
@@ -1047,31 +1112,29 @@ await lockedClient.connect(lockedTransport)
 const locked = await lockedClient.callTool({ name: 'probe_pdf', arguments: { path: a } })
 const lockedText = (locked.content ?? []).map((part) => part.text ?? '').join('\n')
 check(
-  'MCP filesystem access is disabled by default',
-  !!locked.isError && lockedText.includes('WPT_MCP_ROOTS'),
+  'MCP access is disabled by default and the former env override is ignored',
+  !!locked.isError && lockedText.includes('no folder has been approved'),
   lockedText
 )
 await lockedClient.close()
 
-// Roots from the FILE the app writes, with no environment variable in sight.
+// Roots from the exact FILE the app writes, with no root override in sight.
 //
 // This is the path every real user takes: they approve a folder in the app, and
-// the agent can read it. Every other check here sets WPT_MCP_ROOTS, which is the
-// developer's path and the one CI uses — so without this the new mechanism would
-// ship entirely unexercised, and "approve a folder" could silently do nothing.
-const ROOTS_FILE = path.join(REPO, 'spike', 'out', 'agent-roots-check.json')
-writeFileSync(ROOTS_FILE, JSON.stringify({ roots: [path.join(REPO, 'spike')] }))
+// the agent can read it. The synthetic profile prevents the check from reading
+// or changing the developer's real approvals.
+const fileAccess = isolatedAgentAccess(
+  path.join(REPO, 'spike', 'out', 'agent-profile-file-roots'),
+  [path.join(REPO, 'spike')]
+)
+const ROOTS_FILE = fileAccess.rootsFile
 const fileRootsTransport = new StdioClientTransport({
   command: process.execPath,
   args: [SERVER],
   env: {
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([key, value]) => key !== 'WPT_MCP_ROOTS' && value !== undefined
-      )
-    ),
+    ...process.env,
+    ...fileAccess.env,
     WPT_NO_LIVE: '1',
-    WPT_AGENT_ROOTS_FILE: ROOTS_FILE
   }
 })
 const fileRootsClient = new Client({ name: 'wpt-mcp-file-roots', version: '1.0.0' })
@@ -1079,7 +1142,7 @@ await fileRootsClient.connect(fileRootsTransport)
 const viaFile = await fileRootsClient.callTool({ name: 'probe_pdf', arguments: { path: a } })
 const viaFileText = (viaFile.content ?? []).map((part) => part.text ?? '').join('\n')
 check(
-  'a folder approved in the app grants access with no WPT_MCP_ROOTS set',
+  'a folder approved in the app grants access with no test override set',
   !viaFile.isError && viaFileText.includes('3'),
   viaFileText.split('\n')[0]
 )
@@ -1092,7 +1155,7 @@ const viaFileOutside = await fileRootsClient.callTool({
 const viaFileOutsideText = (viaFileOutside.content ?? []).map((part) => part.text ?? '').join('\n')
 check(
   'and a path outside an approved folder is still refused',
-  !!viaFileOutside.isError && /outside WPT_MCP_ROOTS|not a supported/i.test(viaFileOutsideText),
+  !!viaFileOutside.isError && /outside the approved folders|not a supported/i.test(viaFileOutsideText),
   viaFileOutsideText.split('\n')[0].slice(0, 80)
 )
 // Approvals take effect on the NEXT request, without restarting the client —
@@ -1110,7 +1173,6 @@ check(
   afterEditText.split('\n')[0].slice(0, 90)
 )
 await fileRootsClient.close()
-rmSync(ROOTS_FILE, { force: true })
 
 console.log('\n=== MCP server check ===')
 let fails = 0

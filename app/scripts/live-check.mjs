@@ -16,6 +16,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { isolatedAgentAccess } from './lib/isolated-agent-access.mjs'
 import { stopApp as stopAppTree } from './lib/stop-app.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -24,8 +25,13 @@ const REPO = path.resolve(APP, '..')
 const FIXTURES = path.join(REPO, 'spike', 'fixtures')
 const SERVER = path.join(APP, 'out', 'mcp-server.cjs')
 const OUT = path.join(REPO, 'spike', 'out', 'live_binder.pdf')
+const HIDDEN_SAVE_AS = path.join(REPO, 'spike', 'out', 'live_hidden_save_as.pdf')
 const OUTSIDE_ROOT = path.join(APP, 'build', 'live-outside-root.pdf')
 const USERDATA = path.join(REPO, 'spike', 'out', 'userdata-live')
+const LIVE_ACCESS = isolatedAgentAccess(
+  path.join(REPO, 'spike', 'out', 'agent-profile-live'),
+  [path.join(REPO, 'spike')]
+)
 
 // Pin the endpoint file for this run. Two reasons, and the first is a real bug
 // this replaced: deriving it from the socket's directory only works on POSIX,
@@ -79,9 +85,32 @@ if (!existsSync(fixture) || !existsSync(SERVER)) {
   process.exit(1)
 }
 rmSync(OUT, { force: true })
+rmSync(HIDDEN_SAVE_AS, { force: true })
 rmSync(OUTSIDE_ROOT, { force: true })
 copyFileSync(fixture, OUTSIDE_ROOT)
 rmSync(USERDATA, { force: true, recursive: true })
+
+// Seed a real saved binder, then close the standalone owner. The desktop app
+// below opens THIS file and must become the cross-process lock holder.
+const seedTransport = new StdioClientTransport({
+  command: process.execPath,
+  args: [SERVER],
+  env: {
+    ...process.env,
+    ...LIVE_ACCESS.env,
+    WPT_NO_LIVE: '1'
+  }
+})
+const seedClient = new Client({ name: 'live-check-seed', version: '1.0.0' })
+await seedClient.connect(seedTransport)
+await seedClient.callTool({ name: 'binder_add_pdfs', arguments: { paths: [fixture] } })
+const seeded = await seedClient.callTool({ name: 'binder_save', arguments: { path: OUT } })
+await seedClient.callTool({ name: 'binder_new', arguments: {} })
+await seedClient.close()
+if (seeded.isError || !existsSync(OUT)) {
+  console.error('could not seed the saved binder used by the live lock check')
+  process.exit(1)
+}
 
 // detached: the child leads its own process group, so cleanup can signal the
 // GROUP. `app.kill()` alone kills npm and orphans Electron underneath it — and
@@ -94,6 +123,7 @@ const app = spawn('npm', ['run', 'dev'], {
   detached: process.platform !== 'win32',
   env: {
     ...process.env,
+    ...LIVE_ACCESS.env,
     // Its own userData, wiped first, because Electron's single-instance lock is
     // a file in there. Sharing the real one means this check cannot run while
     // the developer has the app open — the launch hands off to the running
@@ -102,16 +132,18 @@ const app = spawn('npm', ['run', 'dev'], {
     // machine. Safe here because the live endpoint is deliberately NOT under
     // userData (see shared/live-endpoint.ts) and is pinned above anyway.
     WPT_DEV_USERDATA: USERDATA,
+    // Import once to hold live startup until the renderer is ready, then use
+    // the real single-file reopen seam so the app (not the harness) claims OUT.
     WPT_DEV_OPEN: fixture,
+    WPT_DEV_REOPEN: OUT,
     WPT_DEV_LIVE: '1',
     // Forward renderer console messages into stderr. The follow assertion below
     // can then distinguish a deliberately suppressed jump from one that was
     // accepted and later overwritten by the scroll tracker.
     ELECTRON_ENABLE_LOGGING: '1',
-    // The app independently enforces the same roots as the MCP server. Giving
-    // only the server a root would leave a token-holding local client able to
-    // bypass the user's folder approval through a forged live push.
-    WPT_MCP_ROOTS: path.join(REPO, 'spike')
+    // The app independently reads the same approval file as the MCP server.
+    // Giving only the server a root would leave a token-holding local client
+    // able to bypass the user's folder approval through a forged live push.
   }
 })
 // Bounded, cross-platform teardown — scripts/lib/stop-app.mjs carries the two
@@ -228,13 +260,83 @@ try {
     })
   }
 
+  /** Two clients read one revision; only the first may replace it. */
+  const stalePushIsRefused = async () => {
+    const endpointInfo = JSON.parse(readFileSync(ENDPOINT_FILE, 'utf8'))
+    return new Promise((resolve) => {
+      const sock = connect(endpointInfo.socketPath)
+      sock.setEncoding('utf8')
+      let buffer = ''
+      let stage = 'hello'
+      let firstPull = null
+      const timer = setTimeout(() => {
+        sock.destroy()
+        resolve({ ok: false, error: 'revision check timed out' })
+      }, 8000)
+      const finish = (value) => {
+        clearTimeout(timer)
+        sock.destroy()
+        resolve(value)
+      }
+      sock.on('connect', () => {
+        sock.write(`${JSON.stringify({ id: 11, verb: 'hello', token: endpointInfo.token })}\n`)
+      })
+      sock.on('data', (chunk) => {
+        buffer += chunk
+        let cut = buffer.indexOf('\n')
+        while (cut >= 0) {
+          const line = buffer.slice(0, cut)
+          buffer = buffer.slice(cut + 1)
+          cut = buffer.indexOf('\n')
+          if (!line.trim()) continue
+          const reply = JSON.parse(line)
+          if (stage === 'hello') {
+            stage = 'pull-one'
+            sock.write(`${JSON.stringify({ id: 12, verb: 'pull' })}\n`)
+          } else if (stage === 'pull-one') {
+            firstPull = reply
+            stage = 'pull-two'
+            sock.write(`${JSON.stringify({ id: 13, verb: 'pull' })}\n`)
+          } else if (stage === 'pull-two') {
+            stage = 'push-one'
+            sock.write(
+              `${JSON.stringify({
+                id: 14,
+                verb: 'push',
+                expectedRevision: firstPull.revision,
+                session: { ...firstPull.session, reviewer: 'REVISION-A' }
+              })}\n`
+            )
+          } else if (stage === 'push-one') {
+            if (!reply.ok) return finish({ ok: false, error: `first push failed: ${reply.error}` })
+            stage = 'push-stale'
+            sock.write(
+              `${JSON.stringify({
+                id: 15,
+                verb: 'push',
+                expectedRevision: firstPull.revision,
+                session: { ...firstPull.session, reviewer: 'REVISION-B' }
+              })}\n`
+            )
+          } else {
+            finish(reply)
+          }
+        }
+      })
+      sock.on('error', (error) => finish({ ok: false, error: error.message }))
+    })
+  }
+
   // The real MCP server, spawned exactly as an MCP client would spawn it.
   client = new Client({ name: 'live-check', version: '1.0.0' })
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
       args: [SERVER],
-      env: { ...process.env, WPT_MCP_ROOTS: path.join(REPO, 'spike') }
+      env: {
+        ...process.env,
+        ...LIVE_ACCESS.env
+      }
     })
   )
   const call = async (name, args = {}) => {
@@ -245,13 +347,45 @@ try {
   const status = await call('binder_status')
   check(
     'the agent sees the binder the app already has open',
-    status.text.includes('3 page(s)') && status.text.includes('fixture_a.pdf'),
+    status.text.includes('3 page(s)') && status.text.includes('live_binder.pdf'),
     status.text.split('\n')[0]
   )
   check(
     'the agent is told it is editing the live binder, not a copy',
     status.text.includes('LIVE'),
     status.text.split('\n')[1] ?? ''
+  )
+
+  // Force a second server to stay standalone even though live access is on.
+  // It must meet the lease held by the desktop app and refuse the open.
+  const standaloneTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [SERVER],
+    env: {
+      ...process.env,
+      ...LIVE_ACCESS.env,
+      WPT_NO_LIVE: '1'
+    }
+  })
+  const standaloneClient = new Client({ name: 'live-lock-check', version: '1.0.0' })
+  await standaloneClient.connect(standaloneTransport)
+  const busyOpen = await standaloneClient.callTool({
+    name: 'binder_open',
+    arguments: { path: OUT }
+  })
+  const busyText = (busyOpen.content ?? []).map((part) => part.text ?? '').join('\n')
+  check(
+    'a standalone agent cannot open the binder held by the desktop app',
+    busyOpen.isError && /already open/i.test(busyText),
+    busyText.split('\n')[0]
+  )
+  await standaloneClient.close()
+
+  const stale = await stalePushIsRefused()
+  check(
+    'a stale live push cannot replace a newer user or agent change',
+    stale.ok === false && /changed after the agent read it|stale change/i.test(stale.error ?? ''),
+    JSON.stringify(stale).slice(0, 180)
   )
 
   const pageId = status.text.match(/\bpg_\d+\b/)?.[0]
@@ -282,61 +416,47 @@ try {
     drew.text.split('\n')[0]
   )
 
-  const saved = await call('binder_save', { path: OUT })
-  check('the shared binder saves as one file', !saved.isError && existsSync(OUT), saved.text.split('\n')[0])
-  if (existsSync(OUT)) {
-    // Reopening it is the real assertion: the page the APP had open and the
-    // mark the AGENT made both come back out of the binder itself.
-    await call('binder_new')
-    const back = await call('binder_open', { path: OUT })
-    check(
-      'the saved binder holds the page the APP opened and the mark the AGENT made',
-      // Six now: the three the APP opened plus the three the AGENT added.
-      back.text.includes('6 page(s)') && back.text.includes('1 mark(s)'),
-      back.text.split('\n')[0]
-    )
-
-    // Follow-the-agent: marking a page the person is NOT looking at moves the
-    // window there. Without this, an agent working deep in a real binder is
-    // invisible — the push applies but the view sits on page 1 and "watch it
-    // work" is only true of binders small enough to have no elsewhere. The
-    // harness never generates input events, so the idle guard is open and the
-    // follow must fire.
-    // binder_open's reply summarizes; binder_status is what enumerates pages.
-    // The first draft read ids out of the open reply, found none, and failed
-    // for a reason that had nothing to do with following.
-    const enumerated = await call('binder_status')
-    const ids = [...enumerated.text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
-    const last = [...new Set(ids)].pop()
-    const before = await call('binder_current_page')
-    if (last && !before.text.includes(last)) {
-      await call('binder_place_mark', { pageId: last, kind: 'tick', nx: 0.5, ny: 0.5 })
-      // Wait for the OBSERVED view, not for the push to return. The push
-      // resolves when the renderer acknowledges it, but setCurrentId is a React
-      // state update and binder_current_page pulls what the last RENDER put in
-      // the ref — so reading it immediately races the re-render. It passed on
-      // timing luck until a rebase shifted the timing, which is exactly how a
-      // flaky check earns its keep: never on the run where it matters.
-      let after = ''
-      for (let i = 0; i < 40; i++) {
-        after = (await call('binder_current_page')).text
-        if (after.includes(last)) break
-        await new Promise((r) => setTimeout(r, 100))
-      }
-      check(
-        'the window follows the agent to the page it marked',
-        after.includes(last),
-        `marked ${last}; view: ${after.split('\n')[0]}; ${err
-          .split('\n')
-          .filter((line) => line.includes('[live-follow]'))
-          .slice(-3)
-          .join(' | ')}`
-      )
-    } else {
-      check('the window follows the agent to the page it marked', false,
-        `could not find an off-screen page to mark (view: ${before.text.split('\n')[0]})`)
+  // Follow-the-agent: marking a page the person is NOT looking at moves the
+  // window there. The harness never generates input events, so the idle guard
+  // is open and the follow must fire.
+  const enumerated = await call('binder_status')
+  const ids = [...enumerated.text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+  const last = [...new Set(ids)].pop()
+  const before = await call('binder_current_page')
+  if (last && !before.text.includes(last)) {
+    await call('binder_place_mark', { pageId: last, kind: 'tick', nx: 0.5, ny: 0.5 })
+    let after = ''
+    for (let i = 0; i < 40; i++) {
+      after = (await call('binder_current_page')).text
+      if (after.includes(last)) break
+      await new Promise((r) => setTimeout(r, 100))
     }
+    check(
+      'the window follows the agent to the page it marked',
+      after.includes(last),
+      `marked ${last}; view: ${after.split('\n')[0]}; ${err
+        .split('\n')
+        .filter((line) => line.includes('[live-follow]'))
+        .slice(-3)
+        .join(' | ')}`
+    )
+  } else {
+    check(
+      'the window follows the agent to the page it marked',
+      false,
+      `could not find an off-screen page to mark (view: ${before.text.split('\n')[0]})`
+    )
   }
+
+  // The live agent may change the open session, but it may not silently choose
+  // a new durable path the app does not adopt or lock. The person saves through
+  // the visible app; standalone mode owns its own Save paths.
+  const saved = await call('binder_save', { path: HIDDEN_SAVE_AS })
+  check(
+    'a live agent cannot choose a hidden Save As destination behind the app',
+    saved.isError && /Save As in the app/i.test(saved.text) && !existsSync(HIDDEN_SAVE_AS),
+    saved.text.split('\n')[0]
+  )
   const forged = await forgeOutsideRoot()
   check(
     'an authenticated live client cannot widen the approved folders',
@@ -354,6 +474,7 @@ try {
   if (client) await client.close().catch(() => {})
   await stopApp()
   rmSync(OUTSIDE_ROOT, { force: true })
+  rmSync(HIDDEN_SAVE_AS, { force: true })
 }
 
 clearTimeout(watchdog)

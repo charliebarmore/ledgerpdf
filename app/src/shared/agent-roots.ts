@@ -15,9 +15,10 @@
  * you paste into a file rather than a thing you choose — with nowhere to see
  * afterwards what you had approved.
  *
- * `WPT_MCP_ROOTS` is still honoured and still wins, because CI and every
- * verification harness set it, and an operator overriding config from the
- * environment is a reasonable thing to be able to do.
+ * There is intentionally no environment override. Verification harnesses move
+ * the OS config home to a synthetic user profile and write the same file the
+ * app writes. An MCP configuration must never silently outrank the list the app
+ * shows: the visible control is the source of truth.
  *
  * WHAT THIS IS NOT. It is not a permission system. It is the record of a
  * decision the person made deliberately, in a folder dialog, and can revisit.
@@ -30,9 +31,8 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { liveDir } from './live-endpoint'
 
-/** Overridable for tests, like WPT_LIVE_ENDPOINT — never for shipped config. */
 export function agentRootsFile(): string {
-  return process.env.WPT_AGENT_ROOTS_FILE ?? path.join(liveDir(), 'agent-roots.json')
+  return path.join(liveDir(), 'agent-roots.json')
 }
 
 interface RootsFile {
@@ -72,7 +72,7 @@ export function isPathInsideRoot(root: string, candidate: string): boolean {
 }
 
 /**
- * The roots in effect. Env wins; otherwise the file the app writes.
+ * The roots in effect. The app-owned file is authoritative in normal use.
  *
  * Read per call rather than cached at module load, so approving a folder in the
  * app takes effect on the agent's NEXT request instead of after restarting the
@@ -80,10 +80,6 @@ export function isPathInsideRoot(root: string, candidate: string): boolean {
  * friction that makes people widen the roots once and never revisit them.
  */
 export function readAgentRootsSync(): string[] {
-  const fromEnv = process.env.WPT_MCP_ROOTS
-  if (fromEnv !== undefined && fromEnv.trim() !== '') {
-    return normalizeRoots(fromEnv.split(path.delimiter))
-  }
   try {
     // Sync on purpose: the guard that calls this is synchronous, and making it
     // async would mean every path check awaits a file read.

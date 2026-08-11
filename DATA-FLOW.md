@@ -72,17 +72,19 @@ Optional MCP client ─local stdio─ MCP server ─same session model/engine─
   a timer. They are siblings rather than files in the OS temp directory
   deliberately: a working copy of a binder is client data and belongs in the
   engagement folder the firm already governs. Both are owner-only (`0600`) on
-  POSIX; Windows permissions inherit from the chosen folder. A crash can strand
-  a working copy, so opening a binder overwrites any already beside it.
+  POSIX; Windows permissions inherit from the chosen folder. A hidden
+  cross-process lease beside the binder allows only one LedgerPDF/standalone
+  agent writer at a time. A crash can strand a working copy, so after the stale
+  lease is recovered, opening the binder replaces that derived copy.
 - **"Save a copy to send out"** produces the distribution copy: marks flattened
   into the page content and **no session inside**. An inherited session from the
   binder it was built from is stripped before writing, so the firm's editable
   working record never travels to a recipient.
 - The older two-file `.wptsession.json` format still opens, once, so nothing made
-  before this change is stranded. Saving converts it to a binder; the app never
-  writes that format again. The MCP server still uses it as its handoff when it
-  is running standalone; in live mode it acts on the open window's own session
-  and there is no handoff file at all.
+  before this change is stranded. Saving converts it to a binder; neither the
+  app nor MCP writes that format again. Standalone MCP uses the same editable
+  binder PDF as its handoff; in live mode it acts on the open window's own
+  session and the app owns the save path.
 - Export writes a temporary file beside the chosen output, validates it, then
   atomically replaces the destination. A source file can never be the export
   target. The app does not maintain a cloud copy, recent-file database, or
@@ -108,8 +110,10 @@ Optional MCP client ─local stdio─ MCP server ─same session model/engine─
 MCP is a separate, opt-in local process; it is not required for the desktop
 app. File operations are disabled until the practitioner approves one or more
 engagement folders — in the app, under **Agent access** in the status bar, chosen
-through a folder dialog. The approved list is stored per user, owner-only, outside
-the binder; `WPT_MCP_ROOTS` overrides it for automation and CI. Canonical-path
+through a folder dialog. This is persistent standalone **read/write** access,
+not the live-binder switch: it remains in effect when that switch is off and
+when the desktop app is closed. The approved list is stored per user,
+owner-only, outside the binder and is authoritative in normal use. Canonical-path
 checks reject access and symlink escapes outside those roots, and the list is read
 on every request, so withdrawing a folder takes effect immediately rather than at
 the next restart.

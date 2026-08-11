@@ -985,9 +985,10 @@ installed, under **Agent access** in the status bar.
 The `-e ELECTRON_RUN_AS_NODE=1` option belongs to Claude Code rather than to a
 shell, so this command shape works in macOS shells, PowerShell, and `cmd.exe`.
 
-Notice that neither command sets `WPT_MCP_ROOTS`. Approved folders are chosen in
-the app now; the variable remains an override for CI and automation. See
-`src/shared/agent-roots.ts`.
+Notice that neither command supplies folder paths. Approved folders are chosen
+in the app, and that visible list is authoritative. There is no environment
+override that can silently replace it; verification uses an isolated synthetic
+user profile containing the same approval file the app writes.
 
 **Two modes, and `binder_status` names which one is in effect.** When the app is
 listening, the agent edits the binder you already have open and you watch it
@@ -996,13 +997,27 @@ handoff: the agent assembles one, calls `binder_save`, and you open it in the
 app to review and finish. An agent can also `binder_export` straight to PDF
 when no review is wanted.
 
+The orange switch controls **only the binder on screen**. Approved folders are
+the separate, persistent permission for standalone work: an agent may read
+documents and create or update LedgerPDF files there even while open-binder
+access is off or the app is closed. The panel states both facts rather than
+using "agent access off" as an accidental master-switch claim.
+
+One saved binder has one writer. The desktop app and standalone MCP processes
+hold the same cross-process lease while a binder is open; a second process is
+refused until the first closes it. Live pushes also carry the revision they
+read, so a user edit or another agent change that lands first makes the stale
+push fail and retry instead of replacing newer work. In live mode, the app owns
+the document: `binder_open` is refused and `binder_save` may write only the
+binder already open, never a hidden Save As destination.
+
 (This paragraph said "there is no live link to a running app window" until
 2026-08-06. Live access shipped on 2026-08-04 and the section above documented
 it correctly — this second, older copy further down the file was missed. Worth
 a look whenever the MCP surface changes: there is more than one place here that
 describes it.)
 
-Tools — all 34: `probe_pdf` · `binder_new` / `binder_open` / `binder_save` /
+Tools — all 36: `probe_pdf` · `binder_new` / `binder_open` / `binder_save` /
 `binder_status` · `binder_add_pdfs` / `binder_add_folder` · `binder_move_pages`
 / `binder_rotate_pages` / `binder_delete_pages` · `binder_bookmarks` /
 `binder_add_bookmark` / `binder_rename_bookmark` · `binder_set_reviewer` /
@@ -1011,7 +1026,8 @@ Tools — all 34: `probe_pdf` · `binder_new` / `binder_open` / `binder_save` /
 `binder_tie` · `binder_set_status` / `binder_review_queue` · `binder_read_page`
 / `binder_read_cells` / `binder_find` · `binder_current_page` ·
 `binder_history` / `binder_revert_run` · `binder_inventory` / `binder_summary`
-/ `binder_add_cover` · `binder_export`.
+/ `binder_add_cover` · `binder_place_connector` / `binder_legend` ·
+`binder_export`.
 
 Page ids (`pg_*`) are permanent and are how every tool refers to pages, so an
 agent reads them once from `binder_status` and they stay valid across reordering.
@@ -1035,20 +1051,26 @@ question from *metadata* to *content*, and it deserves a fresh decision rather
 than inheriting the old one.
 
 Two mitigations, neither of which is a substitute for that decision. Text is
-only readable from folders the user approved under Agent access (or named in
-`WPT_MCP_ROOTS`, which overrides). Nothing is approved by default.
+only readable from folders the user approved under Agent access. Nothing is
+approved by default.
 And **whether the model is local or hosted is the part only you know** — a
 local model keeps this on the machine and is the honest way to have both.
 
 **File names and bookmark titles also routinely carry client names** — a real
 62-page master file had `Revenue – Triland Partners LLC` in its outline. Pointing an
 agent at real client files is therefore an IRC §7216
-disclosure decision. File access is **disabled by default**. Registration
-must set `WPT_MCP_ROOTS` to one or more path-delimited engagement roots; reads,
-session opens/saves, and exports outside those canonical roots are refused,
+disclosure decision. File access is **disabled by default**. The practitioner
+must approve one or more engagement folders in LedgerPDF; reads, binder
+opens/saves, and exports outside those canonical roots are refused,
 including symlink escapes. This limits accidental reach but does not redact
 identifying strings inside an allowed engagement. A future client-safe mode can
 add handle mapping in `src/mcp/server.ts` before those strings reach transport.
+
+Within an approved folder, standalone access is read/write rather than
+read-only. New binders, exports and cover memos may be created there. An MCP
+save/export refuses to overwrite an unrelated existing file, and opening an
+existing binder requires its exclusive lease; updating the binder already held
+by that same standalone session remains supported.
 
 Note this does not change the *product's* local-only claim: the app still has no
 telemetry and reaches no network. What leaves the machine is whatever the agent
