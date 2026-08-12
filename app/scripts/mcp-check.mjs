@@ -1022,8 +1022,8 @@ check(
 
 const reverted = await call('binder_revert_run', { run: runId })
 check(
-  'binder_revert_run removes the agent annotations',
-  reverted.text.includes('removed 3 agent annotation(s)'),
+  'binder_revert_run removes the agent items',
+  reverted.text.includes('removed 3 agent item(s)'),
   reverted.text.split('\n')[0]
 )
 check(

@@ -1,4 +1,4 @@
-import type { JournalEntry, Session } from '../session'
+import { revertibleRunItems, type JournalEntry, type Session } from '../session'
 
 /**
  * What an agent did to this binder, and the way to take it back out.
@@ -31,18 +31,15 @@ export function HistoryPanel({
   const journal = session.journal ?? []
 
   /** Whether anything from this run is still in the binder to remove. */
-  const remaining = (run: string): number =>
-    (session.marks ?? []).filter((m) => m.run === run).length +
-    (session.tapes ?? []).filter((t) => t.run === run).length +
-    (session.shapes ?? []).filter((s) => s.run === run).length +
-    (session.bookmarks ?? []).filter((b) => b.run === run).length
+  const remaining = (run: string): number => revertibleRunItems(session, run)
 
   // Runs come from the journal AND from what is actually stamped in the binder.
   // Stamping and journaling are separate steps, so a run can leave annotations
   // behind without an action log — a session from an older build, or a tool
   // that stamps but does not record. Listing only journalled runs would let the
-  // status bar say "1 by AI" while this panel said nothing was automated, which
-  // is precisely the contradiction a reviewer must never be shown.
+  // status bar say "1 AI-created item" while this panel said nothing was
+  // automated, which is precisely the contradiction a reviewer must never be
+  // shown.
   const runs: Array<{ run: string; entries: JournalEntry[] }> = []
   const seen = (key: string): { run: string; entries: JournalEntry[] } => {
     const found = runs.find((r) => r.run === key)
@@ -56,6 +53,7 @@ export function HistoryPanel({
     ...(session.marks ?? []),
     ...(session.tapes ?? []),
     ...(session.shapes ?? []),
+    ...(session.links ?? []),
     ...(session.bookmarks ?? [])
   ]) {
     if (stamped.run) seen(stamped.run)
@@ -93,8 +91,8 @@ export function HistoryPanel({
                     {run === 'you'
                       ? 'Your changes'
                       : entries.length
-                        ? `AI run · ${entries.length} change(s)`
-                        : `AI run · ${left} annotation(s), not logged`}
+                        ? `AI run · ${entries.length} logged action${entries.length === 1 ? '' : 's'}`
+                        : `AI run · ${left} item${left === 1 ? '' : 's'}, not logged`}
                   </span>
                   {run !== 'you' && (
                     <button
@@ -104,10 +102,10 @@ export function HistoryPanel({
                       title={
                         left === 0
                           ? 'Nothing from this run is left to remove'
-                          : `Remove the ${left} annotation(s) this run added. Page order, rotation and deletions are not undone.`
+                          : `Remove the ${left} item${left === 1 ? '' : 's'} this run added. Page order, rotation and deletions are not undone.`
                       }
                     >
-                      {left === 0 ? 'Reverted' : `Undo ${left}`}
+                      {left === 0 ? 'Reverted' : `Undo ${left} item${left === 1 ? '' : 's'}`}
                     </button>
                   )}
                 </div>
