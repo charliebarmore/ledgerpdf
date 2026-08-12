@@ -567,6 +567,7 @@ async function openBinderAt(target: string): Promise<unknown> {
     const info = (opened as EngineOk).binder as {
       found: boolean
       reason?: string
+      flattened?: boolean
       payload_intact?: boolean
       geometry_matches?: boolean
       session?: unknown
@@ -576,7 +577,26 @@ async function openBinderAt(target: string): Promise<unknown> {
     // is the normal way a binder starts. Hand it back for import, not an error.
     if (!info.found) {
       await releaseFailedOpen()
-      return { kind: 'plain' as const, path: target, reason: info.reason }
+      if (info.flattened) {
+        const result = await dialog.showMessageBox({
+          type: 'warning',
+          title: 'This is a flattened copy',
+          message: `${path.basename(target)} is a copy for sending, not the editable binder.`,
+          detail:
+            'Its LedgerPDF marks and note icons are printed permanently into the pages. They cannot be clicked, edited, or recovered from this copy. Open the editable binder if you need the comments.\n\nYou can still open this PDF as a new binder and add new marks of your own.',
+          buttons: ['Cancel', 'Open as a new binder'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true
+        })
+        if (result.response !== 1) return null
+      }
+      return {
+        kind: 'plain' as const,
+        path: target,
+        reason: info.reason,
+        ...(info.flattened ? { flattened: true } : {})
+      }
     }
 
     const working = workingCopyPathFor(target)

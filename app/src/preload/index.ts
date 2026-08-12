@@ -50,7 +50,7 @@ const api = {
         geometryMatches: boolean
         pendingAutosave?: { savedAt?: string; session?: unknown }
       }
-    | { kind: 'plain'; path: string; reason?: string }
+    | { kind: 'plain'; path: string; reason?: string; flattened?: boolean }
     | {
         kind: 'legacy'
         path: string

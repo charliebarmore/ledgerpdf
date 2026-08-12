@@ -130,7 +130,7 @@ solves that — what remains is one publisher warning, described below.
 ### Getting a build
 
 Download the current installers and checksums from the
-**[LedgerPDF v0.1.2 release](https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.2)**.
+**[LedgerPDF v0.1.3 release](https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.3)**.
 
 On **macOS**, download the `.dmg` or the `.zip`, open it, and drag LedgerPDF to
 Applications. It is notarized and stapled, so it launches with no warning.

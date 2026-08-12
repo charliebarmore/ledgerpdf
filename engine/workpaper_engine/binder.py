@@ -269,6 +269,15 @@ def export_binder(spec: dict) -> dict:
             if session is not None and not flatten:
                 session_bytes = session_store.embed_session(out, session)
 
+            # A flattened copy deliberately has no session, but the app still
+            # needs to distinguish it from an ordinary source PDF. Otherwise it
+            # opens the copy as a fresh binder and the permanent note icons look
+            # like broken clickable comments. This boolean contains no client
+            # data or source path. Older outputs are recognized by their WptM
+            # appearance resources; see session_store.is_flattened_copy.
+            if flatten:
+                out.Root[session_store.WPT_FLATTENED] = True
+
             out.save(temp_output)
 
         # 6. Validate the temporary artifact before it can replace a prior good

@@ -226,9 +226,28 @@ def main() -> int:
     res = engine_cli({"cmd": "open_binder", "path": str(flat)})
     check("flattened copy cannot be reopened as editable",
           res.get("binder", {}).get("found") is False)
+    check("flattened copy identifies itself to the app",
+          res.get("binder", {}).get("flattened") is True,
+          str(res.get("binder", {}).get("reason", ""))[:160])
+    with pikepdf.open(flat) as pdf:
+        check("new flattened copies carry the explicit non-sensitive marker",
+              bool(pdf.Root.get(Name("/WPT_Flattened"), False)))
     ours, theirs = count_annots(flat)
     check("flattened copy has our marks as ink, not annotations", ours == 0, f"ours={ours}")
     check("flattened copy still keeps the client's annotations", theirs >= 2, f"theirs={theirs}")
+
+    # Files produced before the explicit catalog marker shipped still carry the
+    # WptM appearance-resource signature. The warning has to work on those too:
+    # the user's already-created distribution copy is the bug that prompted it.
+    legacy_flat = OUT_DIR / "binder-flat-before-marker.pdf"
+    with pikepdf.open(flat) as pdf:
+        if Name("/WPT_Flattened") in pdf.Root:
+            del pdf.Root[Name("/WPT_Flattened")]
+        pdf.save(legacy_flat)
+    res = engine_cli({"cmd": "open_binder", "path": str(legacy_flat)})
+    check("an older flattened copy is recognized by its page resources",
+          res.get("binder", {}).get("flattened") is True,
+          str(res.get("binder", {}).get("reason", ""))[:160])
 
     # ------------------------------------- 6. the integrity check must fire
     # Someone opened the binder elsewhere and rotated a page. The session is
@@ -251,6 +270,8 @@ def main() -> int:
     check("plain PDF reports no session, quietly",
           res.get("binder", {}).get("found") is False,
           str(res.get("binder", {}).get("reason", ""))[:120])
+    check("an ordinary PDF is not mislabeled as a flattened LedgerPDF copy",
+          res.get("binder", {}).get("flattened") is False)
 
     return report()
 
