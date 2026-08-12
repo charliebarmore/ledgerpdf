@@ -101,6 +101,19 @@ export interface Provenance {
 }
 
 /**
+ * Exact bytes written by an agent export.
+ *
+ * This is evidence, not permission supplied by the caller. `binder_export`
+ * may replace an existing file only when its canonical path and current
+ * SHA-256 both match one of these records in this binder's journal.
+ */
+export interface JournalArtifact {
+  kind: 'binder_export'
+  path: string
+  sha256: string
+}
+
+/**
  * One recorded action. The journal answers "what did the AI do to this file",
  * in order, in the reviewer's language.
  *
@@ -124,6 +137,8 @@ export interface JournalEntry {
    * so revert reports them instead of pretending.
    */
   structural?: boolean
+  /** Present for a file-producing action whose exact bytes matter later. */
+  artifact?: JournalArtifact
 }
 
 export interface UserBookmark extends Provenance {
@@ -632,6 +647,12 @@ export interface ExportSpec {
    * ordinary export's spec is unchanged.
    */
   flatten?: boolean
+  /**
+   * Final engine-side destination assertion. MCP exports set one while holding
+   * the path lease so a non-cooperating editor cannot change/create the file
+   * during materialization and still be overwritten at commit.
+   */
+  output_guard?: { must_not_exist: true } | { sha256: string }
   output: string
 }
 
@@ -930,7 +951,7 @@ export function toSaved(session: Session): Session {
 /** Append to the record. No-op for human actions — see JournalEntry. */
 export function record(
   session: Session,
-  entry: { action: string; what: string; structural?: boolean }
+  entry: { action: string; what: string; structural?: boolean; artifact?: JournalArtifact }
 ): Session {
   if (!session.activeRun) return session
   const seq = session.seq + 1
@@ -941,7 +962,8 @@ export function record(
     run: session.activeRun,
     action: entry.action,
     what: entry.what,
-    ...(entry.structural ? { structural: true } : {})
+    ...(entry.structural ? { structural: true } : {}),
+    ...(entry.artifact ? { artifact: entry.artifact } : {})
   }
   return { ...session, seq, journal: [...(session.journal ?? []), next] }
 }
@@ -2743,10 +2765,21 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
       // one would silently stamp a person's later edits as the AI's work.
       ...(Array.isArray(s.journal)
         ? {
-            journal: s.journal.filter(
-              (e): e is JournalEntry =>
-                !!e && typeof e.id === 'string' && typeof e.what === 'string'
-            )
+            journal: s.journal
+              .filter(
+                (e): e is JournalEntry =>
+                  !!e && typeof e.id === 'string' && typeof e.what === 'string'
+              )
+              .map((e) => {
+                const { artifact, ...entry } = e
+                const validArtifact =
+                  artifact?.kind === 'binder_export' &&
+                  typeof artifact.path === 'string' &&
+                  artifact.path.length > 0 &&
+                  typeof artifact.sha256 === 'string' &&
+                  /^[a-f0-9]{64}$/i.test(artifact.sha256)
+                return validArtifact ? { ...entry, artifact } : entry
+              })
           }
         : {}),
       ...(Array.isArray(s.stamps)

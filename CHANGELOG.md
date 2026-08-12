@@ -5,6 +5,15 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-12
+
+### Added
+
+- Let `binder_export` replace its own prior export at the same canonical path
+  only when the file's SHA-256 still matches the provenance recorded in this
+  binder's journal. Modified, unrelated, symlinked, or mid-export replacement
+  files remain protected.
+
 ## [0.1.1] - 2026-08-11
 
 ### Security
@@ -44,6 +53,7 @@ Initial public alpha.
 - Added platform-independent MCP registration and complete macOS notarization
   credential handling.
 
-[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.2
 [0.1.1]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.1
 [0.1.0]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.0
