@@ -61,6 +61,7 @@ import {
   shapesOnPage,
   updateShape,
   agentWork,
+  agentCreatedItems,
   formatCents,
   parseMoney,
   bookmarkSection,
@@ -69,6 +70,7 @@ import {
   endRun,
   record,
   revertRun,
+  revertibleRunItems,
   toSaved,
   rotatePages,
   rotateVisual,
@@ -402,6 +404,23 @@ async function main(): Promise<number> {
       ny: 0.5,
       entries: [1, 2].map(toTapeEntry)
     }).session
+    w = addShape(w, {
+      page: w.pages[0].id,
+      kind: 'rect',
+      nx: 0.1,
+      ny: 0.1,
+      nx2: 0.2,
+      ny2: 0.2,
+      color: 'red',
+      width: 1.5
+    }).session
+    w = addLink(w, {
+      page: w.pages[0].id,
+      target: w.pages[1].id,
+      rect: [0.1, 0.1, 0.2, 0.2],
+      label: 'Test link'
+    }).session
+    w = addBookmark(w, w.pages[0].id, 'Agent bookmark').session
     const agentMark = w.marks![w.marks!.length - 1]
     check(
       'a mark made during a run is stamped with the agent and the run',
@@ -409,18 +428,36 @@ async function main(): Promise<number> {
       `${agentMark.by} ${agentMark.run}`
     )
     check(
-      'agentWork counts only what the agent made',
-      agentWork(w).marks === 1 && agentWork(w).tapes === 1,
+      'agentWork separates every kind of item the agent made',
+      agentWork(w).marks === 1 &&
+        agentWork(w).tapes === 1 &&
+        agentWork(w).shapes === 1 &&
+        agentWork(w).links === 1 &&
+        agentWork(w).bookmarks === 1,
       JSON.stringify(agentWork(w))
+    )
+    check(
+      'the status total is AI-created marks, tapes and shapes — links are not double-counted',
+      agentCreatedItems(w) === 3,
+      `${agentCreatedItems(w)} AI-created page item(s)`
+    )
+    check(
+      'the history Undo count includes every item revertRun will remove',
+      revertibleRunItems(w, begun.run) === 5,
+      `${revertibleRunItems(w, begun.run)} item(s)`
     )
 
     // Structural changes are recorded as unrevertible rather than pretended.
     w = record(w, { action: 'move_pages', what: 'Moved 2 pages', structural: true })
     const reverted = revertRun(w, begun.run)
     check(
-      'reverting a run removes the agent annotations',
+      'reverting a run removes the agent items',
       (reverted.session.marks?.length ?? 0) === marksBefore + 1 &&
-        (reverted.session.tapes?.length ?? 0) === (s.tapes?.length ?? 0),
+        (reverted.session.tapes?.length ?? 0) === (s.tapes?.length ?? 0) &&
+        (reverted.session.shapes?.length ?? 0) === (s.shapes?.length ?? 0) &&
+        (reverted.session.links?.length ?? 0) === (s.links?.length ?? 0) &&
+        (reverted.session.bookmarks?.length ?? 0) === (s.bookmarks?.length ?? 0) &&
+        reverted.removed === 5,
       `${reverted.session.marks?.length} marks left, removed ${reverted.removed}`
     )
     check(

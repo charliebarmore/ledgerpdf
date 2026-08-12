@@ -984,13 +984,7 @@ export function revertRun(
   session: Session,
   run: string
 ): { session: Session; removed: number; structural: JournalEntry[] } {
-  const mine = <T extends Provenance>(xs: T[] | undefined): T[] => (xs ?? []).filter((x) => x.run === run)
-  const removed =
-    mine(session.marks).length +
-    mine(session.tapes).length +
-    mine(session.shapes).length +
-    mine(session.links).length +
-    mine(session.bookmarks).length
+  const removed = revertibleRunItems(session, run)
   const drop = <T extends Provenance>(xs: T[] | undefined): T[] | undefined =>
     xs ? xs.filter((x) => x.run !== run) : xs
   const structural = (session.journal ?? []).filter((e) => e.run === run && e.structural)
@@ -1016,7 +1010,7 @@ export function revertRun(
         by: 'human',
         action: 'revert_run',
         what:
-          `Reverted ${run}: removed ${removed} agent annotation(s)` +
+          `Reverted ${run}: removed ${removed} agent item(s)` +
           (structural.length
             ? `; ${structural.length} structural change(s) could not be undone`
             : '')
@@ -1024,6 +1018,25 @@ export function revertRun(
     ]
   }
   return { session: next, removed, structural }
+}
+
+/**
+ * Everything Undo will actually remove from one agent run.
+ *
+ * Keep the history panel's number and `revertRun` on this one calculation. A
+ * link used to be removed by Undo but omitted from the button's count, so the
+ * interface promised a smaller operation than it performed.
+ */
+export function revertibleRunItems(session: Session, run: string): number {
+  const mine = <T extends Provenance>(xs: T[] | undefined): number =>
+    (xs ?? []).filter((x) => x.run === run).length
+  return (
+    mine(session.marks) +
+    mine(session.tapes) +
+    mine(session.shapes) +
+    mine(session.links) +
+    mine(session.bookmarks)
+  )
 }
 
 /** What an agent has touched in this binder — the reviewer's summary. */
@@ -1045,6 +1058,18 @@ export function agentWork(session: Session): {
     links: byAgent(session.links),
     bookmarks: byAgent(session.bookmarks)
   }
+}
+
+/**
+ * AI-created page items named in the status bar: marks, tapes and shapes.
+ *
+ * Links are the click-through mechanics attached to marks, so including them
+ * would make a pair of visible connector marks count four times. Bookmarks are
+ * navigation, reported in the history rather than mixed into page annotations.
+ */
+export function agentCreatedItems(session: Session): number {
+  const work = agentWork(session)
+  return work.marks + work.tapes + work.shapes
 }
 
 /**

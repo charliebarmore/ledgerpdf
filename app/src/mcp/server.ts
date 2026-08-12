@@ -1160,7 +1160,7 @@ registerTool(
       ? `\n\n${res.structural.length} change(s) could NOT be undone, because they altered the binder rather than adding something removable:\n` +
         res.structural.map((e) => `  ${e.what}`).join('\n')
       : ''
-    return text(`Reverted ${run}: removed ${res.removed} agent annotation(s).${tail}\n\n${summary(session)}`)
+    return text(`Reverted ${run}: removed ${res.removed} agent item(s).${tail}\n\n${summary(session)}`)
   }
 )
 

@@ -5,6 +5,17 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-12
+
+### Fixed
+
+- Replaced the ambiguous `by AI` status with an `AI-created items` total and
+  displayed shapes alongside marks and tapes, so every page item contributing
+  to the total is visible.
+- Distinguished logged agent actions from the items still present in a binder,
+  and made each run's Undo count match every mark, tape, shape, link, and
+  bookmark that Undo will actually remove.
+
 ## [0.1.3] - 2026-08-12
 
 ### Fixed
@@ -62,7 +73,8 @@ Initial public alpha.
 - Added platform-independent MCP registration and complete macOS notarization
   credential handling.
 
-[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.4
 [0.1.3]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.3
 [0.1.2]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.2
 [0.1.1]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.1

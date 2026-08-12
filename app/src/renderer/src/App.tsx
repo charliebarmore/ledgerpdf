@@ -28,6 +28,7 @@ import {
   clearBookmarkPage,
   addStamp,
   addTape,
+  agentCreatedItems,
   legendMarkdown,
   legendEntries,
   nextConnectorLabel,
@@ -244,10 +245,7 @@ export default function App(): React.JSX.Element {
 
   const pages = session.pages
   /** Annotations an agent placed, so the status bar can say so on open. */
-  const aiCount =
-    (session.marks ?? []).filter((m) => m.by === 'agent').length +
-    (session.tapes ?? []).filter((t) => t.by === 'agent').length +
-    (session.shapes ?? []).filter((x) => x.by === 'agent').length
+  const aiCount = agentCreatedItems(session)
   const serializedSession = useMemo(() => JSON.stringify(session), [session])
   /** Monotonic guard against a stale agent replacing newer user/agent work. */
   const liveRevision = useRef(0)
@@ -2669,6 +2667,11 @@ export default function App(): React.JSX.Element {
               {' '}· <b>{session.tapes.length}</b> tape{session.tapes.length === 1 ? '' : 's'}
             </>
           ) : null}
+          {session.shapes?.length ? (
+            <>
+              {' '}· <b>{session.shapes.length}</b> shape{session.shapes.length === 1 ? '' : 's'}
+            </>
+          ) : null}
           {/* Opening a binder an agent worked on should say so without being
               asked. A reviewer signing this file needs to know before they
               scroll, not after. */}
@@ -2678,9 +2681,9 @@ export default function App(): React.JSX.Element {
               <button
                 className="ai-count link"
                 onClick={() => setHistoryOpen((v) => !v)}
-                title="Show what the AI changed, and undo it"
+                title={`${aiCount} AI-created page item${aiCount === 1 ? '' : 's'}: marks, tapes and shapes. Click to see logged actions or undo a run.`}
               >
-                {aiCount} by AI
+                {aiCount} AI-created item{aiCount === 1 ? '' : 's'}
               </button>
             </>
           ) : null}
