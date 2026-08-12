@@ -1379,7 +1379,9 @@ export default function App(): React.JSX.Element {
       adoptSession(
         fresh,
         null,
-        `Opened ${baseName(res.path)} — a new binder from this PDF. Add more, mark it up, then Save.`,
+        res.flattened
+          ? `Opened flattened copy as a new binder — its existing marks are permanent ink and cannot be clicked. New marks you add will be editable.`
+          : `Opened ${baseName(res.path)} — a new binder from this PDF. Add more, mark it up, then Save.`,
         true
       )
       return

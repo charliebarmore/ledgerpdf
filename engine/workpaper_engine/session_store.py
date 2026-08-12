@@ -42,6 +42,12 @@ SESSION_ENVELOPE_VERSION = 1
 #: arrived with, which must always be left alone.
 WPT_DATA = Name("/WPT_Data")
 
+#: Non-sensitive document marker on a copy whose LedgerPDF annotations were
+#: painted into page content. It carries no session, client name, source path,
+#: or other provenance; its only job is to stop the desktop app from presenting
+#: permanent ink as though it were still clickable review work.
+WPT_FLATTENED = Name("/WPT_Flattened")
+
 
 # ---------------------------------------------------------------- fingerprint
 
@@ -183,7 +189,16 @@ def read_session(pdf: pikepdf.Pdf) -> dict:
         raw = _read_page_attachment(pdf)
         anchor = "page"
     if raw is None:
-        return {"found": False, "reason": "no embedded session"}
+        flattened = is_flattened_copy(pdf)
+        return {
+            "found": False,
+            "reason": (
+                "LedgerPDF flattened copy — marks are permanent page content"
+                if flattened
+                else "no embedded session"
+            ),
+            "flattened": flattened,
+        }
 
     try:
         envelope = json.loads(raw.decode("utf-8"))
@@ -209,6 +224,38 @@ def read_session(pdf: pikepdf.Pdf) -> dict:
         "written_by": envelope.get("written_by"),
         "session": session,
     }
+
+
+def is_flattened_copy(pdf: pikepdf.Pdf) -> bool:
+    """Whether this is a LedgerPDF distribution copy with permanent marks.
+
+    New copies carry an explicit catalog flag. Releases before that flag still
+    identify themselves mechanically: every flattened appearance is installed
+    as a page XObject whose resource name starts with ``/WptM``. Checking that
+    signature is what lets a current app explain an older flattened file — in
+    particular, a copy already handed to someone before this safeguard shipped.
+
+    This is intentionally detection, not recovery. Flattening removes the
+    structured session and paints each mark into page content; no note text or
+    editable coordinates can be reconstructed from this marker.
+    """
+    try:
+        if bool(pdf.Root.get(WPT_FLATTENED, False)):
+            return True
+    except (AttributeError, TypeError, ValueError):
+        pass
+
+    for page in pdf.pages:
+        try:
+            resources = page.obj.get(Name("/Resources"))
+            xobjects = resources.get(Name("/XObject")) if resources is not None else None
+            if xobjects is not None and any(
+                str(name).startswith("/WptM") for name in xobjects.keys()
+            ):
+                return True
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return False
 
 
 # ------------------------------------------------------------------ stripping

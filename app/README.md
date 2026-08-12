@@ -1139,6 +1139,13 @@ departure from it is something a preparer has to be taught.
   **no session inside**. It is a different destination, never the working
   binder, and it cannot be reopened for editing. That is the point of it.
 
+If someone later opens that send-out copy in LedgerPDF, the app identifies it
+before importing and explains that the existing marks and note icons are
+permanent ink. Opening it anyway starts a new binder where newly added marks are
+editable; it does not make the flattened marks editable again. Copies created
+before the explicit marker was added are recognized from their LedgerPDF page
+resources, so the safeguard also covers already-delivered files.
+
 This replaced a two-file model — a `.wptsession.json` master plus an exported
 binder. The buttons had already been renamed once, from "Save"/"Export" to
 "Save session"/"Export PDF", because "Save" is what anyone reaches for when

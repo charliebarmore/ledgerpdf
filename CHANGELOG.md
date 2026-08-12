@@ -5,6 +5,15 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-12
+
+### Fixed
+
+- Detect LedgerPDF copies whose marks were flattened into permanent page
+  content and warn before opening them as a new binder, so a printed note icon
+  is not mistaken for a broken clickable comment. Existing flattened copies are
+  recognized as well as newly created ones.
+
 ## [0.1.2] - 2026-08-12
 
 ### Added
@@ -53,7 +62,8 @@ Initial public alpha.
 - Added platform-independent MCP registration and complete macOS notarization
   credential handling.
 
-[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.3
 [0.1.2]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.2
 [0.1.1]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.1
 [0.1.0]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.0
