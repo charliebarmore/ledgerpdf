@@ -86,9 +86,13 @@ Optional MCP client ─local stdio─ MCP server ─same session model/engine─
   binder PDF as its handoff; in live mode it acts on the open window's own
   session and the app owns the save path.
 - Export writes a temporary file beside the chosen output, validates it, then
-  atomically replaces the destination. A source file can never be the export
-  target. The app does not maintain a cloud copy, recent-file database, or
-  telemetry record.
+  atomically commits it. MCP records the canonical path and SHA-256 of each
+  successful export in the binder journal. It may replace that exact path only
+  while the current bytes still match the recorded hash; it checks again at the
+  engine's final commit point so an edit or file created during materialization
+  is refused. Unrelated, modified, and symlinked destinations remain protected.
+  A source file can never be the export target. The app does not maintain a
+  cloud copy, recent-file database, or telemetry record.
 - The renderer has no Node.js access and no generic file API. The Electron main
   process authorizes user-selected paths, denies navigation/popups/webviews and
   browser permissions, and is the only desktop component that opens files. A

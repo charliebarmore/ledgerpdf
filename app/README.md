@@ -997,6 +997,14 @@ handoff: the agent assembles one, calls `binder_save`, and you open it in the
 app to review and finish. An agent can also `binder_export` straight to PDF
 when no review is wanted.
 
+`binder_export` may safely reuse one stable output name. After a successful
+export it records that file's canonical path and SHA-256 in the binder journal;
+the next export may replace it only if the bytes at that path still match. A
+human-edited copy, an unrelated file, a symlink, or a file changed while the new
+PDF is being built is refused. There is deliberately no `overwrite: true`
+escape hatch: replacement authority comes from measured provenance, not an
+agent's promise.
+
 The orange switch controls **only the binder on screen**. Approved folders are
 the separate, persistent permission for standalone work: an agent may read
 documents and create or update LedgerPDF files there even while open-binder

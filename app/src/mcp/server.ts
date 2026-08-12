@@ -34,7 +34,16 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import packageJson from '../../package.json'
-import { existsSync, readdirSync, realpathSync, statSync, type Dirent } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  createReadStream,
+  existsSync,
+  lstatSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  type Dirent
+} from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isPathInsideRoot, readAgentRootsSync } from '../shared/agent-roots'
@@ -84,6 +93,7 @@ import {
   toExportSpec,
   toSaved,
   type BookmarkNode,
+  type JournalArtifact,
   type JournalEntry,
   type ProbeWire,
   type Session
@@ -154,9 +164,14 @@ export function setSessionOwner(next: SessionOwner): void {
  * Opened lazily rather than at connect: a server that only ever reads should
  * not leave a run in someone's engagement record.
  */
-function mutating(action: string, what: string, structural = false): void {
+function mutating(
+  action: string,
+  what: string,
+  structural = false,
+  artifact?: JournalArtifact
+): void {
   if (!session.activeRun) session = beginRun(session).session
-  session = record(session, { action, what, structural })
+  session = record(session, { action, what, structural, ...(artifact ? { artifact } : {}) })
 }
 
 const text = (s: string): { content: Array<{ type: 'text'; text: string }> } => ({
@@ -240,6 +255,32 @@ function resolveSource(p: string): string {
   }
   return abs
 }
+
+function sha256File(file: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256')
+    const input = createReadStream(file)
+    input.once('error', reject)
+    input.on('data', (chunk) => hash.update(chunk))
+    input.once('end', () => resolve(hash.digest('hex')))
+  })
+}
+
+function lastExportAt(s: Session, canonicalPath: string): JournalArtifact | undefined {
+  return [...(s.journal ?? [])]
+    .reverse()
+    .find(
+      (entry) =>
+        entry.action === 'export_binder' &&
+        entry.artifact?.kind === 'binder_export' &&
+        entry.artifact.path === canonicalPath
+    )?.artifact
+}
+
+const existingExportRefusal = (out: string): string =>
+  `Refusing to overwrite an existing export: ${out}. ` +
+  `It does not match this binder's last export to that path, so it may have been edited ` +
+  'or replaced. Choose a new path instead.'
 
 /** Page ids are how every other tool refers to pages, so always show them. */
 function pageTable(s: Session, limit = 300): string {
@@ -981,7 +1022,7 @@ registerTool(
   {
     title: 'Export the binder to PDF',
     description:
-      'Write the binder to a single PDF: pages in order, bookmarks retargeted, marks and tapes applied. Source files are opened read-only and never modified. Returns qpdf validation results.',
+      "Write the binder to a single PDF: pages in order, bookmarks retargeted, marks and tapes applied. Source files are opened read-only and never modified. A path may replace only this binder's own prior export when its current SHA-256 still matches the journal; unrelated or edited files are refused. Returns qpdf validation results.",
     inputSchema: {
       output: z.string().describe('Path for the exported .pdf'),
       pageCounts: z.boolean().optional().describe('Append "(N pages)" to leaf bookmarks'),
@@ -996,32 +1037,69 @@ registerTool(
   async ({ output, pageCounts, flatten }) => {
     if (session.pages.length === 0) return fail('nothing to export — the binder is empty')
     const out = resolveAllowedPath(output, { mustExist: false, purpose: 'exporting a binder' })
-    if (existsSync(out)) {
-      return fail(`Refusing to overwrite an existing export: ${out}. Choose a new path instead.`)
-    }
     const spec = toExportSpec(session, out, {
       pageCounts: pageCounts ?? false,
       flatten: flatten ?? false
     })
     let res
+    let replacedSha256: string | undefined
+    let exportedArtifact: JournalArtifact | undefined
     try {
-      res = await withBinderLock(out, () => {
-        // Recheck after acquiring the lease. This closes the race between the
-        // first existence check and a separate process creating the file.
+      res = await withBinderLock(out, async () => {
+        // Decide only while holding the cross-process lease. This closes the
+        // race between hashing the old bytes and atomically replacing them.
         if (existsSync(out)) {
-          throw new Error(
-            `Refusing to overwrite an existing export: ${out}. Choose a new path instead.`
-          )
+          // Never follow a file-level symlink for replacement. A prior export
+          // is a regular file; a symlink appearing later is a different object
+          // even if its target happens to carry matching bytes.
+          const stats = lstatSync(out)
+          if (stats.isSymbolicLink() || !stats.isFile()) {
+            throw new Error(existingExportRefusal(out))
+          }
+          const canonicalExisting = realpathSync(out)
+          const currentSha256 = await sha256File(canonicalExisting)
+          const prior = lastExportAt(session, canonicalExisting)
+          if (!prior || prior.sha256 !== currentSha256) {
+            throw new Error(existingExportRefusal(out))
+          }
+          replacedSha256 = currentSha256
         }
-        return runEngine({ cmd: 'export', binder: spec })
+        const guardedSpec = {
+          ...spec,
+          output_guard: replacedSha256
+            ? { sha256: replacedSha256 }
+            : { must_not_exist: true as const }
+        }
+        const result = await runEngine({ cmd: 'export', binder: guardedSpec })
+        if (result.ok) {
+          // Hash before releasing the path lease. If a non-cooperating process
+          // changes the file afterwards, the next call sees a mismatch rather
+          // than treating those bytes as ours.
+          const canonicalOut = realpathSync(out)
+          exportedArtifact = {
+            kind: 'binder_export',
+            path: canonicalOut,
+            sha256: await sha256File(canonicalOut)
+          }
+        }
+        return result
       })
     } catch (e) {
       return fail(String((e as Error).message))
     }
     if (!res.ok) return fail(`export failed: ${res.error}`)
     const r = res.result as { pages: number; marks: number; check_problems: string[] }
+    if (!exportedArtifact) return fail('export succeeded but its provenance hash could not be recorded')
+    mutating(
+      'export_binder',
+      `${replacedSha256 ? 'Replaced prior export' : 'Exported binder'} ${baseName(out)}: ` +
+        `${r.pages} page(s), ${r.marks} annotation(s)${flatten ? ', flattened' : ''}`,
+      false,
+      exportedArtifact
+    )
     return text(
-      `Exported ${r.pages} page(s) and ${r.marks} annotation(s)${flatten ? ' (flattened)' : ''} → ${out}\n` +
+      `${replacedSha256 ? 'Replaced prior export' : 'Exported'} ${r.pages} page(s) and ` +
+        `${r.marks} annotation(s)${flatten ? ' (flattened)' : ''} → ${out}\n` +
         (r.check_problems.length
           ? `qpdf validation: ${r.check_problems.length} problem(s): ${r.check_problems.join('; ')}`
           : 'qpdf validation: clean')

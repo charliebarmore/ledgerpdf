@@ -286,6 +286,32 @@ def export_binder(spec: dict) -> dict:
             if actual["sha256"] != expected.get("sha256"):
                 raise ValueError(f"source changed during export: {spec['sources'][key]}")
 
+        # MCP exports carry the destination state observed under their
+        # cross-process lease. Recheck it at the last possible moment: another
+        # program does not honor our lock and could save or create this path
+        # while the new PDF is being materialized. The assertion turns that
+        # race into a refusal rather than replacing a person's newer bytes.
+        output_guard = spec.get("output_guard")
+        if output_guard:
+            expected_output_sha256 = output_guard.get("sha256")
+            if expected_output_sha256 is not None:
+                if not output.exists():
+                    raise ValueError(
+                        "export destination changed while the replacement was being prepared"
+                    )
+                actual_output_sha256 = fingerprint_file(str(output))["sha256"]
+                if actual_output_sha256 != expected_output_sha256:
+                    raise ValueError(
+                        "export destination changed while the replacement was being prepared"
+                    )
+            elif output_guard.get("must_not_exist"):
+                if output.exists():
+                    raise ValueError(
+                        "export destination appeared while the export was being prepared"
+                    )
+            else:
+                raise ValueError("invalid export output guard")
+
         # Windows requires a writable handle to fsync: _commit() on a
         # read-only fd raises EBADF, where POSIX is happy to flush one.
         with temp_output.open("rb+") as handle:

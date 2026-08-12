@@ -34,6 +34,8 @@ const PACKAGE_VERSION = JSON.parse(readFileSync(path.join(APP, 'package.json'), 
 const OUT_PDF = path.join(REPO, 'spike', 'out', 'mcp_binder.pdf')
 const OUT_BINDER = path.join(REPO, 'spike', 'out', 'mcp_binder_saved.pdf')
 const EXISTING_BINDER = path.join(REPO, 'spike', 'out', 'mcp_existing.pdf')
+const MODIFIED_EXPORT = path.join(REPO, 'spike', 'out', 'mcp_modified_export.pdf')
+const UNRELATED_EXPORT = path.join(REPO, 'spike', 'out', 'mcp_unrelated_export.pdf')
 const IMAGE_OUT = path.join(REPO, 'spike', 'out', 'mcp_images.pdf')
 const MAIN_ACCESS = isolatedAgentAccess(
   path.join(REPO, 'spike', 'out', 'agent-profile-mcp'),
@@ -76,6 +78,8 @@ if (!existsSync(SERVER)) {
 rmSync(OUT_PDF, { force: true })
 rmSync(OUT_BINDER, { force: true })
 rmSync(EXISTING_BINDER, { force: true })
+rmSync(MODIFIED_EXPORT, { force: true })
+rmSync(UNRELATED_EXPORT, { force: true })
 rmSync(IMAGE_OUT, { force: true })
 
 const transport = new StdioClientTransport({
@@ -288,14 +292,85 @@ check(
   !exported.isError && exported.text.includes('validation: clean') && existsSync(OUT_PDF),
   exported.text
 )
-const refusedExportOverwrite = await call('binder_export', {
+const firstExport = readFileSync(OUT_PDF)
+
+// The safe iteration loop: further agent work may replace this binder's own
+// exact prior export at the same canonical path. Remove the temporary mark and
+// export once more so the downstream content assertions still exercise the
+// original two review marks.
+await call('binder_place_mark', {
+  pageId: pageIds[0],
+  kind: 'cross',
+  nx: 0.25,
+  ny: 0.25,
+  note: 'Temporary re-export check'
+})
+const afterTemporaryMark = await call('binder_annotations')
+const temporaryMarkId = [...afterTemporaryMark.text.matchAll(/\bmk_\d+\b/g)]
+  .map((match) => match[0])
+  .find((id) => !markIds.includes(id))
+const replacedExport = await call('binder_export', {
   output: OUT_PDF,
   pageCounts: true
 })
 check(
-  'binder_export refuses to overwrite an existing PDF',
-  refusedExportOverwrite.isError && /Refusing to overwrite/.test(refusedExportOverwrite.text),
-  refusedExportOverwrite.text.split('\n')[0]
+  'binder_export replaces its own byte-identical prior export after further agent work',
+  !replacedExport.isError &&
+    /Replaced prior export/.test(replacedExport.text) &&
+    !readFileSync(OUT_PDF).equals(firstExport),
+  replacedExport.text.split('\n')[0]
+)
+const exportHistory = await call('binder_history')
+check(
+  'the journal records the provenance-checked replacement',
+  /Replaced prior export mcp_binder\.pdf/.test(exportHistory.text),
+  exportHistory.text.split('\n').slice(-3).join(' | ')
+)
+check('the temporary re-export mark has an id', !!temporaryMarkId, afterTemporaryMark.text)
+if (temporaryMarkId) await call('binder_remove_marks', { markIds: [temporaryMarkId] })
+const restoredExport = await call('binder_export', { output: OUT_PDF, pageCounts: true })
+check(
+  'a second safe replacement succeeds after correcting the binder',
+  !restoredExport.isError && /Replaced prior export/.test(restoredExport.text),
+  restoredExport.text.split('\n')[0]
+)
+
+// Path provenance alone is not enough. Once anything changes the bytes at a
+// known export path, the server must leave those bytes untouched.
+const stagedModified = await call('binder_export', { output: MODIFIED_EXPORT })
+check('a separate export can be staged for the modification check', !stagedModified.isError)
+writeFileSync(
+  MODIFIED_EXPORT,
+  Buffer.concat([readFileSync(MODIFIED_EXPORT), Buffer.from('\n% byte-modified after export\n')])
+)
+const modifiedBytes = readFileSync(MODIFIED_EXPORT)
+const refusedModifiedExport = await call('binder_export', { output: MODIFIED_EXPORT })
+check(
+  'binder_export refuses a byte-modified copy of its prior export',
+  refusedModifiedExport.isError &&
+    /does not match this binder's last export/.test(refusedModifiedExport.text) &&
+    readFileSync(MODIFIED_EXPORT).equals(modifiedBytes),
+  refusedModifiedExport.text.split('\n')[0]
+)
+
+copyFileSync(OUT_PDF, UNRELATED_EXPORT)
+const unrelatedBytes = readFileSync(UNRELATED_EXPORT)
+const refusedUnrelatedExport = await call('binder_export', { output: UNRELATED_EXPORT })
+check(
+  'binder_export refuses an unrelated existing PDF even when its bytes match another path',
+  refusedUnrelatedExport.isError &&
+    /does not match this binder's last export/.test(refusedUnrelatedExport.text) &&
+    readFileSync(UNRELATED_EXPORT).equals(unrelatedBytes),
+  refusedUnrelatedExport.text.split('\n')[0]
+)
+const refusedPromisedOverwrite = await call('binder_export', {
+  output: UNRELATED_EXPORT,
+  overwrite: true
+})
+check(
+  'an overwrite flag cannot bypass export provenance',
+  refusedPromisedOverwrite.isError && readFileSync(UNRELATED_EXPORT).equals(unrelatedBytes),
+  refusedPromisedOverwrite.text.split('\n')[0]
 )
 
 const probe = await engine({ cmd: 'probe', path: OUT_PDF })
@@ -406,6 +481,15 @@ check(
   // dependency, so it still opens after they move.
   reopened.text.includes('1 source(s)') && reopened.text.includes('6 page(s)'),
   reopened.text.split('\n')[0]
+)
+const persistedExportProvenance = await call('binder_export', {
+  output: OUT_PDF,
+  pageCounts: true
+})
+check(
+  'export provenance survives save and reopen',
+  !persistedExportProvenance.isError && /Replaced prior export/.test(persistedExportProvenance.text),
+  persistedExportProvenance.text.split('\n')[0]
 )
 check(
   'an ordinary PDF with no session is refused as a binder, with what to do instead',
@@ -1090,6 +1174,24 @@ check(
 
 await call('binder_new')
 check('exporting an empty binder is refused', (await call('binder_export', { output: OUT_PDF })).isError)
+
+const atomicFailure = await new Promise((resolve) => {
+  const child = spawn(PY, [path.join(REPO, 'spike', 'verify_export_atomic.py')], {
+    cwd: REPO,
+    env: { ...process.env, PYTHONPATH: ENGINE }
+  })
+  let stdout = ''
+  let stderr = ''
+  child.stdout.on('data', (data) => (stdout += data))
+  child.stderr.on('data', (data) => (stderr += data))
+  child.once('error', (error) => resolve({ code: -1, stdout, stderr: String(error) }))
+  child.once('close', (code) => resolve({ code, stdout, stderr }))
+})
+check(
+  'a failure at atomic replacement leaves the prior export intact',
+  atomicFailure.code === 0,
+  `${atomicFailure.stdout}${atomicFailure.stderr}`.trim()
+)
 
 await client.close()
 
