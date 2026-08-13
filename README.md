@@ -114,6 +114,23 @@ is published under GPL-3.0 so you or your IT reviewer can verify the factual hal
 against the code rather than take it on trust;
 [`DATA-FLOW.md`](DATA-FLOW.md) sets out where every file goes.
 
+## Disclosures and support
+
+LedgerPDF is software, not accounting, tax, legal, investment, audit, assurance,
+or other professional advice. You remain responsible for reviewing its output,
+supervising agent work, protecting client information, and maintaining
+independent backups. Before using it with client data, read:
+
+- [`DISCLAIMER.md`](DISCLAIMER.md) — professional, review, AI, warranty, and
+  liability limitations;
+- [`PRIVACY.md`](PRIVACY.md) — local files, recents, optional agent access, the
+  website, and third-party services;
+- [`TERMS.md`](TERMS.md) — website and official-build distribution terms that do
+  not reduce the rights granted by GPL-3.0; and
+- [`SUPPORT.md`](SUPPORT.md) — how to report an issue without disclosing client
+  information. Suspected vulnerabilities belong in the private channel in
+  [`SECURITY.md`](SECURITY.md), not a public issue.
+
 ## Status
 
 **Alpha.** Used daily by its author on real engagements. Expect rough edges, and
