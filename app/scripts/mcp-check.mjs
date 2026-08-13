@@ -889,6 +889,13 @@ check(
     !queue.text.includes(ids[1]),
     queue.text
   )
+  await call('binder_set_status', { pageId: ids[0], status: 'reviewed' })
+  const resolvedQueue = await call('binder_review_queue')
+  check(
+    'reviewing after a note resolves it without deleting the evidence',
+    !resolvedQueue.text.includes(ids[0]),
+    resolvedQueue.text
+  )
 
   // A note is only useful if a reviewer meets it where they already look.
   const notePdf = path.join(REPO, 'spike', 'out', 'mcp_noted.pdf')

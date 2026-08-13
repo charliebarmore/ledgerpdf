@@ -5,14 +5,14 @@ permissions:
 
 on:
   workflow_dispatch:
-  # Skip documentation-only pushes, but always report the required check on a
-  # pull request so branch protection cannot deadlock waiting for a skipped job.
-  push:
-    branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'references/**'
+    inputs:
+      package:
+        description: 'Also build and verify the packaged app'
+        type: boolean
+        default: true
+  # Pull requests run the complete source suite, including the real Electron
+  # smoke and cross-viewer checks. Packaging is a release-candidate gate below,
+  # not something to pay for again on every intermediate commit.
   pull_request:
     branches: [main]
 
@@ -25,6 +25,8 @@ jobs:
     name: Verify and package on macOS
     runs-on: macos-15
     timeout-minutes: 50
+    env:
+      PACKAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.package }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -64,6 +66,7 @@ jobs:
         run: npm run verify:viewers
 
       - name: Package and verify clean app
+        if: env.PACKAGE == 'true'
         working-directory: app
         run: |
           npm run package:dir

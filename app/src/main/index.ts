@@ -1248,6 +1248,7 @@ function createWindow(): void {
         paths,
         exportTo,
         seedMarks: isDev && !!process.env.WPT_DEV_MARKS,
+        preflight: isDev && !!process.env.WPT_DEV_PREFLIGHT,
         reopen: isDev ? process.env.WPT_DEV_REOPEN : undefined,
         // A scripted run through the REAL placeTool, rather than around it.
         // WPT_DEV_MARKS above calls addMark directly, which is why placeTool

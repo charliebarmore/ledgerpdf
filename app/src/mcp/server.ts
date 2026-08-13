@@ -98,6 +98,7 @@ import {
   type ProbeWire,
   type Session
 } from '../renderer/src/session'
+import { reviewSnapshot } from '../renderer/src/review'
 
 // ------------------------------------------------------------------- state
 
@@ -1380,37 +1381,35 @@ function summaryMarkdown(narrative?: string, coverPages = 0): string {
   const pageOf = new Map(session.pages.map((p, i) => [p.id, i + 1 + coverPages]))
   const marks = session.marks ?? []
   const tapes = session.tapes ?? []
+  const shapes = session.shapes ?? []
+  const review = reviewSnapshot(session)
   const byKind = (k: string): number => marks.filter((m) => m.kind === k).length
-  const agentMade = marks.filter((m) => m.by === 'agent').length + tapes.filter((t) => t.by === 'agent').length
+  const agentMade = review.agentCreatedItems
 
   const sources = session.sources.map((src) => {
     const pages = session.pages.filter((p) => p.source === src.id).length
     return `| ${src.name} | ${src.kind} | ${pages} |`
   })
 
-  const outstanding: string[] = []
-  session.pages.forEach((p, i) => {
-    const st = statusOf(session, p.id)
-    const notes = marks.filter((m) => m.page === p.id && m.kind === 'note')
-    const crosses = marks.filter((m) => m.page === p.id && m.kind === 'cross')
-    if (st?.id === 'reviewed' && !notes.length && !crosses.length) return
-    if (!st && !notes.length && !crosses.length) return
-    outstanding.push(
-      `- **p.${i + 1 + coverPages}**${st ? ` — ${st.label}` : ''}` +
-        (crosses.length ? ` · ${crosses.length} cross(es)` : '') +
-        notes.map((n) => `\n  - ${n.note ?? ''}`).join('')
+  const outstanding = review.active.map((page) => {
+    const notes = page.findings.filter((finding) => finding.kind === 'note')
+    const crosses = page.findings.filter((finding) => finding.kind === 'cross')
+    return (
+      `- **p.${page.pageNumber + coverPages}**${page.status ? ` — ${page.status.label}` : ''}` +
+      (crosses.length ? ` · ${crosses.length} cross(es)` : '') +
+      notes.map((finding) => `\n  - ${finding.note ?? ''}`).join('')
     )
   })
 
-  const journal = session.journal ?? []
-  const runs = [...new Set(journal.map((e) => e.run).filter(Boolean))] as string[]
-  const runLines = runs.map((run) => {
-    const entries = journal.filter((e) => e.run === run)
-    const first = entries[0]?.at?.slice(0, 16).replace('T', ' ') ?? ''
-    const last = entries[entries.length - 1]?.at?.slice(11, 16) ?? ''
+  const runs = [...review.runs].filter((item) => item.run !== 'you').reverse()
+  const runLines = runs.map((item, index) => {
+    const first = item.firstAt?.slice(0, 16).replace('T', ' ') ?? ''
+    const last = item.lastAt?.slice(11, 16) ?? ''
     return (
-      `**Run ${runs.indexOf(run) + 1}** — ${first}${last ? `–${last}` : ''}, ${entries.length} action(s)\n` +
-      entries.map((e) => `- ${e.what}${e.structural ? ' *(not undoable)*' : ''}`).join('\n')
+      `**Run ${index + 1}** — ${first}${last ? `–${last}` : ''}, ${item.entries.length} action(s)\n` +
+      (item.entries.length
+        ? item.entries.map((entry) => `- ${entry.what}${entry.structural ? ' *(not undoable)*' : ''}`).join('\n')
+        : `- ${item.remainingItems} surviving item(s), no action log`)
     )
   })
 
@@ -1463,6 +1462,7 @@ function summaryMarkdown(narrative?: string, coverPages = 0): string {
     `- ${byKind('text')} lettered stamp(s)`,
     `- ${byKind('note')} review note(s)`,
     `- ${tapes.length} calculator tape(s)`,
+    `- ${shapes.length} drawn shape(s)`,
     ``,
     `**${agentMade} of these were placed by an agent.** Every one is attributed in`,
     `the exported PDF and can be removed with binder_revert_run.`,
@@ -2057,25 +2057,21 @@ registerTool(
     inputSchema: {}
   },
   async () => {
-    const defs = statusDefs(session)
-    const rows: string[] = []
-    session.pages.forEach((p, i) => {
-      const st = statusOf(session, p.id)
-      const notes = (session.marks ?? []).filter((m) => m.page === p.id && m.kind === 'note')
-      const crosses = (session.marks ?? []).filter((m) => m.page === p.id && m.kind === 'cross')
-      if (!st && !notes.length && !crosses.length) return
-      // "Reviewed" is not waiting on anyone; it is shown only when the page
-      // also carries something unresolved.
-      if (st?.id === 'reviewed' && !notes.length && !crosses.length) return
+    const review = reviewSnapshot(session)
+    const rows = review.active.map((page) => {
+      const notes = page.findings.filter((finding) => finding.kind === 'note')
+      const crosses = page.findings.filter((finding) => finding.kind === 'cross')
       const bits = [
-        `p.${i + 1}  ${p.id}`,
-        st ? `[${st.label}]` : '',
+        `p.${page.pageNumber}  ${page.pageId}`,
+        page.status ? `[${page.status.label}]` : '',
         crosses.length ? `${crosses.length} cross(es)` : '',
-        ...notes.map((n) => `\n      note: ${n.note ?? ''}${n.by === 'agent' ? '  (AI)' : ''}`)
+        ...notes.map((finding) =>
+          `\n      note: ${finding.note ?? ''}${finding.by === 'agent' ? '  (AI)' : ''}`
+        )
       ].filter(Boolean)
-      rows.push(bits.join('  '))
+      return bits.join('  ')
     })
-    const legend = `statuses in this binder: ${defs.map((d) => `${d.id} (${d.label})`).join(', ')}`
+    const legend = `statuses in this binder: ${review.statusDefs.map((d) => `${d.id} (${d.label})`).join(', ')}`
     return text(
       rows.length
         ? `${rows.length} page(s) need attention:\n\n${rows.join('\n')}\n\n${legend}`

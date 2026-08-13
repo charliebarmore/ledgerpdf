@@ -5,6 +5,23 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-13
+
+### Added
+
+- Added a Review Center that brings open notes and crosses, source coverage,
+  page-status progress, connector integrity, and agent-run history into one
+  reviewer workflow with direct page jumps and run-level undo.
+- Added a send-out preflight before permanent flattened copies are created,
+  separating items that need attention from advisories and requiring an
+  explicit second confirmation to send with open review items.
+
+### Changed
+
+- Made reviewer decisions time-aware: Reviewed or N/A resolves findings that
+  existed when the status was applied, while a later finding reopens the page
+  without deleting the earlier review evidence.
+
 ## [0.1.4] - 2026-08-12
 
 ### Fixed
@@ -73,7 +90,8 @@ Initial public alpha.
 - Added platform-independent MCP registration and complete macOS notarization
   credential handling.
 
-[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.2.0
 [0.1.4]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.4
 [0.1.3]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.3
 [0.1.2]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.2

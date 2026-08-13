@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookmarkPanel } from './components/BookmarkPanel'
-import { HistoryPanel } from './components/HistoryPanel'
+import { ReviewCenter, type ReviewTab } from './components/ReviewCenter'
+import { SendOutPreflight } from './components/SendOutPreflight'
 import { MarkInspector } from './components/MarkInspector'
 import { ShapeInspector } from './components/ShapeInspector'
 import { Keypad } from './components/Keypad'
@@ -91,6 +92,7 @@ import {
   type SourceDoc,
   type ToolKind
 } from './session'
+import { reviewSnapshot } from './review'
 
 const MOD = window.wpt.platform === 'darwin' ? '⌘' : 'Ctrl'
 
@@ -203,7 +205,10 @@ export default function App(): React.JSX.Element {
   const [markSize] = useState(MARK_SIZE_DEFAULT)
   const [shapeColor, setShapeColor] = useState<ShapeColor>('red')
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
-  const [historyOpen, setHistoryOpen] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewTab, setReviewTab] = useState<ReviewTab>('attention')
+  const [sendPreflightOpen, setSendPreflightOpen] = useState(false)
+  const [sendAnywayArmed, setSendAnywayArmed] = useState(false)
   const [liveOn, setLiveOn] = useState(false)
   /**
    * The initials question, open.
@@ -246,6 +251,7 @@ export default function App(): React.JSX.Element {
   const pages = session.pages
   /** Annotations an agent placed, so the status bar can say so on open. */
   const aiCount = agentCreatedItems(session)
+  const review = useMemo(() => reviewSnapshot(session), [session])
   const serializedSession = useMemo(() => JSON.stringify(session), [session])
   /** Monotonic guard against a stale agent replacing newer user/agent work. */
   const liveRevision = useRef(0)
@@ -1294,7 +1300,7 @@ export default function App(): React.JSX.Element {
    * no editable session inside. Deliberately a separate destination — it must
    * never overwrite the working binder.
    */
-  const saveCopyToSendOut = useCallback(async () => {
+  const writeCopyToSendOut = useCallback(async () => {
     if (!pages.length) return setStatus('Nothing to send yet — add some pages.')
     const out = await window.wpt.chooseBinderOutput(`${binderStem} (copy to send).pdf`)
     if (!out) return
@@ -1311,6 +1317,13 @@ export default function App(): React.JSX.Element {
     }
     await writeBinder(session, out, { flatten: true, reveal: true })
   }, [session, pages.length, binderPath, binderStem, writeBinder])
+
+  /** Show what the binder itself can prove before making the permanent copy. */
+  const saveCopyToSendOut = useCallback(() => {
+    if (!pages.length) return setStatus('Nothing to send yet — add some pages.')
+    setSendAnywayArmed(false)
+    setSendPreflightOpen(true)
+  }, [pages.length])
 
   /** Load a session into the editor, replacing whatever is open. */
   const adoptSession = useCallback(
@@ -1552,7 +1565,7 @@ export default function App(): React.JSX.Element {
     agentPanelOpen
   }
   useEffect(() => {
-    window.wpt.onDevOpen(async ({ paths, exportTo, seedMarks, reopen, place, openRecent }) => {
+    window.wpt.onDevOpen(async ({ paths, exportTo, seedMarks, preflight, reopen, place, openRecent }) => {
       let imported = await devRefs.current.importPaths(paths)
       // A scripted run through the REAL placement path. `seedMarks` above calls
       // addMark directly, which is exactly why placeTool went uncovered and
@@ -1910,27 +1923,26 @@ export default function App(): React.JSX.Element {
           size: 24,
           text: 'TB'
         }).session
-        // One mark placed as an agent would place it, so the smoke covers the
+        // One finding placed as an agent would place it, so the smoke covers the
         // attribution path end to end: stamped in the model, shown in the UI,
         // and exported as "(AI)" rather than under the reviewer's initials.
-        // On page 1, not page 0: this is a green tick, and page 0's green
-        // centroid check would then average two green objects. Same "one
-        // asserted colour per page" rule the conformance harness follows.
+        // It is a note rather than another agreed tick so the window snapshot
+        // also exercises the Review Center's real exception path and wrapping.
         {
           const run = beginRun(imported)
           // Journal it as the MCP server does, so the smoke exercises the
           // stamp AND the action log rather than only the stamp.
           const logged = record(run.session, {
             action: 'place_mark',
-            what: 'Ticked the wages figure on page 2'
+            what: 'Flagged the wages figure for reviewer follow-up on page 2'
           })
           const agent = addMark(logged, {
             page: imported.pages[1].id,
-            kind: 'tick',
+            kind: 'note',
             nx: 0.28,
             ny: 0.62,
             size: 24,
-            note: 'Placed by an agent'
+            note: 'Confirm the wages figure agrees to the final W-2 summary before sign-off.'
           })
           imported = endRun(agent.session)
         }
@@ -1959,7 +1971,13 @@ export default function App(): React.JSX.Element {
       }
       // Report what loaded, not merely that we got here — an import that threw
       // lands on this line too, with `imported` still undefined.
-      if (seedMarks) setHistoryOpen(true)
+      if (seedMarks) {
+        if (preflight) setSendPreflightOpen(true)
+        else {
+          setReviewTab('attention')
+          setReviewOpen(true)
+        }
+      }
       // Dev seam: reopen what was just written. The single-file reopen path is
       // the primary flow now and had no headless coverage, which is how a
       // refused readSource reached a person before a check did.
@@ -2061,6 +2079,15 @@ export default function App(): React.JSX.Element {
       // and OS's modifier shortcuts.
       if (!mod && !e.repeat) {
         if (e.key === 'Escape') {
+          if (sendPreflightOpen) {
+            setSendPreflightOpen(false)
+            setSendAnywayArmed(false)
+            return
+          }
+          if (reviewOpen) {
+            setReviewOpen(false)
+            return
+          }
           setArmed(null)
           setSelectedMarkId(null)
           setSelectedShapeId(null)
@@ -2123,7 +2150,9 @@ export default function App(): React.JSX.Element {
     deleteShape,
     selectedMarkId,
     selectedShapeId,
-    initialsPrompt
+    initialsPrompt,
+    reviewOpen,
+    sendPreflightOpen
   ])
 
   /** Drag the divider to widen the bookmark panel — real titles are long.
@@ -2504,13 +2533,6 @@ export default function App(): React.JSX.Element {
                   setSelected(new Set([id]))
                 }}
               />
-              {historyOpen && (
-                <HistoryPanel
-                  session={session}
-                  onClose={() => setHistoryOpen(false)}
-                  onRevert={revertAgentRun}
-                />
-              )}
               {selectedMark && (
                 <MarkInspector mark={selectedMark} onChange={editMark} onDelete={deleteMark} />
               )}
@@ -2563,6 +2585,55 @@ export default function App(): React.JSX.Element {
           </>
         )}
       </div>
+
+      {reviewOpen && (
+        <ReviewCenter
+          snapshot={review}
+          tab={reviewTab}
+          onTab={setReviewTab}
+          onClose={() => setReviewOpen(false)}
+          onJump={(pageId) => {
+            setCurrentId(pageId)
+            setSelected(new Set([pageId]))
+            setReviewOpen(false)
+          }}
+          onResolve={(pageId, nextStatus) => {
+            const label = defs.find((definition) => definition.id === nextStatus)?.label ?? nextStatus
+            apply(
+              setPageStatus(session, [pageId], nextStatus, reviewerInitials),
+              `Page ${pages.findIndex((page) => page.id === pageId) + 1} marked "${label}".`
+            )
+          }}
+          onRevert={revertAgentRun}
+        />
+      )}
+
+      {sendPreflightOpen && (
+        <SendOutPreflight
+          snapshot={review}
+          confirmAnyway={sendAnywayArmed}
+          onArmAnyway={() => {
+            if (!sendAnywayArmed) return setSendAnywayArmed(true)
+            setSendPreflightOpen(false)
+            setSendAnywayArmed(false)
+            void writeCopyToSendOut()
+          }}
+          onReview={() => {
+            setSendPreflightOpen(false)
+            setSendAnywayArmed(false)
+            setReviewTab('attention')
+            setReviewOpen(true)
+          }}
+          onContinue={() => {
+            setSendPreflightOpen(false)
+            void writeCopyToSendOut()
+          }}
+          onClose={() => {
+            setSendPreflightOpen(false)
+            setSendAnywayArmed(false)
+          }}
+        />
+      )}
 
       {/* The backdrop is not decoration. Without it the page stays live behind
           the question, and a click meant for the dialog lands on the binder and
@@ -2672,6 +2743,21 @@ export default function App(): React.JSX.Element {
               {' '}· <b>{session.shapes.length}</b> shape{session.shapes.length === 1 ? '' : 's'}
             </>
           ) : null}
+          {pages.length ? (
+            <>
+              {' '}·{' '}
+              <button
+                className={`review-count link${review.active.length ? ' has-open' : ''}`}
+                onClick={() => {
+                  setReviewTab('attention')
+                  setReviewOpen(true)
+                }}
+                title="Open the Review Center: exceptions, coverage, and agent work"
+              >
+                Review · {review.active.length} open
+              </button>
+            </>
+          ) : null}
           {/* Opening a binder an agent worked on should say so without being
               asked. A reviewer signing this file needs to know before they
               scroll, not after. */}
@@ -2680,7 +2766,10 @@ export default function App(): React.JSX.Element {
               {' '}·{' '}
               <button
                 className="ai-count link"
-                onClick={() => setHistoryOpen((v) => !v)}
+                onClick={() => {
+                  setReviewTab('ai')
+                  setReviewOpen(true)
+                }}
                 title={`${aiCount} AI-created page item${aiCount === 1 ? '' : 's'}: marks, tapes and shapes. Click to see logged actions or undo a run.`}
               >
                 {aiCount} AI-created item{aiCount === 1 ? '' : 's'}
