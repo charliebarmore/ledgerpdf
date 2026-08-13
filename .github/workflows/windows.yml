@@ -3,15 +3,15 @@ name: Windows x64
 permissions:
   contents: read
 
-# Windows is the primary platform, so it is tested on every change to code —
-# not only when someone remembers to ask. Two sessions of manual runs found
+# Windows is the primary platform, so its source suite runs on every pull
+# request. Two sessions of manual runs found
 # eight problems invisible from macOS (path separators, named pipes, POSIX file
 # modes, GUI-subsystem stdout), every one of them latent for days.
 #
-# Docs-only pushes are skipped: a README cannot break a build, and a full run
-# bills at 2x for the Windows runner. Pull requests still run this required
-# check, even when documentation-only; otherwise branch protection waits for a
-# status that GitHub never creates and the PR cannot be merged normally.
+# Installer construction and installed-app verification remain mandatory for a
+# release candidate, but are manual-only. Running them for every feature PR and
+# then again after every merge was consuming the Actions budget without adding
+# a distinct release decision.
 on:
   workflow_dispatch:
     inputs:
@@ -19,15 +19,6 @@ on:
         description: 'Also upload the packaged app and installer as artifacts'
         type: boolean
         default: true
-  push:
-    branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'references/**'
-      - 'templates/**'
-      - 'LICENSE'
-      - '.gitignore'
   pull_request:
     branches: [main]
 
@@ -44,12 +35,10 @@ jobs:
     timeout-minutes: 45
 
     env:
-      # Packaging runs on EVERY trigger. It is ~2 minutes of the ~6, and it is
-      # where the interesting Windows failures actually live: a GUI-subsystem
-      # binary whose stdout never reaches the parent, a smoke run defeated by
-      # the single-instance lock. Verifying only the unpackaged app would have
-      # caught none of them.
-      PACKAGE: ${{ github.event_name != 'workflow_dispatch' || inputs.package }}
+      # Packaging remains a real gate, but only for an explicitly dispatched
+      # release-candidate run. Ordinary PRs still exercise Windows paths, named
+      # pipes, the sidecar and the Electron GUI through `npm run verify`.
+      PACKAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.package }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -146,7 +135,7 @@ jobs:
       # screenshot of the packaged app actually running on Windows, and an
       # artifact an external tester could install.
       - name: Upload evidence
-        if: always()
+        if: failure() || (github.event_name == 'workflow_dispatch' && inputs.package)
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

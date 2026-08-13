@@ -34,10 +34,10 @@ npm run verify     # typecheck + model verification + GUI smoke test
 |---|---|
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 8 checks proving atomic session replacement, private POSIX permissions, recovery, temporary-file cleanup, and shell-independent installed MCP registration |
-| `verify:model` | 259 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity, owner-only working copies, atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, and flattening) |
+| `verify:model` | 274 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity, owner-only working copies, atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, flattening, and review/preflight decisions) |
 | `verify:text` | 68 checks that extracted/OCR text lands where the text actually is — against fixture coordinates and rendered pixels, including hostile page geometry |
-| `verify:live` | 13 checks that an agent and the running app share ONE binder, plus socket permissions, authentication, approved roots, saving, follow behavior, and forged-push containment |
-| `verify:closed-window` | 3 macOS checks that a live agent receives an actionable error when the binder window closes and succeeds after it reopens (other platforms quit when their last window closes) |
+| `verify:live` | 14 checks that an agent and the running app share ONE binder, plus socket permissions, authentication, approved roots, saving, follow behavior, and forged-push containment |
+| `verify:closed-window` | 4 macOS checks that a live agent receives an actionable error when the binder window closes and succeeds after it reopens (other platforms quit when their last window closes) |
 | `verify:mcp` | more than 100 checks driving the **MCP server** as a real client through a whole binder build, its filesystem guardrails, and its page-text privacy disclosure |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | reads every Electron fuse from the packaged binary, launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, confirms the renderer loaded from `ledgerpdf://app`, renders a synthetic PDF, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
@@ -433,7 +433,9 @@ otherwise the finding dies in a chat log.
   shows in the thumbnail rail and bookmark tree while a person scrolls.
 - **`binder_review_queue`** lists everything waiting on a person, in binder
   order, with the note text and who left it. A page marked reviewed with
-  nothing outstanding stays out of it.
+  nothing outstanding stays out of it. Reviewed/N/A resolves findings that
+  existed when the status was applied; a later note or cross reopens the page,
+  so a new agent finding cannot hide behind an older reviewer decision.
 
 Notes carry attribution like every other agent artifact, so the exported
 annotation reads `ABC (AI)`.
@@ -471,8 +473,9 @@ their own — and take it back out.
   Deliberately agent-only: journaling every human keystroke would turn an
   engagement record into an input log without answering the question anyone
   asks of it.
-- The status bar says **"N by AI"** on open, and the mark inspector names the
-  placer. Nobody has to go looking.
+- The status bar says **"N AI-created items"** on open, and the mark inspector
+  names the placer. Clicking the count opens the Review Center directly on the
+  run history. Nobody has to go looking.
 - In the exported PDF the visible author becomes `ABC (AI)` — the raw initials
   stay in `/WPT_Data`. Without this an agent placing marks under the reviewer's
   initials would appear in Acrobat as the reviewer: a person's signature on work
@@ -752,6 +755,22 @@ whole feature untrustworthy.
 
 Removing a status from the legend clears it from every page holding it, rather
 than leaving those pages pointing at something that no longer exists.
+
+## Review Center
+
+The status bar always names how many pages have open review work. Clicking it
+opens one reviewer pass with three views, all derived from the saved session:
+
+- **Needs attention** walks notes and crosses in binder order, preserves the
+  full note text, and can jump to the page or mark it Reviewed/N/A in place.
+- **Coverage** accounts for imported source pages, page-status progress, stale
+  cover text, incomplete connectors, and page items missing reviewer initials.
+- **AI work** groups the journal by run and makes the exact surviving Undo count
+  visible beside the actions and any structural changes that cannot be undone.
+
+The desktop view, `binder_review_queue`, generated cover summary, and send-out
+preflight all call the same pure `reviewSnapshot()`. This is the important part:
+four review surfaces cannot quietly develop four definitions of "open."
 
 ## Drawn annotations
 
@@ -1137,7 +1156,11 @@ departure from it is something a preparer has to be taught.
 - **Save a copy to send out** writes the copy that leaves the firm: marks
   flattened into the page content, nothing a recipient can drag or delete, and
   **no session inside**. It is a different destination, never the working
-  binder, and it cannot be reopened for editing. That is the point of it.
+  binder, and it cannot be reopened for editing. Before the file picker opens,
+  a preflight names open findings, incomplete connectors, a stale cover,
+  source-page differences, unset statuses, and missing initials. Attention
+  items take a deliberate second confirmation to send anyway; advisories remain
+  professional judgment rather than hard blocks. That is the point of it.
 
 If someone later opens that send-out copy in LedgerPDF, the app identifies it
 before importing and explains that the existing marks and note icons are

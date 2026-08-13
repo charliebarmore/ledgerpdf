@@ -159,6 +159,7 @@ const api = {
       paths: string[]
       exportTo?: string
       seedMarks?: boolean
+      preflight?: boolean
       reopen?: string
       place?: string
       openRecent?: boolean

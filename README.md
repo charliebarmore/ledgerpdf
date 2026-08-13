@@ -32,6 +32,10 @@ tapes that show their addends, and link a figure to the page that supports it.
   server exposing the same model the UI drives, so an agent reads pages, finds a
   figure by name, and marks the binder you have open. Everything it does is
   attributed to the AI, journalled, and revertible.
+- **A review pass before the file leaves.** The Review Center walks open notes
+  and crosses, source coverage, page statuses, connector integrity, and every
+  agent run. Creating a permanent send-out copy shows those same checks first;
+  it does not quietly turn unfinished work into a delivery file.
 
 ## Where your data goes
 
@@ -130,7 +134,7 @@ solves that — what remains is one publisher warning, described below.
 ### Getting a build
 
 Download the current installers and checksums from the
-**[LedgerPDF v0.1.3 release](https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.3)**.
+**[LedgerPDF v0.2.0 release](https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.2.0)**.
 
 On **macOS**, download the `.dmg` or the `.zip`, open it, and drag LedgerPDF to
 Applications. It is notarized and stapled, so it launches with no warning.
@@ -156,10 +160,12 @@ Two other ways to run it, in order of effort:
 1. **A test CI build**, if you have access to this repository. Go to the **Windows
    x64** workflow under the Actions tab and **"Run workflow"** with `package`
    ticked — the installer is attached only on a manual dispatch, deliberately,
-   because uploading a ~140 MB installer on every push burns the storage quota.
-   Ordinary pushes still build, package and verify; they just attach evidence
-   rather than a download. Artifacts expire after 3 days and are **unsigned:
-   for pilot testing, not for redistribution.**
+   because building installers for every pull request burns runner minutes and
+   uploading a ~140 MB installer each time burns storage. Pull requests still
+   run the complete source and Electron smoke suites on Windows and macOS;
+   packaging and installed-app verification are release-candidate gates.
+   Artifacts expire after 3 days and are **unsigned: for pilot testing, not for
+   redistribution.**
 2. **From source**, below. Works on macOS and Windows and takes about five
    minutes on a machine that already has Node and Python.
 

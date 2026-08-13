@@ -98,6 +98,12 @@ import {
   type ProbeWire,
   type Session
 } from '../src/renderer/src/session'
+import {
+  connectorIssues,
+  reviewPages,
+  reviewRuns,
+  reviewSnapshot
+} from '../src/renderer/src/review'
 
 const APP = path.resolve(__dirname, '..')
 const REPO = path.resolve(APP, '..')
@@ -1949,6 +1955,131 @@ async function main(): Promise<number> {
         noBorder.annotations.filter((a) => a.kind === 'statusstamp').length === 2
       )
     })()
+  )
+
+  // --- one review truth for the desktop, MCP queue, cover and send-out gate
+  const reviewBase: Session = {
+    ...s,
+    // Earlier model checks deliberately delete a page from `s`. This review
+    // fixture starts from a self-consistent inventory so its own omission test
+    // controls the one missing page rather than inheriting that setup detail.
+    sources: s.sources.map((source) => ({
+      ...source,
+      nPages: s.pages.filter((page) => page.source === source.id).length
+    })),
+    reviewer: 'RV',
+    marks: [
+      {
+        id: 'mk_review_old', page: s.pages[0].id, kind: 'note', nx: 0.5, ny: 0.2,
+        size: 20, author: 'RV', note: 'Resolved before sign-off', created: '2026-08-13T10:00:00Z'
+      },
+      {
+        id: 'mk_review_late', page: s.pages[1].id, kind: 'note', nx: 0.5, ny: 0.2,
+        size: 20, author: 'RV', note: 'Arrived after sign-off', created: '2026-08-13T12:00:00Z'
+      },
+      {
+        id: 'mk_review_cross', page: s.pages[3].id, kind: 'cross', nx: 0.5, ny: 0.2,
+        size: 20, author: 'RV', created: '2026-08-13T10:00:00Z'
+      },
+      {
+        id: 'mk_review_na', page: s.pages[4].id, kind: 'note', nx: 0.5, ny: 0.2,
+        size: 20, author: 'RV', note: 'Documented N/A', created: '2026-08-13T10:00:00Z'
+      }
+    ],
+    tapes: [], shapes: [], links: [], bookmarks: [],
+    statusDefs: [
+      ...statusDefs(s),
+      { id: 'prepared', label: 'Prepared', color: 'blue' }
+    ],
+    statuses: {
+      [s.pages[0].id]: { status: 'reviewed', by: 'RV', at: '2026-08-13T11:00:00Z' },
+      [s.pages[1].id]: { status: 'reviewed', by: 'RV', at: '2026-08-13T11:00:00Z' },
+      [s.pages[2].id]: { status: 'open', by: 'RV', at: '2026-08-13T11:00:00Z' },
+      [s.pages[4].id]: { status: 'na', by: 'RV', at: '2026-08-13T11:00:00Z' }
+    }
+  }
+  const review = reviewSnapshot(reviewBase)
+  check(
+    'open review work is attention; missing page statuses are advisory',
+    review.readiness.some((finding) => finding.kind === 'open-items' && finding.level === 'attention') &&
+      review.readiness.some((finding) => finding.kind === 'without-status' && finding.level === 'advisory')
+  )
+  check(
+    'review status resolves an older finding but a later finding reopens the page',
+    review.resolved.some((p) => p.pageId === s.pages[0].id) &&
+      review.active.some((p) => p.pageId === s.pages[1].id)
+  )
+  check(
+    'N/A resolves documented findings, while Open remains active',
+    review.resolved.some((p) => p.pageId === s.pages[4].id) &&
+      review.active.some((p) => p.pageId === s.pages[2].id)
+  )
+  check(
+    'a custom workflow status is not mistaken for reviewer sign-off',
+    reviewPages({
+      ...reviewBase,
+      statuses: {
+        ...reviewBase.statuses,
+        [s.pages[4].id]: { status: 'prepared', by: 'RV', at: '2026-08-13T11:00:00Z' }
+      }
+    }).active.some((p) => p.pageId === s.pages[4].id)
+  )
+  check(
+    'the shared review queue has three active pages and two resolved pages',
+    review.active.length === 3 && review.resolved.length === 2,
+    JSON.stringify({ active: review.active.map((p) => p.pageNumber), resolved: review.resolved.map((p) => p.pageNumber) })
+  )
+  check(
+    'a complete source reports all imported pages accounted for',
+    review.sources.every((src) => src.leftOut === 0 && src.extra === 0)
+  )
+  check(
+    'removing an imported page appears as source coverage, not a silent omission',
+    (() => {
+      const short = reviewSnapshot({ ...reviewBase, pages: reviewBase.pages.slice(1) })
+      return short.sources.some((src) => src.leftOut === 1) &&
+        short.readiness.some((finding) => finding.kind === 'source-coverage')
+    })()
+  )
+  check(
+    'missing reviewer initials are called out by the readiness model',
+    reviewSnapshot({
+      ...reviewBase,
+      marks: reviewBase.marks!.map((mark, i) => i === 0 ? { ...mark, author: '' } : mark)
+    }).readiness.some((finding) => finding.kind === 'missing-attribution' && finding.count === 1)
+  )
+  check(
+    'cover freshness is part of the same review snapshot',
+    !reviewSnapshot({ ...reviewBase, cover: { path: 'cover.pdf', pages: reviewBase.pages.map((p) => p.id).join(',') } }).coverStale &&
+      reviewSnapshot({ ...reviewBase, cover: { path: 'cover.pdf', pages: reviewBase.pages.slice(1).map((p) => p.id).join(',') } }).coverStale
+  )
+
+  let paired: Session = { ...s, reviewer: 'RV', marks: [], links: [], tapes: [], shapes: [], bookmarks: [] }
+  paired = placeConnector(paired, { page: s.pages[0].id, nx: 0.2, ny: 0.2, size: 20, label: '1' }).session
+  check(
+    'one connector end is an integrity issue on a named binder page',
+    connectorIssues(paired)[0]?.kind === 'unpaired' && connectorIssues(paired)[0]?.pageNumbers[0] === 1
+  )
+  paired = placeConnector(paired, { page: s.pages[1].id, nx: 0.2, ny: 0.2, size: 20, label: '1' }).session
+  check('a reciprocal two-ended connector is complete', connectorIssues(paired).length === 0)
+  check(
+    'a connector whose navigation links were stripped is reported as broken',
+    connectorIssues({ ...paired, links: [] })[0]?.kind === 'broken-reference'
+  )
+
+  const runSession: Session = {
+    ...reviewBase,
+    marks: [{ ...reviewBase.marks![0], by: 'agent', run: 'run_review' }],
+    journal: [{
+      id: 'jr_review', at: '2026-08-13T10:00:00Z', by: 'agent', run: 'run_review',
+      action: 'place_mark', what: 'Placed a review note'
+    }]
+  }
+  check(
+    'agent runs are discovered from both the journal and surviving stamped work',
+    reviewRuns(runSession)[0]?.run === 'run_review' &&
+      reviewRuns(runSession)[0]?.remainingItems === 1 &&
+      reviewRuns(runSession)[0]?.pageIds[0] === s.pages[0].id
   )
   const statExport = await runEngine({
     cmd: 'export',

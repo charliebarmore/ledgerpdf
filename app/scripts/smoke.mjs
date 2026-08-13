@@ -259,7 +259,7 @@ if (existsSync(OUT_PDF)) {
     JSON.stringify(marks.map((m) => [m.wpt_kind, m.wpt_data?.author, m.wpt_data?.text]))
   )
   check(
-    'an agent-placed mark is attributed to the AI in the exported PDF',
+    'an agent finding is attributed to the AI in the exported PDF',
     marks.filter((m) => (m.author ?? '').includes('(AI)')).length === 1,
     JSON.stringify(marks.map((m) => [m.wpt_kind, m.author]))
   )

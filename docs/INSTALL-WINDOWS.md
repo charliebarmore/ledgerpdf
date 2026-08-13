@@ -26,10 +26,11 @@ repository, open the **Actions** tab → **Windows x64** → **Run workflow**, l
 (~7 minutes). A CI build is verified by that run alone and expires in three
 days, so test with it rather than handing it on.
 
-The installer is attached **only** to a manually dispatched run. Ordinary pushes
-build and verify the package but do not upload it — a ~140 MB artifact on every
-push would exhaust the storage quota. If you open the newest run and find no
-installer, that is why: dispatch one.
+The installer is built and attached **only** to a manually dispatched run.
+Pull requests run the Windows source and Electron smoke suites without building
+an installer; packaging, registration and uninstall verification are explicit
+release-candidate gates. If you open the newest run and find no installer, that
+is why: dispatch one.
 
 Artifacts expire after 3 days.
 
