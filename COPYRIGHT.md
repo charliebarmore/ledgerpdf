@@ -15,9 +15,12 @@ PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 ## Why GPL-3.0
 
-LedgerPDF's central claim is that **nothing leaves your machine** — no telemetry,
-no cloud, no account. For a tool holding client tax records under IRC §7216 and
-the FTC Safeguards Rule, that claim is only worth what it can be checked against.
+LedgerPDF's central claim is that **the application makes no network calls** —
+no telemetry, no cloud, no account. (An MCP client you connect is a separate
+program, and what it sends to a model is your configuration choice, stated
+plainly in `DATA-FLOW.md`.) For a tool holding client tax records under IRC
+§7216 and the FTC Safeguards Rule, that claim is only worth what it can be
+checked against.
 A public repository under a copyleft licence means a firm's own IT reviewer can
 verify it rather than take our word, and that anyone shipping a modified LedgerPDF
 has to publish their changes too.

@@ -44,6 +44,7 @@ export interface LiveHooks {
   pull: () => Promise<{
     session: unknown
     path: string | null
+    documentId?: string
     currentPage?: string | null
     revision?: number
   }>
@@ -148,6 +149,7 @@ export async function startLive(hooks: LiveHooks): Promise<LiveHandle> {
                 ok: true,
                 session: got.session,
                 path: got.path,
+                documentId: got.documentId,
                 currentPage: got.currentPage ?? null,
                 revision: got.revision
               })

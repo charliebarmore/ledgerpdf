@@ -102,3 +102,10 @@ confirmation rather than a new risk. Pages 2 (CropBox ≠ MediaBox) and 3
       whether Acrobat on Windows does anything similar. A binder is a record.
 - [ ] Try a real multi-hundred-page file if one is handy: the continuous
       scroller windows its rendering, and Windows is where that will be slowest.
+- [ ] **Cold-start file association (fixed 2026-08-14, verify on hardware):**
+      with LedgerPDF fully closed, right-click a binder → Open with → LedgerPDF.
+      The binder must open — before the fix the app launched empty, because
+      nothing read the path Explorer put in argv, and the same action with the
+      app already running worked (second-instance), so casual testing passed.
+      Also run `LedgerPDF.exe "C:\path\to\binder.pdf"` from a terminal with no
+      instance running.

@@ -255,6 +255,13 @@ export default function App(): React.JSX.Element {
   const serializedSession = useMemo(() => JSON.stringify(session), [session])
   /** Monotonic guard against a stale agent replacing newer user/agent work. */
   const liveRevision = useRef(0)
+  /**
+   * Identity of the binder in this window, separate from its path. Two fresh
+   * binders can both be unsaved, and Save As changes a path without changing
+   * the document. A live MCP process uses this boundary to start a new run
+   * when the person actually replaces the binder.
+   */
+  const liveDocumentId = useRef(crypto.randomUUID())
   const liveRevisionSession = useRef(serializedSession)
   if (liveRevisionSession.current !== serializedSession) {
     liveRevisionSession.current = serializedSession
@@ -282,6 +289,29 @@ export default function App(): React.JSX.Element {
   /** Every mutation goes through here so undo/redo is never bypassed. */
   const apply = useCallback((next: Session, note?: string) => {
     setSession((prev) => {
+      past.current = [...past.current.slice(-49), prev]
+      future.current = []
+      return next
+    })
+    if (note) setStatus(note)
+  }, [])
+
+  /**
+   * Like `apply`, but the mutation runs against the session React holds at
+   * commit time instead of this render's closure.
+   *
+   * Any path that AWAITS between reading `session` and applying is a lost-
+   * update window: an agent push landing during the await was silently
+   * replaced by a next-state computed from the pre-push world — the agent was
+   * told ok, its marks and journal entries vanished, and only ⌘Z knew.
+   * The agent side has a revision guard for the mirror-image race; this is
+   * the same care in the other direction. Synchronous click handlers can keep
+   * using `apply` — React flushes discrete events before a push can land.
+   */
+  const applyWith = useCallback((mutate: (prev: Session) => Session, note?: string) => {
+    setSession((prev) => {
+      const next = mutate(prev)
+      if (next === prev) return prev
       past.current = [...past.current.slice(-49), prev]
       future.current = []
       return next
@@ -335,8 +365,22 @@ export default function App(): React.JSX.Element {
    * change would drop requests already in flight.
    */
   const openRef = useRef<(target?: string) => Promise<void>>(async () => {})
-  const liveRefs = useRef({ session, binderPath, apply, currentId, revision: liveRevision.current })
-  liveRefs.current = { session, binderPath, apply, currentId, revision: liveRevision.current }
+  const liveRefs = useRef({
+    session,
+    binderPath,
+    apply,
+    currentId,
+    revision: liveRevision.current,
+    documentId: liveDocumentId.current
+  })
+  liveRefs.current = {
+    session,
+    binderPath,
+    apply,
+    currentId,
+    revision: liveRevision.current,
+    documentId: liveDocumentId.current
+  }
   /**
    * When the person last touched the app, for follow-the-agent. A live agent's
    * change carries the page it acted on, and the view follows it there — that
@@ -404,6 +448,7 @@ export default function App(): React.JSX.Element {
         window.wpt.liveReply(req.id, {
           session: liveRefs.current.session,
           path: liveRefs.current.binderPath,
+          documentId: liveRefs.current.documentId,
           // What the person is actually looking at, so "why did you flag this
           // one?" resolves without them reading a page id off the screen.
           currentPage: liveRefs.current.currentId,
@@ -427,7 +472,10 @@ export default function App(): React.JSX.Element {
       // `apply`, not setSession: an agent's change lands on the undo stack and
       // autosaves exactly like a click, so a person can take it back with the
       // undo they already know and never sees a change they cannot reverse.
-      const pushed = req.payload as Session
+      // endRun strips any run id the server let through: if activeRun survives
+      // into this session, stamp() marks the person's own work as the
+      // agent's, and reverting the run deletes it.
+      const pushed = endRun(req.payload as Session)
       // Close the race before React renders the pushed state. A second agent
       // holding the same prior revision must fail even if its IPC event arrives
       // in this narrow gap.
@@ -510,7 +558,7 @@ export default function App(): React.JSX.Element {
       if (paths.length === 0) return null
       setBusy(true)
       try {
-        let next = session
+        const probes: ProbeWire[] = []
         const failed: string[] = []
         // What the engine had to guess or truncate. A file that imported but
         // not exactly as written is not a failure and must not be reported as
@@ -521,25 +569,32 @@ export default function App(): React.JSX.Element {
           const res = await window.wpt.probe(p)
           if (res.ok && res.probe) {
             const probe = res.probe as ProbeWire
-            next = addSource(next, probe)
+            probes.push(probe)
             for (const w of probe.sheet?.warnings ?? []) caveats.push(w)
           } else {
             failed.push(`${baseName(p)}: ${res.error ?? 'unreadable'}`)
           }
         }
-        if (next !== session) {
-          apply(next, `Added ${paths.length - failed.length} file(s).`)
-          setCurrentId((cur) => cur ?? next.pages[0]?.id ?? null)
+        let preview: Session | null = null
+        if (probes.length) {
+          // The probes above took real time — an agent may have pushed while
+          // the engine read the files. Fold the imports into whatever session
+          // is CURRENT, never the one this closure was rendered with.
+          applyWith((prev) => probes.reduce(addSource, prev), `Added ${probes.length} file(s).`)
+          // The closure-based preview serves only the return value and the
+          // first-page fallback; the committed state above is the truth.
+          preview = probes.reduce(addSource, session)
+          setCurrentId((cur) => cur ?? preview!.pages[0]?.id ?? null)
         }
         // Failures first: not adding a file at all is the bigger news.
         if (failed.length) setStatus(`Could not add — ${failed.join('; ')}`)
         else if (caveats.length) setStatus(caveats.join(' · '))
-        return next === session ? null : next
+        return preview
       } finally {
         setBusy(false)
       }
     },
-    [session, apply]
+    [session, applyWith]
   )
 
   const addViaDialog = useCallback(async () => {
@@ -569,26 +624,35 @@ export default function App(): React.JSX.Element {
       // Ours by name, and it only ever lives in a folder we write. A file the
       // user named this themselves would be replaced too, which is why the
       // message says what happened rather than doing it silently.
-      const stale = new Set(
-        session.sources.filter((s) => baseName(s.path).startsWith(LEGEND_DOC_PREFIX)).map((s) => s.id)
+      //
+      // Computed inside applyWith against the CURRENT session: writing and
+      // probing the legend doc took real time, and folding the page in from
+      // this render's closure would silently drop anything an agent pushed
+      // meanwhile. The status text reads from the closure — worst case it
+      // says "added" for a rebuild, never wrong state.
+      const rebuilt = session.sources.some((s) => baseName(s.path).startsWith(LEGEND_DOC_PREFIX))
+      applyWith(
+        (prev) => {
+          const stale = new Set(
+            prev.sources.filter((s) => baseName(s.path).startsWith(LEGEND_DOC_PREFIX)).map((s) => s.id)
+          )
+          const stalePages = prev.pages.filter((p) => stale.has(p.source)).map((p) => p.id)
+          let next = stalePages.length ? deletePages(prev, stalePages) : prev
+          const before = next.pages.length
+          next = addSource(next, res.probe as ProbeWire)
+          const added = next.pages.slice(before).map((p) => p.id)
+          if (added.length) next = movePages(next, added, 0)
+          return next
+        },
+        rebuilt
+          ? `Legend page rebuilt at the front — ${legendEntries(session).length} tickmark(s).`
+          : `Legend page added at the front — ${legendEntries(session).length} tickmark(s). Drag it anywhere you like.`
       )
-      const stalePages = session.pages.filter((p) => stale.has(p.source)).map((p) => p.id)
-      let next = stalePages.length ? deletePages(session, stalePages) : session
-      const before = next.pages.length
-      next = addSource(next, res.probe as ProbeWire)
-      const added = next.pages.slice(before).map((p) => p.id)
-      if (added.length) next = movePages(next, added, 0)
-      apply(
-        next,
-        stalePages.length
-          ? `Legend page rebuilt at the front — ${legendEntries(next).length} tickmark(s).`
-          : `Legend page added at the front — ${legendEntries(next).length} tickmark(s). Drag it anywhere you like.`
-      )
-      if (added.length) setCurrentId(added[0])
+      setCurrentId(null)
     } finally {
       setBusy(false)
     }
-  }, [session, apply])
+  }, [session, applyWith])
 
   // ------------------------------------------------------------- page actions
 
@@ -1329,6 +1393,8 @@ export default function App(): React.JSX.Element {
   const adoptSession = useCallback(
     (next: Session, path: string | null, note: string, clean: boolean) => {
       for (const s of next.sources) forgetDoc(s.id)
+      liveDocumentId.current = crypto.randomUUID()
+      liveRefs.current.documentId = liveDocumentId.current
       past.current = []
       future.current = []
       lastSaved.current = clean ? JSON.stringify(next) : `${JSON.stringify(next)} `

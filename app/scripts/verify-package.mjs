@@ -10,6 +10,7 @@ import { isolatedAgentAccess } from './lib/isolated-agent-access.mjs'
 
 const require = createRequire(import.meta.url)
 const { expectedFuses } = require('./lib/electron-fuses.cjs')
+const packageJson = require('../package.json')
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const arch = process.arch === 'arm64' ? 'arm64' : process.arch
@@ -195,6 +196,11 @@ if (result.code !== 0 || !health.includes('[package-smoke] engine')) {
       `  exe         : ${executable}\n` +
       `  All three empty with exit 0 means main quit before the smoke branch —\n` +
       `  the single-instance lock is claimed at module load and does exactly that.`
+  )
+}
+if (!health.includes(`[package-smoke] engine ${packageJson.version} ready`)) {
+  throw new Error(
+    `Packaged engine version does not match app ${packageJson.version}: ${health.trim()}`
   )
 }
 console.log(health.trim())

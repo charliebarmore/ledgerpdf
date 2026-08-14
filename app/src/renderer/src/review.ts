@@ -122,6 +122,10 @@ function parsedTime(value?: string): number | null {
 function pageResolved(status: StatusDef | null, record: PageStatus | null, findings: ReviewFinding[]): boolean {
   if (!findings.length) return false
   if (status?.id !== 'reviewed' && status?.id !== 'na') return false
+  // An agent may propose Reviewed/N/A, but it cannot close the queue whose
+  // contract is "what still needs a human." The status remains attributed and
+  // visible; a person confirms it by applying the status in the Review Center.
+  if (record?.agent) return false
   const reviewedAt = parsedTime(record?.at)
   if (reviewedAt === null) return false
   return findings.every((finding) => {
@@ -153,7 +157,9 @@ export function reviewPages(session: Session): { active: ReviewPage[]; resolved:
 
     // A plain reviewed/N/A page is coverage, not an issue. A plain Open page
     // is still a handoff even if its explanatory note has not been added yet.
-    if (!findings.length && status?.id !== 'open') return
+    const agentResolution =
+      statusRecord?.agent === true && (status?.id === 'reviewed' || status?.id === 'na')
+    if (!findings.length && status?.id !== 'open' && !agentResolution) return
 
     const item: ReviewPage = {
       pageId: page.id,
@@ -247,6 +253,7 @@ export function reviewRuns(session: Session): ReviewRun[] {
     ...(session.links ?? []),
     ...(session.bookmarks ?? [])
   ]) notice(item.run)
+  for (const record of Object.values(session.statuses ?? {})) notice(record.run)
 
   return runOrder
     .map((run) => {
@@ -263,6 +270,9 @@ export function reviewRuns(session: Session): ReviewRun[] {
         pages.add(item.target)
       }
       for (const item of session.bookmarks ?? []) if (item.run === run) pages.add(item.page)
+      for (const [pageId, status] of Object.entries(session.statuses ?? {})) {
+        if (status.run === run) pages.add(pageId)
+      }
       return {
         run,
         entries,

@@ -885,15 +885,16 @@ check(
     queue.text.split('\n').find((l) => l.includes('note:')) ?? ''
   )
   check(
-    'a page marked reviewed does not clutter the queue',
-    !queue.text.includes(ids[1]),
+    'an agent-set Reviewed page remains queued for human confirmation',
+    queue.text.includes(ids[1]) && queue.text.includes('human confirmation required'),
     queue.text
   )
   await call('binder_set_status', { pageId: ids[0], status: 'reviewed' })
   const resolvedQueue = await call('binder_review_queue')
   check(
-    'reviewing after a note resolves it without deleting the evidence',
-    !resolvedQueue.text.includes(ids[0]),
+    'an agent-set Reviewed status does not close work that still needs a human',
+    resolvedQueue.text.includes(ids[0]) &&
+      resolvedQueue.text.includes('AI-set; human confirmation required'),
     resolvedQueue.text
   )
 

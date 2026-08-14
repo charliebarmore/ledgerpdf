@@ -5,6 +5,34 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-14
+
+### Changed
+
+- Kept agent-proposed Reviewed and N/A statuses in the human review queue until
+  a person confirms them, instead of allowing agent work to close its own
+  review requirement.
+
+### Fixed
+
+- Preserved filled PDF form fields and generated missing appearances during
+  export, and surfaced successful-engine warnings that were previously lost.
+- Refused multi-page image files instead of silently importing only their first
+  frame, with conversion-to-PDF guidance in the error.
+- Kept live-agent run state out of desktop sessions, saves, autosaves and
+  exports; reset that state when the desktop switches binders; and attributed
+  agent-set page statuses explicitly rather than printing them as human work.
+- Prevented a live agent from replacing the binder on screen with a new empty
+  binder, and rebased asynchronous imports and legend generation onto the
+  latest live session so concurrent work is not lost.
+- Opened Windows and Linux file-association launches correctly when the app is
+  cold, and refused macOS agent-registration commands from temporary DMG or
+  translocated paths.
+- Aligned the frozen engine and embedded binder provenance version with the app
+  release version, with source and packaged version-match checks.
+- Described structural-only agent runs as having nothing to undo instead of
+  claiming they had already been reverted.
+
 ## [0.2.0] - 2026-08-13
 
 ### Added
@@ -90,7 +118,8 @@ Initial public alpha.
 - Added platform-independent MCP registration and complete macOS notarization
   credential handling.
 
-[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.2.1
 [0.2.0]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.2.0
 [0.1.4]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.4
 [0.1.3]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.3

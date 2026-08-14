@@ -131,6 +131,8 @@ export interface SessionOwner {
   pull: () => Promise<{
     session: Session
     path: string | null
+    /** Changes when the desktop replaces the binder, even if both are unsaved. */
+    documentId?: string
     currentPage?: string | null
     revision?: number
   }>
@@ -154,8 +156,22 @@ const focus = (pageId: string | null | undefined): void => {
 /** The page the person is looking at, when the app is live. */
 let currentPage: string | null = null
 
+/**
+ * This process's open run id. Run identity belongs to the agent PROCESS, not
+ * the document: if `activeRun` rides a push into the app, every mark the
+ * person places afterwards is stamped as agent work, and "undo the AI's run"
+ * deletes their marks along with the agent's. So the run lives here, is
+ * re-attached to the session before each mutation, and the session is stripped
+ * (`toSaved`) whenever it leaves this process.
+ */
+let currentRun: string | null = null
+/** The desktop document the current run belongs to. */
+let currentDocumentId: string | null = null
+
 export function setSessionOwner(next: SessionOwner): void {
   owner = next
+  currentRun = null
+  currentDocumentId = null
 }
 
 /**
@@ -171,7 +187,13 @@ function mutating(
   structural = false,
   artifact?: JournalArtifact
 ): void {
-  if (!session.activeRun) session = beginRun(session).session
+  if (!currentRun) {
+    const begun = beginRun(session)
+    session = begun.session
+    currentRun = begun.run
+  } else if (session.activeRun !== currentRun) {
+    session = { ...session, activeRun: currentRun }
+  }
   session = record(session, { action, what, structural, ...(artifact ? { artifact } : {}) })
 }
 
@@ -355,18 +377,39 @@ const registerTool: typeof server.registerTool = (name, config, handler) =>
     let pulledRevision: number | undefined
     if (owner) {
       const pulled = await owner.pull()
+      // A long-lived MCP process can outlive several binders opened in the
+      // desktop. A run is process-local, but it must still be document-scoped:
+      // reusing its id in another binder can merge unrelated history and make
+      // run-level Undo remove older work that happens to share the id.
+      if (
+        pulled.documentId &&
+        currentDocumentId &&
+        pulled.documentId !== currentDocumentId
+      ) {
+        currentRun = null
+      }
+      if (pulled.documentId) currentDocumentId = pulled.documentId
       session = pulled.session
       sessionPath = pulled.path
       currentPage = pulled.currentPage ?? null
       pulledRevision = pulled.revision
+      // The app's session never carries a run (see currentRun above). Restore
+      // this process's own run; strip anything foreign that leaked in.
+      if (currentRun && session.activeRun !== currentRun) {
+        session = { ...session, activeRun: currentRun }
+      } else if (!currentRun && session.activeRun) {
+        session = toSaved(session)
+      }
     }
     const before = session
     try {
       return await (handler as (...a: unknown[]) => unknown)(...args)
     } finally {
       // Push only on a real change, so a read-only tool never marks a person's
-      // binder dirty or lands on their undo stack.
-      if (owner && session !== before) await owner.push(session, focusPage, pulledRevision)
+      // binder dirty or lands on their undo stack. Pushed WITHOUT the run id:
+      // if activeRun crossed the socket, the person's next mark would be
+      // stamped as agent work.
+      if (owner && session !== before) await owner.push(toSaved(session), focusPage, pulledRevision)
       focusPage = null
     }
   }) as never)
@@ -430,9 +473,24 @@ registerTool(
     inputSchema: {}
   },
   async () => {
-    if (!owner) await releaseSessionLease()
+    // The same guard binder_open has, for the same reason: during live access
+    // the working binder is the one a person has open in LedgerPDF. Replacing
+    // it with an empty session from here would blank their window without
+    // confirmation — and sessionPath would still name their real binder, so a
+    // later path-less save could overwrite it with unrelated content.
+    if (owner) {
+      return fail(
+        'binder_new is unavailable during live access — it would discard the binder open in ' +
+          'LedgerPDF. Ask the reviewer to start a new binder in the app, or turn live access ' +
+          'off to work standalone.'
+      )
+    }
+    await releaseSessionLease()
     session = newSession()
     sessionPath = null
+    // A new document means a new run: run ids are seq-derived and would
+    // otherwise collide with or leak into an unrelated binder's record.
+    currentRun = null
     return text('New empty binder.')
   }
 )
@@ -494,6 +552,7 @@ registerTool(
       if (rebound.error) return fail(`cannot open binder — ${rebound.error}`)
 
       session = rebound.session
+      currentRun = null
       const previousLease = sessionLease
       sessionPath = target
       sessionLease = nextLease
@@ -1157,6 +1216,9 @@ registerTool(
     if (!known.has(run)) return fail(`unknown run: ${run} — see binder_history`)
     const res = revertRun(session, run)
     session = res.session
+    // Reverting this process's own run closes it — new work must not be
+    // stamped with a run id the record says was undone.
+    if (run === currentRun) currentRun = null
     const tail = res.structural.length
       ? `\n\n${res.structural.length} change(s) could NOT be undone, because they altered the binder rather than adding something removable:\n` +
         res.structural.map((e) => `  ${e.what}`).join('\n')
@@ -1396,6 +1458,11 @@ function summaryMarkdown(narrative?: string, coverPages = 0): string {
     const crosses = page.findings.filter((finding) => finding.kind === 'cross')
     return (
       `- **p.${page.pageNumber + coverPages}**${page.status ? ` — ${page.status.label}` : ''}` +
+      (page.statusRecord?.agent
+        ? page.status?.id === 'reviewed' || page.status?.id === 'na'
+          ? ' *(AI-set; human confirmation required)*'
+          : ' *(AI-set)*'
+        : '') +
       (crosses.length ? ` · ${crosses.length} cross(es)` : '') +
       notes.map((finding) => `\n  - ${finding.note ?? ''}`).join('')
     )
@@ -2063,7 +2130,15 @@ registerTool(
       const crosses = page.findings.filter((finding) => finding.kind === 'cross')
       const bits = [
         `p.${page.pageNumber}  ${page.pageId}`,
-        page.status ? `[${page.status.label}]` : '',
+        page.status
+          ? `[${page.status.label}${
+              page.statusRecord?.agent
+                ? page.status.id === 'reviewed' || page.status.id === 'na'
+                  ? ' · AI-set; human confirmation required'
+                  : ' · AI-set'
+                : ''
+            }]`
+          : '',
         crosses.length ? `${crosses.length} cross(es)` : '',
         ...notes.map((finding) =>
           `\n      note: ${finding.note ?? ''}${finding.by === 'agent' ? '  (AI)' : ''}`

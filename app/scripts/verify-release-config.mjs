@@ -10,9 +10,19 @@ const { expectedFuses, electronFuseConfig } = require('./lib/electron-fuses.cjs'
 const builderConfig = require('../electron-builder.config.cjs')
 const packageJson = require('../package.json')
 const packageLock = require('../package-lock.json')
+const engineInit = readFileSync(
+  new URL('../../engine/workpaper_engine/__init__.py', import.meta.url),
+  'utf8'
+)
 
 assert.equal(packageLock.version, packageJson.version)
 assert.equal(packageLock.packages[''].version, packageJson.version)
+const engineVersion = engineInit.match(/^__version__\s*=\s*["']([^"']+)["']/m)?.[1]
+assert.equal(
+  engineVersion,
+  packageJson.version,
+  `engine version ${engineVersion ?? '(missing)'} must match app version ${packageJson.version}`
+)
 const windowsWorkflow = readFileSync(
   new URL('../../.github/workflows/windows.yml', import.meta.url),
   'utf8'

@@ -72,14 +72,15 @@ export interface EngineResult {
   cells?: unknown
   binder?: unknown
   result?: unknown
+  warnings?: string
 }
 
-export function runEngine(command: unknown): Promise<EngineResult> {
+export async function runEngine(command: unknown): Promise<EngineResult> {
   // Resolved per call, not at module load: a throw at import time would kill the
   // server before it could answer initialize, so an installed app with a broken
   // engine would look like a broken MCP server rather than a missing engine.
   const engine = findEngine()
-  return runJsonCommand<EngineResult>({
+  const result = await runJsonCommand<EngineResult>({
     executable: engine.executable,
     args: engine.args,
     cwd: engine.cwd,
@@ -88,4 +89,8 @@ export function runEngine(command: unknown): Promise<EngineResult> {
     env: restrictedProcessEnv(engine.python ? { PYTHONPATH: engine.cwd } : {}),
     command
   })
+  // An MCP server's stderr reaches the client's log without corrupting the
+  // stdio protocol — the one place an engine warning is visible at all.
+  if (result.warnings) console.error(`[engine warning] ${result.warnings}`)
+  return result
 }

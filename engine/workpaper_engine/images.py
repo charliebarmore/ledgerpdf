@@ -103,6 +103,17 @@ def _layout(display_w: int, display_h: int) -> tuple[tuple[float, float], tuple[
 def image_page(path: str | Path) -> ImagePage:
     """Work out the page geometry for an image without building the PDF."""
     with Image.open(path) as img:
+        # A multi-frame image (scanner TIFF, animated GIF) would import as its
+        # first page ONLY — pages 2..N of a 40-page scan batch silently gone
+        # from the record. Refuse loudly until multi-page import exists; this
+        # guard sits here so probe and export both hit it.
+        n_frames = int(getattr(img, "n_frames", 1))
+        if n_frames > 1:
+            raise ValueError(
+                f"{Path(path).name} holds {n_frames} pages; importing it would keep only the "
+                f"first and silently drop the other {n_frames - 1}. Convert it to a PDF "
+                "(scanner software and Preview can both save one) and import that instead."
+            )
         sw, sh = img.size
         rotate, mirrored = _orientation(img)
         raw_ok = _can_embed_raw(img, mirrored)

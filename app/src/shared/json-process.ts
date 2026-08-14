@@ -64,7 +64,14 @@ export function runJsonCommand<T extends { ok: boolean; error?: string }>(option
     child.on('close', () => {
       if (settled) return
       try {
-        finish(JSON.parse(out.trim()) as T)
+        const parsed = JSON.parse(out.trim()) as T & { warnings?: string }
+        // stderr used to be read only when stdout failed to parse, so a
+        // dependency's loud, correct warning about data loss (pikepdf's
+        // PageCopyWarning on dropped form fields) reached nobody for as long
+        // as the call "succeeded". Carry it on the result instead.
+        const warned = err.trim()
+        if (warned && parsed.warnings === undefined) parsed.warnings = warned.slice(0, 2000)
+        finish(parsed)
       } catch {
         fail(`engine returned no JSON: ${(err || out).slice(0, 500)}`)
       }

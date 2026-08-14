@@ -369,6 +369,63 @@ Prepared by ABC
     )
 
 
+def make_multipage_tiff_fixture(path: Path) -> None:
+    """A 3-frame TIFF, the standard output of an office scanner batch.
+
+    Import must REFUSE it with an actionable message — the old behavior kept
+    frame 0 and silently dropped the rest, which for a 40-page scan batch is
+    39 missing client documents that nothing ever reports.
+    """
+    from PIL import Image, ImageDraw
+
+    frames = []
+    for i in range(3):
+        img = Image.new("L", (400, 550), 255)
+        ImageDraw.Draw(img).text((30, 30), f"Scan page {i + 1} of 3", fill=0)
+        frames.append(img)
+    frames[0].save(path, save_all=True, append_images=frames[1:])
+
+
+def make_form_fixture(path: Path) -> None:
+    """One page with a FILLED AcroForm text field relying on /NeedAppearances.
+
+    The blocker this guards: `pages.append` copies the widget annotation but
+    not the document-level /AcroForm, so the filled value renders as a blank
+    box — a W-9 or 8879 silently loses the client's answers on export.
+    NeedAppearances (no appearance stream of our own) is the hard variant:
+    the value can ONLY render if /AcroForm and its /DR fonts survive.
+    """
+    with pikepdf.new() as pdf:
+        pdf.add_blank_page(page_size=(612, 792))
+        page = pdf.pages[0]
+        field = pdf.make_indirect(
+            Dictionary(
+                FT=Name.Tx,
+                T=String("business_name"),
+                V=String("Whitmore Holdings LLC"),
+                Type=Name.Annot,
+                Subtype=Name.Widget,
+                Rect=[100, 600, 500, 640],
+                DA=String("/Helv 14 Tf 0 g"),
+                F=4,
+                P=page.obj,
+            )
+        )
+        page.obj.Annots = pdf.make_indirect(Array([field]))
+        helv = pdf.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica)
+        )
+        pdf.Root.AcroForm = pdf.make_indirect(
+            Dictionary(
+                Fields=Array([field]),
+                NeedAppearances=True,
+                DA=String("/Helv 14 Tf 0 g"),
+                DR=Dictionary(Font=Dictionary(Helv=helv)),
+            )
+        )
+        pdf.save(path)
+
+
 def main() -> dict[str, str]:
     FIXTURES.mkdir(parents=True, exist_ok=True)
     a = FIXTURES / "fixture_a.pdf"
@@ -388,6 +445,10 @@ def main() -> dict[str, str]:
     make_tb_columns_fixture(columns)
     memo = FIXTURES / "review_memo.md"
     make_memo_fixture(memo)
+    form = FIXTURES / "filled_form.pdf"
+    make_form_fixture(form)
+    scan_batch = FIXTURES / "scan_batch.tif"
+    make_multipage_tiff_fixture(scan_batch)
     return {
         "A": str(a),
         "B": str(b),
@@ -399,6 +460,8 @@ def main() -> dict[str, str]:
         "REGISTER": str(register),
         "MEMO": str(memo),
         "TB_COLUMNS": str(columns),
+        "FORM": str(form),
+        "SCAN_BATCH": str(scan_batch),
     }
 
 

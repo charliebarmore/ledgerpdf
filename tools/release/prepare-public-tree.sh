@@ -55,5 +55,5 @@ git -C "$SOURCE_ROOT" archive --format=tar HEAD "${PUBLIC_ROOTS[@]}" | tar -xf -
 node "$DESTINATION/tools/release/check-public-tree.mjs" "$DESTINATION"
 
 echo "Public tree prepared at $DESTINATION"
-echo "Review it, run secret scanning, then create a NEW repository and root commit."
-echo "Before pushing, run: node tools/release/check-initial-public-history.mjs $DESTINATION"
+echo "Review and secret-scan it, then sync it into a clean checkout of the existing public repository."
+echo "See RELEASING.md. The initial-public-history check is only for a brand-new repository."
