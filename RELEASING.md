@@ -90,33 +90,43 @@ Verify the exact final DMG/installer, record SHA-256 hashes, and retain the
 matching source commit and generated SBOMs. Do not substitute a locally modified
 artifact after signing.
 
-## 3. Publish from a clean public history
+## 3. Publish the sanitized source tree
 
 Do **not** change the existing private engineering repository to public. Its old
 history contains internal business and personal workflow context even though it
 contains no known credentials.
 
-After committing and verifying the release candidate, run:
+After committing and verifying the release candidate, export the exact commit
+to a new temporary directory:
 
 ```bash
-tools/release/prepare-public-tree.sh /absolute/path/to/new-ledgerpdf-public
+tools/release/prepare-public-tree.sh /absolute/path/to/ledgerpdf-public-export
 ```
 
-Review and secret-scan that exported tree, initialize a new Git repository in
-it, and make a single clean root commit. Before pushing, run the launch-only
-history check from the engineering repository:
+The public repository already exists. Clone it separately, replace its tracked
+tree with the sanitized export while preserving only its `.git` directory, and
+review the resulting incremental diff:
 
 ```bash
-node tools/release/check-initial-public-history.mjs \
-  /absolute/path/to/new-ledgerpdf-public
+git clone https://github.com/charliebarmore/ledgerpdf.git \
+  /absolute/path/to/ledgerpdf-public-checkout
+rsync -a --delete --exclude .git \
+  /absolute/path/to/ledgerpdf-public-export/ \
+  /absolute/path/to/ledgerpdf-public-checkout/
+node /absolute/path/to/ledgerpdf-public-checkout/tools/release/check-public-tree.mjs \
+  /absolute/path/to/ledgerpdf-public-checkout
+git -C /absolute/path/to/ledgerpdf-public-checkout diff --check
+git -C /absolute/path/to/ledgerpdf-public-checkout status --short
 ```
 
-It requires one untagged `main` root named exactly `Initial public release`, a
-clean worktree, and only the project's GitHub noreply author/committer identity.
-This prevents session links, co-author trailers, personal email addresses, or
-incremental pre-launch history from escaping through commit metadata after the
-tree itself has passed review. It is deliberately an initial-publication check,
-not a rule for normal open-source development after launch.
+Review and secret-scan the exported tree before committing it normally on the
+public repository's `main` branch. Confirm that the public commit contains the
+same application source used for the final binaries, then tag that public
+commit. Never force-push or replace the public repository's existing history.
 
-Push that new history to the public repository, tag the source commit matching
-the binaries, and attach only the signed artifacts and their checksums.
+`tools/release/check-initial-public-history.mjs` is retained only for recreating
+the one-time initial public root in a brand-new repository. It must not be run
+for subsequent releases because it intentionally rejects incremental history.
+
+Push the incremental public commit, tag the source commit matching the binaries,
+and attach only the verified artifacts and their checksums.

@@ -33,6 +33,10 @@ async function visit(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const absolute = path.join(directory, entry.name)
     const relative = path.relative(root, absolute).split(path.sep).join('/')
+    // A recurring release is checked inside a clone of the already-public
+    // repository. Repository metadata is not part of the exported source tree
+    // and can contain binary objects, hooks or local remote configuration.
+    if (relative === '.git' || relative.startsWith('.git/')) continue
     const stats = await lstat(absolute)
     if (stats.isSymbolicLink()) {
       findings.push(`${relative}: symbolic links are not allowed in the public export`)

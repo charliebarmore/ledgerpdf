@@ -31,7 +31,10 @@ tapes that show their addends, and link a figure to the page that supports it.
 - **Agents work in the same binder.** Not a chat box bolted onto a GUI — an MCP
   server exposing the same model the UI drives, so an agent reads pages, finds a
   figure by name, and marks the binder you have open. Everything it does is
-  attributed to the AI, journalled, and revertible.
+  attributed to the AI and journalled. Agent-added marks, tapes, shapes and
+  bookmarks are removable by run; structural page changes (imports, reorders,
+  rotations, deletions) stay journalled but are not automatically undone — the
+  history says exactly which is which.
 - **A review pass before the file leaves.** The Review Center walks open notes
   and crosses, source coverage, page statuses, connector integrity, and every
   agent run. Creating a permanent send-out copy shows those same checks first;
@@ -98,9 +101,10 @@ facts are ours to state and be held to.
   IRS Pubs 4557 and 5708 are useful starting points.
 - **Circular 230 (31 CFR Part 10).** *To consider:* how you supervise
   machine-produced work, and how a reviewer tells it from your own. *The facts:*
-  agent actions are attributed to the AI, journalled in order and revertible in
-  one step; agent marks are outlined on the page. The tool reaches no conclusions
-  and signs nothing.
+  agent actions are attributed to the AI and journalled in order; the marks a
+  run added can be removed in one step, and the history names the structural
+  changes that cannot be; agent marks are outlined on the page. The tool reaches
+  no conclusions and signs nothing.
 - **AICPA Code of Professional Conduct.** *To consider:* whether connecting an
   agent brings a model provider into the engagement as a third party for
   confidentiality purposes, and what consent or agreement you would want first.
@@ -151,7 +155,7 @@ solves that — what remains is one publisher warning, described below.
 ### Getting a build
 
 Download the current installers and checksums from the
-**[LedgerPDF v0.2.0 release](https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.2.0)**.
+**[LedgerPDF v0.2.1 release](https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.2.1)**.
 
 On **macOS**, download the `.dmg` or the `.zip`, open it, and drag LedgerPDF to
 Applications. It is notarized and stapled, so it launches with no warning.
@@ -259,8 +263,11 @@ Copyright © 2026 **Ledger Labs LLC**. Released under the **GNU General Public
 Licence v3.0 or later** — see [`LICENSE`](LICENSE), with the reasoning and a
 dependency-compatibility audit in [`COPYRIGHT.md`](COPYRIGHT.md).
 
-Copyleft is deliberate. The claim above — that nothing leaves your machine — is
-only worth what your own IT reviewer can check, and this way they can check it.
+Copyleft is deliberate. The claim above — that the application makes no network
+calls — is only worth what your own IT reviewer can check, and this way they
+can check it. (A connected agent is a separate program under your control, and
+what IT carries off the machine is governed by the client you chose — see the
+data-flow notes above.)
 
 ## Contributing
 

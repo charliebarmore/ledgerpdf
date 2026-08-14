@@ -260,6 +260,47 @@ try {
     })
   }
 
+  /** Authenticated raw pull of the state the app itself holds. */
+  const pullAppState = async () => {
+    const endpointInfo = JSON.parse(readFileSync(ENDPOINT_FILE, 'utf8'))
+    return new Promise((resolve) => {
+      const sock = connect(endpointInfo.socketPath)
+      sock.setEncoding('utf8')
+      let buffer = ''
+      let stage = 'hello'
+      const timer = setTimeout(() => {
+        sock.destroy()
+        resolve(null)
+      }, 5000)
+      const finish = (value) => {
+        clearTimeout(timer)
+        sock.destroy()
+        resolve(value)
+      }
+      sock.on('connect', () => {
+        sock.write(`${JSON.stringify({ id: 1, verb: 'hello', token: endpointInfo.token })}\n`)
+      })
+      sock.on('data', (chunk) => {
+        buffer += chunk
+        let cut = buffer.indexOf('\n')
+        while (cut >= 0) {
+          const line = buffer.slice(0, cut)
+          buffer = buffer.slice(cut + 1)
+          cut = buffer.indexOf('\n')
+          if (!line.trim()) continue
+          const reply = JSON.parse(line)
+          if (stage === 'hello') {
+            stage = 'pull'
+            sock.write(`${JSON.stringify({ id: 2, verb: 'pull' })}\n`)
+          } else {
+            finish({ session: reply.session ?? null, documentId: reply.documentId })
+          }
+        }
+      })
+      sock.on('error', () => finish(null))
+    })
+  }
+
   /** Two clients read one revision; only the first may replace it. */
   const stalePushIsRefused = async () => {
     const endpointInfo = JSON.parse(readFileSync(ENDPOINT_FILE, 'utf8'))
@@ -401,6 +442,29 @@ try {
     after.text.split('\n')[0]
   )
 
+  // REGRESSION — the run-attribution leak. The agent's run id must never
+  // survive the push into the app: if `activeRun` crosses the socket, stamp()
+  // marks every tick the PERSON places afterwards as agent work, and "undo the
+  // AI's run" deletes their marks along with the agent's. Pull the app's own
+  // session and look at what it actually holds.
+  const appState = await pullAppState()
+  const appSession = appState?.session ?? null
+  check(
+    'the live binder carries a document identity distinct from its save path',
+    typeof appState?.documentId === 'string' && appState.documentId.length > 0,
+    `documentId=${JSON.stringify(appState?.documentId)}`
+  )
+  check(
+    "the app's session carries no activeRun after an agent edit",
+    appSession !== null && appSession.activeRun === undefined,
+    appSession ? `activeRun=${JSON.stringify(appSession.activeRun)}` : 'pull failed'
+  )
+  check(
+    "while the agent's own mark keeps its attribution",
+    !!appSession?.marks?.some((m) => m.by === 'agent' && m.run),
+    JSON.stringify(appSession?.marks?.map((m) => [m.by, m.run]) ?? 'no marks')
+  )
+
   // The agent adding a file it can reach is not the same as the WINDOW being
   // able to draw it. The renderer may only read paths a user action authorized,
   // and a session arriving from an agent names files this app never opened a
@@ -456,6 +520,20 @@ try {
     'a live agent cannot choose a hidden Save As destination behind the app',
     saved.isError && /Save As in the app/i.test(saved.text) && !existsSync(HIDDEN_SAVE_AS),
     saved.text.split('\n')[0]
+  )
+
+  // binder_new during live access would blank the binder the person is
+  // reviewing — and leave sessionPath aimed at their real file, one path-less
+  // save away from overwriting it. It must refuse, and the binder must
+  // still be there afterwards.
+  const blanked = await call('binder_new', {})
+  const stillThere = await call('binder_status')
+  check(
+    'a live agent cannot discard the binder a person has open',
+    blanked.isError &&
+      /unavailable during live access/i.test(blanked.text) &&
+      /\b[1-9]\d* page\(s\)/.test(stillThere.text),
+    `${blanked.text.split('\n')[0]} | ${stillThere.text.split('\n')[0]}`
   )
   const forged = await forgeOutsideRoot()
   check(

@@ -31,7 +31,8 @@ import {
   writeAgentRoots
 } from '../shared/agent-roots'
 import { toSaved, type Session } from '../renderer/src/session'
-import { agentConnectCommand } from '../shared/agent-connect'
+import { agentConnectCommand, unstableInstallReason } from '../shared/agent-connect'
+import { argvOpenTarget } from '../shared/argv-open'
 import { acquireBinderLock, type BinderLease } from '../shared/binder-lock'
 import {
   RENDERER_ENTRY_URL,
@@ -156,6 +157,19 @@ app.on('open-file', (event, filePath) => {
 })
 
 /**
+ * Windows and Linux hand a double-clicked file to a COLD launch in argv —
+ * there is no open-file event. `second-instance` below covers the warm
+ * launch; this covers the cold one. The pair is what kept "double-click
+ * never worked in a packaged build" invisible: anyone testing casually has
+ * the app already running and takes the warm path, which worked.
+ * (Same class as the two bugs commented further down at the recents fix.)
+ */
+if (process.platform !== 'darwin' && !packageSmoke) {
+  const coldOpen = argvOpenTarget(process.argv)
+  if (coldOpen) requestOpen(path.resolve(coldOpen))
+}
+
+/**
  * Printed to stderr when a scripted run cannot get the single-instance lock, so
  * the verifier can name the cause instead of guessing from missing files.
  * Matched literally in `app/scripts/smoke.mjs` — the two are bundled separately,
@@ -194,7 +208,7 @@ if (!packageSmoke) {
     }
   } else {
     app.on('second-instance', (_e, argv) => {
-      const target = argv.find((a) => a.toLowerCase().endsWith('.pdf'))
+      const target = argvOpenTarget(argv)
       if (target) requestOpen(path.resolve(target))
     })
   }
@@ -323,15 +337,19 @@ interface EngineErr {
 }
 
 /** Spawn the Python engine for one bounded JSON command. */
-function runEngine(command: unknown): Promise<EngineOk | EngineErr> {
+async function runEngine(command: unknown): Promise<EngineOk | EngineErr> {
   const engine = engineCommand()
-  return runJsonCommand<EngineOk | EngineErr>({
+  const result = await runJsonCommand<(EngineOk | EngineErr) & { warnings?: string }>({
     executable: engine.executable,
     args: engine.args,
     cwd: engine.cwd,
     env: restrictedProcessEnv(isDev ? { PYTHONPATH: engine.cwd } : {}),
     command
   })
+  // Engine stderr on a successful call is a warning, not noise — a discarded
+  // PageCopyWarning is how dropped form fields stayed invisible.
+  if (result.warnings) console.warn(`[engine warning] ${result.warnings}`)
+  return result
 }
 
 /**
@@ -494,6 +512,7 @@ async function setLiveAccess(on: boolean): Promise<{ on: boolean; socketPath?: s
       (await askRenderer('pull')) as {
         session: unknown
         path: string | null
+        documentId?: string
         currentPage?: string | null
       },
     push: async (session, focus, expectedRevision) => {
@@ -900,16 +919,22 @@ function registerIpc(): void {
       ? path.join(repoRoot(), 'app', 'out', 'mcp-server.cjs')
       : path.join(process.resourcesPath, 'app.asar', 'out', 'mcp-server.cjs')
     const runner = isDev ? 'node' : process.execPath
-    return agentConnectCommand({ isDev, runner, bundle })
+    const command = agentConnectCommand({ isDev, runner, bundle })
+    // From a mounted DMG or a translocated run, the baked path dies with the
+    // session — offer the move-to-Applications instruction, not the command.
+    const unstable = isDev ? null : unstableInstallReason(process.resourcesPath, process.platform)
+    return unstable ? { ...command, unstableReason: unstable } : command
   })
 
   ipcMain.handle('binder:autosave', async (_e, binder: unknown, session: unknown) => {
     assertTrustedIpc(_e)
     const target = assertAllowed(allowedOutputs, binder, 'binder path')
     const recovery = binderRecoveryPathFor(target)
-    await atomicWriteJson(recovery, { binder: target, savedAt: new Date().toISOString(), session }, {
-      keepRecovery: false
-    })
+    await atomicWriteJson(
+      recovery,
+      { binder: target, savedAt: new Date().toISOString(), session: toSaved(session as Session) },
+      { keepRecovery: false }
+    )
     // A dot prefix hides this on macOS and does nothing on Windows.
     await hideFromUser(recovery)
     return recovery

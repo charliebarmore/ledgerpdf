@@ -152,7 +152,12 @@ def export_binder(spec: dict) -> dict:
             final_index: dict[str, int] = {}
             for i, entry in enumerate(spec["pages"]):
                 src = sources[entry["source"]]
-                out.pages.append(src.pages[entry["index"]])
+                # add_pages_from, not pages.append: append alone drops the
+                # document-level /AcroForm, so a filled W-9 or 8879 renders
+                # with blank boxes where the client's answers were. This
+                # carries the form fields (renaming on collision, e.g. the
+                # same source imported twice).
+                out.add_pages_from(src, [entry["index"]])
                 final_index[entry["id"]] = i
                 delta = int(entry.get("rotate", 0)) % 360
                 if delta:
@@ -277,6 +282,13 @@ def export_binder(spec: dict) -> dict:
             # appearance resources; see session_store.is_flattened_copy.
             if flatten:
                 out.Root[session_store.WPT_FLATTENED] = True
+
+            # A source that relies on /NeedAppearances ships filled values with
+            # no appearance streams; generate them so the values render in
+            # viewers that ignore that flag. Fields carrying their own
+            # appearances are left untouched.
+            if out.acroform.exists:
+                out.acroform.generate_appearances_if_needed()
 
             out.save(temp_output)
 

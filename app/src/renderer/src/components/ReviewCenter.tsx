@@ -136,7 +136,7 @@ export function ReviewCenter({
                           {page.status && (
                             <span className="review-status">
                               <i style={{ background: SHAPE_COLORS[page.status.color] }} />
-                              {page.status.label}
+                              {page.status.label}{page.statusRecord?.agent ? ' · AI' : ''}
                             </span>
                           )}
                         </div>
@@ -152,7 +152,12 @@ export function ReviewCenter({
                           </div>
                         ))}
                         {!page.findings.length && (
-                          <p className="review-no-note">Flagged open without an explanatory note.</p>
+                          <p className="review-no-note">
+                            {page.statusRecord?.agent &&
+                            (page.status?.id === 'reviewed' || page.status?.id === 'na')
+                              ? 'AI set this status. A human reviewer must confirm it.'
+                              : 'Flagged open without an explanatory note.'}
+                          </p>
                         )}
                         <div className="review-actions">
                           <button onClick={() => onJump(page.pageId)}>Go to page</button>
@@ -240,9 +245,17 @@ export function ReviewCenter({
                       <button
                         disabled={run.remainingItems === 0}
                         onClick={() => onRevert(run.run)}
-                        title={run.structural.length ? 'Page order, rotation and deletion cannot be undone here.' : ''}
+                        title={
+                          run.remainingItems
+                            ? run.structural.length
+                              ? 'Structural and page-status changes cannot be undone here.'
+                              : ''
+                            : run.structural.length
+                              ? 'This run has only changes that cannot be undone here.'
+                              : 'No removable items from this run remain.'
+                        }
                       >
-                        {run.remainingItems ? `Undo ${run.remainingItems}` : 'Reverted'}
+                        {run.remainingItems ? `Undo ${run.remainingItems}` : 'Nothing to undo'}
                       </button>
                     </div>
                     {run.entries.length ? run.entries.map((entry) => (

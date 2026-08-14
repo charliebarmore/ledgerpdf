@@ -26,6 +26,7 @@ interface Reply {
   error?: string
   session?: unknown
   path?: string | null
+  documentId?: string
   currentPage?: string | null
   revision?: number
 }
@@ -141,6 +142,7 @@ export async function attachToRunningApp(): Promise<SessionOwner | null> {
       return {
         session: reply.session as Session,
         path: reply.path ?? null,
+        documentId: reply.documentId,
         currentPage: reply.currentPage ?? null,
         revision: reply.revision
       }

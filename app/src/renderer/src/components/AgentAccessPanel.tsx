@@ -24,9 +24,11 @@ export function AgentAccessPanel({
   onClose: () => void
 }): React.JSX.Element {
   const [roots, setRoots] = useState<string[]>([])
-  const [connect, setConnect] = useState<{ command: string; needsElectronRunAsNode: boolean } | null>(
-    null
-  )
+  const [connect, setConnect] = useState<{
+    command: string
+    needsElectronRunAsNode: boolean
+    unstableReason?: string
+  } | null>(null)
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -76,8 +78,9 @@ export function AgentAccessPanel({
           <p className="ap-why">
             This switch controls only the binder currently on screen. With it on, an agent you have
             connected can read and change this binder while you watch. Everything it does is
-            attributed to the AI and can be undone. Off by default, and off again every time the app
-            starts.
+            attributed to the AI and journalled; its marks, tapes, shapes and bookmarks can be
+            undone by run, while page changes like reorders and deletions stay in the history but
+            are not automatically undone. Off by default, and off again every time the app starts.
           </p>
         </section>
 
@@ -134,7 +137,17 @@ export function AgentAccessPanel({
           </p>
         </section>
 
-        {connect && (
+        {connect && connect.unstableReason && (
+          <section className="ap-section">
+            <p className="ap-label">Connect an agent</p>
+            {/* The command bakes this app's absolute path into the agent's
+                global config. From a DMG or a translocated run that path dies
+                with the session, so offering it here would hand the user a
+                registration that permanently breaks — explain instead. */}
+            <p className="ap-why">{connect.unstableReason}</p>
+          </section>
+        )}
+        {connect && !connect.unstableReason && (
           <section className="ap-section">
             <p className="ap-label">Connect an agent</p>
             {/* "then restart it" was ambiguous — the thing to restart is the

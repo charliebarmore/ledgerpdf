@@ -317,6 +317,115 @@ def main() -> int:
     dark = np.count_nonzero(np.all(region < 120, axis=2))
     check("C3 tape appearance renders", dark > 40, f"dark px in tape region: {dark}")
 
+    # C10 — filled form fields survive export. `pages.append` dropped the
+    # document-level /AcroForm, so a filled W-9/8879 exported with blank
+    # boxes where the client's answers were. The fixture relies on
+    # /NeedAppearances, the hard variant: the value renders ONLY if
+    # /AcroForm and its /DR fonts survived and appearances were generated.
+    form_out = OUT_DIR / "form_binder.pdf"
+    form_export = engine_cli({
+        "cmd": "export",
+        "binder": {
+            "sources": {"F": fixtures["FORM"]},
+            "pages": [{"id": "pg_f1", "source": "F", "index": 0}],
+            "annotations": [],
+            "output": str(form_out),
+        },
+    })
+    check("C10 filled-form export succeeds", form_export.get("ok", False),
+          form_export.get("error", "")[:200])
+    if form_export.get("ok"):
+        import pikepdf
+        from pikepdf import Name
+
+        with pikepdf.open(form_out) as form_pdf:
+            has_form = Name.AcroForm in form_pdf.Root
+            form_value = (
+                str(form_pdf.Root.AcroForm.Fields[0].V)
+                if has_form and len(form_pdf.Root.AcroForm.Fields)
+                else None
+            )
+        check(
+            "C10 /AcroForm and the filled value survive export",
+            has_form and form_value == "Whitmore Holdings LLC",
+            f"AcroForm={has_form} value={form_value!r}",
+        )
+
+        def _form_dark(path: Path) -> int:
+            doc = pdfium.PdfDocument(str(path))
+            try:
+                doc.init_forms()
+                page = doc[0]
+                bmp = page.render(scale=2, may_draw_forms=True)
+                gray = np.asarray(bmp.to_pil().convert("L"))
+                return int(np.count_nonzero(gray < 128))
+            finally:
+                doc.close()
+
+        src_dark = _form_dark(Path(fixtures["FORM"]))
+        out_dark = _form_dark(form_out)
+        check(
+            "C10 the filled value RENDERS in the exported binder",
+            src_dark > 0 and out_dark > src_dark * 0.8,
+            f"dark px source={src_dark} export={out_dark}",
+        )
+
+    # C11 — a multi-page TIFF must be refused, not silently truncated to its
+    # first frame. The refusal has to name the page count and tell the user
+    # what to do instead; a bare "cannot import" would read as a broken file.
+    batch_probe = engine_cli({"cmd": "probe", "path": fixtures["SCAN_BATCH"]})
+    check(
+        "C11 multi-page TIFF is refused with page count and a way forward",
+        batch_probe.get("ok") is False
+        and "3 pages" in batch_probe.get("error", "")
+        and "PDF" in batch_probe.get("error", ""),
+        batch_probe.get("error", "no error")[:200],
+    )
+    single_probe = engine_cli({"cmd": "probe", "path": fixtures["IMG"]})
+    check(
+        "C11 single-frame images still import",
+        single_probe.get("ok", False) and single_probe.get("probe", {}).get("n_pages") == 1,
+        single_probe.get("error", "")[:120],
+    )
+
+    # C12 — an agent-set page status must never print as the person's own
+    # sign-off. The stamp's drawn initials and its Acrobat author both read
+    # "CB (AI)" when the spec is agent work; a person's own stamp stays "CB".
+    status_out = OUT_DIR / "status_binder.pdf"
+    status_export = engine_cli({
+        "cmd": "export",
+        "binder": {
+            "sources": {"A": fixtures["A"]},
+            "pages": [{"id": "pg_s1", "source": "A", "index": 0}],
+            "annotations": [
+                {"kind": "statusstamp", "page": "pg_s1", "nx": 0.8, "ny": 0.1,
+                 "color": "green", "text": "CB", "label": "Reviewed",
+                 "author": "CB", "by": "agent", "at": "2026-08-14T12:00:00Z"},
+                {"kind": "statusstamp", "page": "pg_s1", "nx": 0.8, "ny": 0.3,
+                 "color": "green", "text": "CB", "label": "Reviewed",
+                 "author": "CB", "at": "2026-08-14T12:00:00Z"},
+            ],
+            "output": str(status_out),
+        },
+    })
+    check("C12 status export succeeds", status_export.get("ok", False),
+          status_export.get("error", "")[:200])
+    if status_export.get("ok"):
+        import pikepdf as _pikepdf
+        from pikepdf import Name as _Name
+
+        with _pikepdf.open(status_out) as status_pdf:
+            authors = sorted(
+                str(a.get(_Name.T, ""))
+                for a in status_pdf.pages[0].obj.get(_Name.Annots, [])
+                if a.get(_Name.Subtype, None) == _Name.Stamp
+            )
+        check(
+            "C12 agent stamp is authored '(AI)', person's stamp is not",
+            authors == ["CB", "CB (AI)"],
+            f"authors={authors}",
+        )
+
     write_fingerprint()
     return report()
 

@@ -504,10 +504,73 @@ async function main(): Promise<number> {
       !('activeRun' in JSON.parse(JSON.stringify(toSaved(w)))),
       JSON.stringify(Object.keys(JSON.parse(JSON.stringify(toSaved(w)))))
     )
+    // The export spec is how a session actually reaches disk — toSaved at that
+    // boundary, not just at the callers, is what keeps activeRun out of client
+    // files.
+    const specWithSession = toExportSpec(w, 'unused.pdf', { embedSession: true }) as {
+      session?: Session
+    }
+    check(
+      'an export spec embeds the session WITHOUT its activeRun',
+      specWithSession.session !== undefined && !('activeRun' in specWithSession.session),
+      specWithSession.session
+        ? `activeRun=${JSON.stringify((specWithSession.session as Session).activeRun)}`
+        : 'no session embedded'
+    )
     check(
       'a reopened agent mark keeps its attribution',
       'session' in round && round.session.marks!.some((m) => m.by === 'agent' && m.run === begun.run)
     )
+
+    // A page status is a sign-off, so it carries the same provenance a mark
+    // does. The failure this guards: an agent marking pages "Reviewed" under
+    // the preparer's bare initials — a clean-looking Review Center and a
+    // printed stamp claiming a review that never happened.
+    {
+      const humanSet = setPageStatus(s, [s.pages[0].id], 'reviewed', 'CB')
+      const humanStatus = humanSet.statuses![s.pages[0].id]
+      check(
+        "a status a person sets carries no agent provenance",
+        !humanStatus.agent && !humanStatus.run && humanStatus.by === 'CB',
+        JSON.stringify(humanStatus)
+      )
+      const inRun = beginRun(s).session
+      const agentSet = setPageStatus(inRun, [s.pages[0].id], 'reviewed', 'CB')
+      const agentStatus = agentSet.statuses![s.pages[0].id]
+      check(
+        'a status set during an agent run is stamped agent + run',
+        agentStatus.agent === true && agentStatus.run === inRun.activeRun,
+        JSON.stringify(agentStatus)
+      )
+      const spec = toExportSpec(agentSet, 'unused.pdf', {}) as {
+        annotations: Array<Record<string, unknown>>
+      }
+      const stamp = spec.annotations.find((a) => a.kind === 'statusstamp')
+      check(
+        'an agent-set status exports as agent work, with its author',
+        !!stamp && stamp.by === 'agent' && stamp.author === 'CB',
+        JSON.stringify(stamp)
+      )
+      const humanSpec = toExportSpec(humanSet, 'unused.pdf', {}) as {
+        annotations: Array<Record<string, unknown>>
+      }
+      const humanStamp = humanSpec.annotations.find((a) => a.kind === 'statusstamp')
+      check(
+        "a person's status exports without the agent flag",
+        !!humanStamp && humanStamp.by === undefined,
+        JSON.stringify(humanStamp)
+      )
+      const statusRound = parseSession(JSON.parse(JSON.stringify(agentSet)))
+      check(
+        'agent status provenance survives save/reopen',
+        'session' in statusRound &&
+          statusRound.session.statuses![s.pages[0].id].agent === true &&
+          typeof statusRound.session.statuses![s.pages[0].id].run === 'string',
+        'session' in statusRound
+          ? JSON.stringify(statusRound.session.statuses![s.pages[0].id])
+          : statusRound.error
+      )
+    }
   }
 
   // --- rotateVisual: turns extracted text coordinates into the binder's own
@@ -2025,6 +2088,33 @@ async function main(): Promise<number> {
     }).active.some((p) => p.pageId === s.pages[4].id)
   )
   check(
+    'an agent-set Reviewed status cannot resolve a finding that still needs a human',
+    reviewPages({
+      ...reviewBase,
+      statuses: {
+        ...reviewBase.statuses,
+        [s.pages[0].id]: {
+          status: 'reviewed', by: 'RV', at: '2026-08-13T11:00:00Z',
+          agent: true, run: 'run_agent_review'
+        }
+      }
+    }).active.some((p) => p.pageId === s.pages[0].id)
+  )
+  check(
+    'an agent-set Reviewed status needs human confirmation even without a note',
+    reviewPages({
+      ...reviewBase,
+      marks: reviewBase.marks!.filter((mark) => mark.page !== s.pages[2].id),
+      statuses: {
+        ...reviewBase.statuses,
+        [s.pages[2].id]: {
+          status: 'reviewed', by: 'RV', at: '2026-08-13T11:00:00Z',
+          agent: true, run: 'run_agent_review'
+        }
+      }
+    }).active.some((p) => p.pageId === s.pages[2].id)
+  )
+  check(
     'the shared review queue has three active pages and two resolved pages',
     review.active.length === 3 && review.resolved.length === 2,
     JSON.stringify({ active: review.active.map((p) => p.pageNumber), resolved: review.resolved.map((p) => p.pageNumber) })
@@ -2080,6 +2170,19 @@ async function main(): Promise<number> {
     reviewRuns(runSession)[0]?.run === 'run_review' &&
       reviewRuns(runSession)[0]?.remainingItems === 1 &&
       reviewRuns(runSession)[0]?.pageIds[0] === s.pages[0].id
+  )
+  check(
+    'agent-set statuses contribute their page to the run review',
+    reviewRuns({
+      ...runSession,
+      statuses: {
+        ...runSession.statuses,
+        [s.pages[1].id]: {
+          status: 'reviewed', by: 'RV', at: '2026-08-13T11:00:00Z',
+          agent: true, run: 'run_review'
+        }
+      }
+    })[0]?.pageIds.includes(s.pages[1].id)
   )
   const statExport = await runEngine({
     cmd: 'export',

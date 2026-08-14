@@ -144,6 +144,7 @@ const api = {
     runner: string
     bundle: string
     needsElectronRunAsNode: boolean
+    unstableReason?: string
   }> => ipcRenderer.invoke('agent:connect-command'),
   /** A binder opened from Finder/Explorer while the app is ALREADY running. */
   onOpenPath: (cb: (target: string) => void): void => {

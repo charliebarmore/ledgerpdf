@@ -26,7 +26,7 @@ import json
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
-from .appearance import _esc
+from .appearance import _display_author, _esc
 from .geometry import PageGeom, appearance_matrix, visual_rect_to_user_rect
 from .shapes import SHAPE_COLORS, color_of
 
@@ -72,7 +72,15 @@ def make_status_stamp(pdf: pikepdf.Pdf, geom: PageGeom, spec: dict, nm: str) -> 
     decision.
     """
     r, g, b = color_of(str(spec.get("color", "green")))
-    initials = str(spec.get("text", "")).strip() or str(spec.get("label", "")).strip() or "OK"
+    # An agent-set status must never print as the person's own sign-off: the
+    # qualified form ("CB (AI)", or "AI" with no initials) wins over the raw
+    # text whenever the spec is agent work. Same rule marks follow.
+    initials = (
+        _display_author(spec)
+        or str(spec.get("text", "")).strip()
+        or str(spec.get("label", "")).strip()
+        or "OK"
+    )
     when = _format_when(str(spec.get("at", "")))
 
     w, h = STAMP_W, STAMP_H
@@ -126,7 +134,7 @@ def make_status_stamp(pdf: pikepdf.Pdf, geom: PageGeom, spec: dict, nm: str) -> 
         Rect=Array(list(rect)),
         AP=Dictionary(N=form),
         NM=String(nm),
-        T=String(str(spec.get("author", ""))),
+        T=String(_display_author(spec)),
         Contents=String(f"{spec.get('label', 'Status')}: {initials} {when}".strip()),
         F=4,
     )

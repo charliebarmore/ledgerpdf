@@ -34,9 +34,9 @@ npm run verify     # typecheck + model verification + GUI smoke test
 |---|---|
 | `typecheck` | main/preload and renderer both typecheck |
 | `verify:persistence` | 8 checks proving atomic session replacement, private POSIX permissions, recovery, temporary-file cleanup, and shell-independent installed MCP registration |
-| `verify:model` | 274 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity, owner-only working copies, atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, flattening, and review/preflight decisions) |
+| `verify:model` | 283 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity, owner-only working copies, atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, flattening, and review/preflight decisions) |
 | `verify:text` | 68 checks that extracted/OCR text lands where the text actually is — against fixture coordinates and rendered pixels, including hostile page geometry |
-| `verify:live` | 14 checks that an agent and the running app share ONE binder, plus socket permissions, authentication, approved roots, saving, follow behavior, and forged-push containment |
+| `verify:live` | 18 checks that an agent and the running app share ONE binder, plus document identity, socket permissions, authentication, approved roots, saving, follow behavior, and forged-push containment |
 | `verify:closed-window` | 4 macOS checks that a live agent receives an actionable error when the binder window closes and succeeds after it reopens (other platforms quit when their last window closes) |
 | `verify:mcp` | more than 100 checks driving the **MCP server** as a real client through a whole binder build, its filesystem guardrails, and its page-text privacy disclosure |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
@@ -433,9 +433,11 @@ otherwise the finding dies in a chat log.
   shows in the thumbnail rail and bookmark tree while a person scrolls.
 - **`binder_review_queue`** lists everything waiting on a person, in binder
   order, with the note text and who left it. A page marked reviewed with
-  nothing outstanding stays out of it. Reviewed/N/A resolves findings that
-  existed when the status was applied; a later note or cross reopens the page,
-  so a new agent finding cannot hide behind an older reviewer decision.
+  nothing outstanding stays out of it only when a person applied that status.
+  An agent may propose Reviewed/N/A, but the page stays in the queue until a
+  human confirms it. Human-applied Reviewed/N/A resolves findings that existed
+  when the status was applied; a later note or cross reopens the page, so a new
+  agent finding cannot hide behind an older reviewer decision.
 
 Notes carry attribution like every other agent artifact, so the exported
 annotation reads `ABC (AI)`.

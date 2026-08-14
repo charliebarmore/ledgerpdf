@@ -307,6 +307,14 @@ export interface PageStatus {
   /** Who set it, and when — the same review record marks and tapes carry. */
   by?: string
   at?: string
+  /**
+   * Set when an AGENT set the status. A "Reviewed / CB" stamp the person never
+   * applied is a signature on work they did not do — the exported stamp and
+   * its Acrobat author read "CB (AI)" when this is present, exactly like an
+   * agent-placed mark.
+   */
+  agent?: boolean
+  run?: string
 }
 
 /** Which parts of a status get drawn. Mirrors PDFlyer's Set Status dialog. */
@@ -1183,8 +1191,12 @@ export function setPageStatus(
   by = ''
 ): Session {
   const at = new Date().toISOString()
+  // The same signal stamp() uses: an open run means an agent is doing this.
+  const provenance = session.activeRun ? { agent: true, run: session.activeRun } : {}
   const statuses = { ...(session.statuses ?? {}) }
-  for (const id of pageIds) statuses[id] = { status: statusId, ...(by ? { by } : {}), at }
+  for (const id of pageIds) {
+    statuses[id] = { status: statusId, ...(by ? { by } : {}), at, ...provenance }
+  }
   return { ...session, statuses }
 }
 
@@ -2637,7 +2649,11 @@ export function toExportSpec(
               text: st.by || session.reviewer || def.label,
               label: def.label,
               ...(st.at ? { at: st.at } : {}),
-              ...(st.by ? { author: st.by } : {})
+              ...(st.by ? { author: st.by } : {}),
+              // The engine qualifies the drawn initials and the Acrobat author
+              // to "CB (AI)" — a status an agent set must never print as the
+              // person's own sign-off.
+              ...(st.agent ? { by: 'agent' } : {})
             })
           }
           if (parts.border) {
@@ -2676,7 +2692,9 @@ export function toExportSpec(
         }))
     ],
     ...(flatten ? { flatten: true } : {}),
-    ...(embedSession && !flatten ? { session } : {}),
+    // Through toSaved: a file on disk must never claim an agent is working
+    // right now (see toSaved's docstring).
+    ...(embedSession && !flatten ? { session: toSaved(session) } : {}),
     output
   }
 }
