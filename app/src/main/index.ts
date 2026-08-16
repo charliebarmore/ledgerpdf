@@ -23,7 +23,12 @@ import {
 } from './persistence'
 import { restrictedProcessEnv, runJsonCommand } from '../shared/json-process'
 import { clearRecents, readRecents, rememberBinder } from './recents'
-import { readPreparerInitials, writePreparerInitials } from './preferences'
+import {
+  readMarkSizes,
+  readPreparerInitials,
+  writeMarkSize,
+  writePreparerInitials
+} from './preferences'
 import {
   isPathInsideRoot,
   readAgentRoots,
@@ -384,8 +389,36 @@ function isSourcePath(p: string): boolean {
  * renderer replies on one channel.
  */
 let liveWindow: BrowserWindow | null = null
+let liveWindowReady = false
+let liveWindowBlock: string | null = null
 let liveSeq = 0
-const livePending = new Map<number, (payload: unknown) => void>()
+interface PendingLiveRequest {
+  windowId: number
+  request: Record<string, unknown>
+  sent: boolean
+  resolve: (payload: unknown) => void
+  reject: (error: Error) => void
+  timer: NodeJS.Timeout
+}
+const livePending = new Map<number, PendingLiveRequest>()
+
+function sendLiveRequest(id: number): void {
+  const pending = livePending.get(id)
+  const win = liveWindow
+  if (!pending || pending.sent || !liveWindowReady || !win || win.isDestroyed()) return
+  if (pending.windowId !== win.webContents.id) return
+  pending.sent = true
+  win.webContents.send('live:request', pending.request)
+}
+
+function rejectLiveRequests(windowId: number, message: string): void {
+  for (const [id, pending] of livePending) {
+    if (pending.windowId !== windowId) continue
+    livePending.delete(id)
+    clearTimeout(pending.timer)
+    pending.reject(new Error(message))
+  }
+}
 
 function askRenderer(
   kind: 'pull' | 'push',
@@ -395,56 +428,41 @@ function askRenderer(
 ): Promise<unknown> {
   const win = liveWindow
   if (!win || win.isDestroyed()) {
-    /**
-     * Live access is on and this process is alive, but its window is closed.
-     *
-     * On macOS that is just ⌘W: `window-all-closed` deliberately does not quit,
-     * so the app keeps running, the live socket keeps listening, and there is
-     * nothing to push to. Every agent call then failed with "no open binder
-     * window" — true, and useless: it names no cause and no remedy, and the
-     * person is looking at a Dock icon that appears perfectly healthy.
-     *
-     * Reopen the window rather than failing. The user turned live access on and
-     * left it on; a request arriving is exactly when they want their binder back.
-     *
-     * NOT a silent fall back to standalone, which is the tempting alternative:
-     * the agent would quietly start working on its own copy, and that is the
-     * precise failure live mode exists to prevent.
-     *
-     * The request itself is refused rather than queued, and deliberately so. A
-     * freshly created window has not yet mounted the renderer that answers
-     * `live:request`, so sending now would race its listener and time out 15
-     * seconds later with a worse message. One retry is honest and deterministic.
-     */
-    const reopened = BrowserWindow.getAllWindows().length === 0
-    if (reopened) createWindow()
-    else BrowserWindow.getAllWindows()[0]?.focus()
     return Promise.reject(
       new Error(
-        'LedgerPDF is running with live agent access on, but its binder window was closed, ' +
-          `so there was no binder to ${kind === 'pull' ? 'read' : 'change'}. The window has ` +
-          'been reopened — send the same request again.'
+        'live agent access ended because the binder window closed; reopen the binder and turn live access on again'
       )
     )
   }
+  if (liveWindowBlock) return Promise.reject(new Error(liveWindowBlock))
   const id = ++liveSeq
   return new Promise((resolve, reject) => {
-    // A renderer that never answers must not wedge the agent forever.
     const timer = setTimeout(() => {
+      const pending = livePending.get(id)
       livePending.delete(id)
-      reject(new Error('the binder window did not respond'))
+      reject(
+        new Error(
+          pending?.sent
+            ? 'the binder window did not respond'
+            : 'the binder window did not become ready'
+        )
+      )
     }, 15_000)
-    livePending.set(id, (value) => {
-      clearTimeout(timer)
-      resolve(value)
+    livePending.set(id, {
+      windowId: win.webContents.id,
+      request: {
+        id,
+        kind,
+        payload,
+        ...(focus ? { focus } : {}),
+        ...(typeof expectedRevision === 'number' ? { expectedRevision } : {})
+      },
+      sent: false,
+      resolve,
+      reject,
+      timer
     })
-    win.webContents.send('live:request', {
-      id,
-      kind,
-      payload,
-      ...(focus ? { focus } : {}),
-      ...(typeof expectedRevision === 'number' ? { expectedRevision } : {})
-    })
+    sendLiveRequest(id)
   })
 }
 
@@ -655,12 +673,32 @@ async function openBinderAt(target: string): Promise<unknown> {
 }
 
 function registerIpc(): void {
+  ipcMain.on('live:ready', (e) => {
+    assertTrustedIpc(e)
+    const senderId = e.sender.id
+    const accept = (): void => {
+      if (
+        !liveWindow ||
+        liveWindow.isDestroyed() ||
+        senderId !== liveWindow.webContents.id
+      ) {
+        return
+      }
+      liveWindowReady = true
+      for (const id of livePending.keys()) sendLiveRequest(id)
+    }
+    const devDelay = isDev ? Number(process.env.WPT_DEV_LIVE_READY_DELAY_MS) : NaN
+    if (Number.isFinite(devDelay) && devDelay > 0) setTimeout(accept, devDelay)
+    else accept()
+  })
+
   ipcMain.on('live:reply', (e, id: unknown, payload: unknown) => {
     assertTrustedIpc(e)
-    const resolve = typeof id === 'number' ? livePending.get(id) : undefined
-    if (resolve) {
+    const pending = typeof id === 'number' ? livePending.get(id) : undefined
+    if (pending && pending.windowId === e.sender.id) {
       livePending.delete(id as number)
-      resolve(payload)
+      clearTimeout(pending.timer)
+      pending.resolve(payload)
     }
   })
 
@@ -858,6 +896,16 @@ function registerIpc(): void {
   ipcMain.handle('prefs:initials:set', async (e, value: unknown) => {
     assertTrustedIpc(e)
     return writePreparerInitials(app.getPath('userData'), value)
+  })
+
+  ipcMain.handle('prefs:mark-sizes:get', async (e) => {
+    assertTrustedIpc(e)
+    return readMarkSizes(app.getPath('userData'))
+  })
+
+  ipcMain.handle('prefs:mark-size:set', async (e, key: unknown, size: unknown) => {
+    assertTrustedIpc(e)
+    return writeMarkSize(app.getPath('userData'), key, size)
   })
 
   /**
@@ -1182,9 +1230,18 @@ function createWindow(): void {
       sandbox: true
     }
   })
-  trustedWebContents.add(win.webContents.id)
+  const windowContentsId = win.webContents.id
+  trustedWebContents.add(windowContentsId)
   liveWindow = win
-  win.webContents.once('destroyed', () => trustedWebContents.delete(win.webContents.id))
+  liveWindowReady = false
+  liveWindowBlock = null
+  win.webContents.on('did-start-loading', () => {
+    if (liveWindow === win) liveWindowReady = false
+  })
+  win.webContents.once('destroyed', () => {
+    trustedWebContents.delete(windowContentsId)
+    rejectLiveRequests(windowContentsId, 'the binder window closed')
+  })
 
   // This application never needs browser permissions, webviews, or navigation.
   // Deny them centrally so a future renderer bug cannot silently widen scope.
@@ -1289,6 +1346,13 @@ function createWindow(): void {
   // Never let the app navigate away or spawn windows — it is a local tool.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
+  let closePromptOpen = false
+  const startClosing = (): void => {
+    liveWindowReady = false
+    liveWindowBlock = 'the binder window is closing; retry after reopening the binder and enabling live access'
+    rejectLiveRequests(windowContentsId, liveWindowBlock)
+  }
+
   win.on('close', (event) => {
     if (
       allowWindowClose ||
@@ -1296,20 +1360,58 @@ function createWindow(): void {
       (isDev && process.env.WPT_DEV_EXIT) ||
       packageUiSmoke
     ) {
+      startClosing()
       return
     }
-    const choice = dialog.showMessageBoxSync(win, {
-      type: 'warning',
-      title: 'Unsaved workpaper changes',
-      message: 'This binder has changes that have not been saved.',
-      detail: 'Keep editing and save the session before closing.',
-      buttons: ['Keep editing', 'Discard changes'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true
+    event.preventDefault()
+    if (closePromptOpen) return
+    closePromptOpen = true
+    liveWindowBlock =
+      'the reviewer has an unsaved-changes dialog open; dismiss it, then retry'
+    rejectLiveRequests(windowContentsId, liveWindowBlock)
+    void (async () => {
+      let choice: number
+      const devHold = isDev ? Number(process.env.WPT_DEV_CLOSE_DIALOG_HOLD_MS) : NaN
+      if (Number.isFinite(devHold) && devHold >= 0) {
+        await new Promise((resolve) => setTimeout(resolve, devHold))
+        choice = process.env.WPT_DEV_CLOSE_DIALOG_RESPONSE === 'discard' ? 1 : 0
+      } else {
+        const result = await dialog.showMessageBox(win, {
+          type: 'warning',
+          title: 'Unsaved workpaper changes',
+          message: 'This binder has changes that have not been saved.',
+          detail: 'Keep editing and save the session before closing.',
+          buttons: ['Keep editing', 'Discard changes'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true
+        })
+        choice = result.response
+      }
+      closePromptOpen = false
+      if (choice === 0) {
+        liveWindowBlock = null
+        return
+      }
+      allowWindowClose = true
+      startClosing()
+      win.close()
+    })().catch(() => {
+      closePromptOpen = false
+      liveWindowBlock = null
     })
-    if (choice === 0) event.preventDefault()
-    else allowWindowClose = true
+  })
+
+  win.on('closed', () => {
+    if (liveWindow !== win) return
+    liveWindow = null
+    liveWindowReady = false
+    liveWindowBlock = null
+    rendererDirty = false
+    // Live access belongs to the exact binder window that enabled it. A fresh
+    // window starts with newSession(); keeping the socket alive would let an
+    // agent believe it was still editing the closed binder.
+    void setLiveAccess(false).catch(() => {})
   })
 
   const devUrl = process.env.ELECTRON_RENDERER_URL

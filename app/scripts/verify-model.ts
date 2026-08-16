@@ -15,6 +15,12 @@ import { readFile, readdir, stat as statFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   SESSION_FORMAT_VERSION,
+  MARK_SIZE_DEFAULT,
+  MARK_SIZE_MIN,
+  MARK_SIZE_MAX,
+  dateMarkText,
+  formatCalendarDate,
+  textMarkSize,
   CONN_STROKE_RATIO,
   connectorFontSize,
   legendEntries,
@@ -104,6 +110,10 @@ import {
   reviewRuns,
   reviewSnapshot
 } from '../src/renderer/src/review'
+import {
+  markSizePreferenceKey,
+  preferredMarkSize
+} from '../src/renderer/src/mark-preferences'
 
 const APP = path.resolve(__dirname, '..')
 const REPO = path.resolve(APP, '..')
@@ -884,6 +894,144 @@ async function main(): Promise<number> {
     updateMark(marked, m1.id, { size: 999 }).marks!.find((m) => m.id === m1.id)!.size === 72
   )
   check(
+    'placement sizes are remembered per stamp rather than globally',
+    preferredMarkSize({ 'text:F': 12 }, { kind: 'text', text: 'F' }) === 12 &&
+      preferredMarkSize({ 'text:F': 12 }, { kind: 'tick' }) === MARK_SIZE_DEFAULT &&
+      markSizePreferenceKey({ kind: 'text', text: 'GL' }) === 'text:GL'
+  )
+  check(
+    'stored placement sizes are clamped before a mark is placed',
+    preferredMarkSize({ tick: 0, cross: 999 }, { kind: 'tick' }) === MARK_SIZE_MIN &&
+      preferredMarkSize({ tick: 0, cross: 999 }, { kind: 'cross' }) === MARK_SIZE_MAX
+  )
+
+  let dateSession = newSession()
+  dateSession = addSource(dateSession, pa.probe as ProbeWire)
+  const dated = addMark(dateSession, {
+    page: dateSession.pages[0].id,
+    kind: 'date',
+    nx: 0.42,
+    ny: 0.34,
+    size: 20,
+    // The model must ignore both fields for a date mark; callers do not get to
+    // choose the visible date.
+    text: '1/1/2000',
+    date: '2000-01-01'
+  })
+  dateSession = dated.session
+  const dateMark = dateSession.marks![0]
+  check(
+    'a date mark stores the placement-day calendar date separately from UTC time',
+    dateMark.kind === 'date' &&
+      dateMark.text === undefined &&
+      !!formatCalendarDate(dateMark.date) &&
+      dateMarkText(dateMark) === formatCalendarDate(dateMark.date) &&
+      typeof dateMark.created === 'string',
+    JSON.stringify(dateMark)
+  )
+  const attemptedBackdate = updateMark(dateSession, dated.id, {
+    text: '1/1/2000',
+    date: '2000-01-01',
+    created: '2000-01-01T00:00:00.000Z'
+  }).marks![0]
+  check(
+    'inspector updates cannot backdate a date stamp or rewrite its timestamp',
+    attemptedBackdate.date === dateMark.date &&
+      attemptedBackdate.created === dateMark.created &&
+      attemptedBackdate.text === undefined
+  )
+  const dateRoundTrip = parseSession(JSON.parse(JSON.stringify(dateSession)))
+  check(
+    'a date stamp survives save and reopen with the same visible day',
+    'session' in dateRoundTrip &&
+      dateMarkText(dateRoundTrip.session.marks![0]) === dateMarkText(dateMark),
+    'session' in dateRoundTrip ? JSON.stringify(dateRoundTrip.session.marks) : dateRoundTrip.error
+  )
+  const invalidDateRoundTrip = parseSession({
+    ...JSON.parse(JSON.stringify(dateSession)),
+    marks: [{ ...dateMark, date: '2026-02-30' }]
+  })
+  check(
+    'reopen drops an invalid calendar-date mark instead of printing a false day',
+    'session' in invalidDateRoundTrip && (invalidDateRoundTrip.session.marks ?? []).length === 0
+  )
+
+  const dateSpec = toExportSpec(dateSession, OUT)
+  const dateAnnotation = dateSpec.annotations[0]
+  check(
+    'the engine receives the display date from the model, not from the caller',
+    dateAnnotation.kind === 'date' &&
+      dateAnnotation.date === dateMark.date &&
+      dateAnnotation.date_text === dateMarkText(dateMark) &&
+      dateAnnotation.text === undefined,
+    JSON.stringify(dateAnnotation)
+  )
+  const metricProbe = await runPython([
+    '-c',
+    'import sys,json; sys.path.insert(0,"engine");' +
+      'from workpaper_engine.appearance import text_mark_size;' +
+      `print(json.dumps(text_mark_size(${JSON.stringify(dateMarkText(dateMark))}, 10)))`
+  ])
+  const engineDateSize = JSON.parse(metricProbe.out.trim().split('\n').pop() ?? '[]') as number[]
+  const rendererDateSize = textMarkSize(dateMarkText(dateMark), 20)
+  check(
+    'date-stamp bounds are identical in the renderer and engine',
+    Math.abs(engineDateSize[0] - rendererDateSize.width) < 1e-9 &&
+      Math.abs(engineDateSize[1] - rendererDateSize.height) < 1e-9,
+    `${JSON.stringify(engineDateSize)} vs ${JSON.stringify(rendererDateSize)}`
+  )
+  const DATE_OUT = path.join(REPO, 'spike', 'out', 'app_binder_date.pdf')
+  const dateExport = await runEngine({
+    cmd: 'export',
+    binder: toExportSpec(dateSession, DATE_OUT, { embedSession: true })
+  })
+  check('a date stamp exports cleanly', dateExport.ok === true, dateExport.error ?? '')
+  if (dateExport.ok) {
+    const dateProbe = await runEngine({ cmd: 'probe', path: DATE_OUT })
+    const dateAnnots = dateProbe.ok
+      ? dateProbe.probe.pages.flatMap((page: any) =>
+          (page.annotations ?? []).filter((annotation: any) => annotation.wpt_kind === 'date')
+        )
+      : []
+    check(
+      'the exported date annotation retains its calendar date and timestamp',
+      dateAnnots.length === 1 &&
+        dateAnnots[0].wpt_data?.date === dateMark.date &&
+        dateAnnots[0].wpt_data?.created === dateMark.created,
+      JSON.stringify(dateAnnots)
+    )
+    const datePos = await runPython([
+      path.join(REPO, 'spike', 'check_mark_positions.py'),
+      DATE_OUT,
+      '0',
+      'blue',
+      '0.42',
+      '0.34'
+    ])
+    check('a date stamp exports centred where it was clicked', datePos.code === 0, datePos.out.trim())
+  }
+  const DATE_FLAT = path.join(REPO, 'spike', 'out', 'app_binder_date_flat.pdf')
+  const dateFlatExport = await runEngine({
+    cmd: 'export',
+    binder: toExportSpec(dateSession, DATE_FLAT, { flatten: true })
+  })
+  check('a date stamp flattens cleanly', dateFlatExport.ok === true, dateFlatExport.error ?? '')
+  if (dateFlatExport.ok) {
+    const flatDatePos = await runPython([
+      path.join(REPO, 'spike', 'check_mark_positions.py'),
+      DATE_FLAT,
+      '0',
+      'blue',
+      '0.42',
+      '0.34'
+    ])
+    check(
+      'a flattened date stamp stays centred where it was clicked',
+      flatDatePos.code === 0,
+      flatDatePos.out.trim()
+    )
+  }
+  check(
     'marks survive save/reopen',
     (() => {
       const rt = parseSession(JSON.parse(JSON.stringify(marked)))
@@ -1578,6 +1726,35 @@ async function main(): Promise<number> {
       JSON.stringify(ends.map((m) => m.refTarget))
     )
 
+    const reopenedPair = parseSession(JSON.parse(JSON.stringify(pair.session)))
+    check(
+      'connector links survive the saved-session parser',
+      'session' in reopenedPair &&
+        (reopenedPair.session.links ?? []).length === 2 &&
+        reopenedPair.session.links!.every(
+          (link) =>
+            (link.page === p1 && link.target === p2) ||
+            (link.page === p2 && link.target === p1)
+        ),
+      'session' in reopenedPair ? JSON.stringify(reopenedPair.session.links) : reopenedPair.error
+    )
+    const hostilePair = JSON.parse(JSON.stringify(pair.session))
+    hostilePair.links.push({
+      ...hostilePair.links[0],
+      id: 'ln_missing_target',
+      target: 'pg_missing'
+    })
+    const reopenedHostilePair = parseSession(hostilePair)
+    check(
+      'reopen drops a link whose target page no longer exists',
+      'session' in reopenedHostilePair &&
+        (reopenedHostilePair.session.links ?? []).length === 2 &&
+        reopenedHostilePair.session.links!.every((link) => link.target !== 'pg_missing'),
+      'session' in reopenedHostilePair
+        ? JSON.stringify(reopenedHostilePair.session.links)
+        : reopenedHostilePair.error
+    )
+
     // The whole reason refTarget holds a page id: reorder the binder and the
     // printed reference must follow. A stored number would be wrong here and
     // would still read as authoritative on a signed document.
@@ -1657,6 +1834,18 @@ async function main(): Promise<number> {
         'the exported binder carries a clickable link at each end',
         links.filter((n: number) => n > 0).length === 2,
         JSON.stringify(links)
+      )
+      const ownedLinks = cp.ok
+        ? cp.probe.pages.flatMap((p: any) =>
+            (p.annotations ?? []).filter(
+              (a: any) => a.subtype === '/Link' && a.wpt_data?.kind === 'link'
+            )
+          )
+        : []
+      check(
+        'generated links carry the ownership marker used during reopen cleanup',
+        ownedLinks.length === 2,
+        JSON.stringify(ownedLinks.map((a: any) => a.wpt_data))
       )
       const connPos = await runPython([
         path.join(REPO, 'spike', 'check_mark_positions.py'),
@@ -2641,6 +2830,12 @@ print(';'.join(f'{a}={o}' for a, o in hits))`
     s = addMark(s, { page: s.pages[0].id, kind: 'tick', nx: 0.75, ny: 0.25, size: 24, author: 'ABC' }).session
     s = addMark(s, { page: s.pages[3].id, kind: 'text', text: 'F', nx: 0.4, ny: 0.6, size: 24, author: 'ABC' }).session
     s = addTape(s, { page: s.pages[0].id, nx: 0.5, ny: 0.5, entries: [], author: 'ABC' }).session
+    s = addLink(s, {
+      page: s.pages[0].id,
+      target: s.pages[3].id,
+      rect: [0.72, 0.22, 0.78, 0.28],
+      label: 'Round-trip reference'
+    }).session
     s = { ...s, reviewer: 'ABC', stamps: ['TB'] }
 
     const wrote = await runEngine({
@@ -2652,6 +2847,33 @@ print(';'.join(f'{a}={o}' for a, o in hits))`
       'round trip: the session is actually in the file',
       (wrote.result?.session_bytes ?? 0) > 0,
       `${wrote.result?.session_bytes} bytes`
+    )
+
+    // Releases through 0.2.1 named generated links `wpt-link-*` but omitted
+    // /WPT_Data. Reopen must clean that already-shipped generation too, or the
+    // restored session link will stack a duplicate over it on the next save.
+    const legacyLink = await runPython([
+      '-c',
+      `import os,pikepdf,sys
+from pikepdf import Name
+p=sys.argv[1]; q=p+'.legacy-link'
+with pikepdf.open(p) as pdf:
+    n=0
+    for pg in pdf.pages:
+        for a in pg.obj.get(Name('/Annots')) or []:
+            if a.get(Name('/Subtype')) == Name('/Link'):
+                for k in (Name('/WPT_Data'),Name('/WPT_Kind')):
+                    if k in a: del a[k]
+                n+=1
+    pdf.save(q)
+os.replace(q,p)
+print(n)`,
+      RT
+    ])
+    check(
+      'round trip fixture simulates a pre-fix generated link',
+      legacyLink.code === 0 && legacyLink.out.trim() === '1',
+      legacyLink.out.trim()
     )
 
     const opened = await runEngine({ cmd: 'open_binder', path: RT })
@@ -2698,6 +2920,13 @@ print(';'.join(f'{a}={o}' for a, o in hits))`
       `${back.marks?.length} marks, ${back.tapes?.length} tapes`
     )
     check(
+      'round trip: clickable links still name their original pages',
+      back.links?.length === 1 &&
+        back.links[0].page === s.links?.[0].page &&
+        back.links[0].target === s.links?.[0].target,
+      JSON.stringify(back.links)
+    )
+    check(
       'round trip: the firm legend and reviewer travelled with the file',
       back.reviewer === 'ABC' && back.stamps?.[0] === 'TB'
     )
@@ -2729,7 +2958,7 @@ n=0
 with pikepdf.open(sys.argv[1]) as pdf:
     for pg in pdf.pages:
         for a in pg.obj.get(Name('/Annots')) or []:
-            if Name('/WPT_Data') in a: n+=1
+            if Name('/WPT_Data') in a and a.get(Name('/Subtype')) != Name('/Link'): n+=1
 print(n)`,
       RT2
     ])
@@ -2737,6 +2966,17 @@ print(n)`,
       'round trip: marks did not double on the second save',
       countMarks.out.trim() === '3',
       `${countMarks.out.trim()} marks (expected 3: 2 marks + 1 tape)`
+    )
+    const secondProbe = await runEngine({ cmd: 'probe', path: RT2 })
+    const secondLinks = secondProbe.ok
+      ? secondProbe.probe.pages.flatMap((page: any) =>
+          (page.annotations ?? []).filter((annotation: any) => annotation.subtype === '/Link')
+        )
+      : []
+    check(
+      'round trip: the clickable link survives Save -> Open -> Save',
+      secondLinks.length === 1,
+      `${secondLinks.length} links`
     )
 
     // --- "Save a copy to send out" must not carry the working record with it.

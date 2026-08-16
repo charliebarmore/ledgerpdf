@@ -69,6 +69,7 @@ import {
   setLegend,
   deletePages,
   formatAmount,
+  formatCalendarDate,
   formatCents,
   parseMoney,
   movePages,
@@ -816,10 +817,10 @@ registerTool(
   {
     title: 'Place a review mark',
     description:
-      'Put a tick (agreed), cross (does not agree), or short lettered stamp on a page. Coordinates are normalized to the page as displayed: nx 0→1 left to right, ny 0→1 TOP TO BOTTOM.',
+      'Put a tick (agreed), cross (does not agree), short lettered stamp, review note, or date stamp on a page. A date stamp always uses the local calendar date when the tool runs; the caller cannot supply or backdate it. Coordinates are normalized to the page as displayed: nx 0→1 left to right, ny 0→1 TOP TO BOTTOM.',
     inputSchema: {
       pageId: z.string(),
-      kind: z.enum(['tick', 'cross', 'text', 'note']),
+      kind: z.enum(['tick', 'cross', 'text', 'note', 'date']),
       nx: z.number().min(0).max(1),
       ny: z.number().min(0).max(1),
       text: z.string().max(8).optional().describe('Required for kind "text" — e.g. F, TB, PY'),
@@ -830,6 +831,9 @@ registerTool(
   async ({ pageId, kind, nx, ny, text: letters, size, note }) => {
     if (!session.pages.some((p) => p.id === pageId)) return fail(`unknown page id: ${pageId}`)
     if (kind === 'text' && !letters?.trim()) return fail('kind "text" needs the text to stamp')
+    if (kind === 'date' && letters !== undefined) {
+      return fail('kind "date" does not accept text — it stamps the current local calendar date')
+    }
     if (kind === 'note' && !note?.trim()) {
       return fail('kind "note" needs the note text — an empty comment tells a reviewer nothing')
     }
@@ -1009,7 +1013,13 @@ registerTool(
     const rows = [
       ...marks.map(
         (m) =>
-          `${m.id}  p${order.get(m.page) ?? '?'} ${m.page}  ${m.kind === 'text' ? `"${m.text}"` : m.kind}` +
+          `${m.id}  p${order.get(m.page) ?? '?'} ${m.page}  ${
+            m.kind === 'text'
+              ? `"${m.text}"`
+              : m.kind === 'date'
+                ? `date "${formatCalendarDate(m.date)}"`
+                : m.kind
+          }` +
           `  (${m.nx.toFixed(3)}, ${m.ny.toFixed(3)})  ${m.size}pt` +
           `${m.author ? `  ${m.author}` : ''}${m.note ? `  — ${m.note}` : ''}`
       ),

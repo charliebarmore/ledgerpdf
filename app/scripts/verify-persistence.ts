@@ -7,6 +7,12 @@ import {
   readSessionWithRecovery,
   recoveryPathFor
 } from '../src/main/persistence'
+import {
+  readMarkSizes,
+  readPreparerInitials,
+  writeMarkSize,
+  writePreparerInitials
+} from '../src/main/preferences'
 import { agentConnectCommand } from '../src/shared/agent-connect'
 
 async function main(): Promise<void> {
@@ -55,7 +61,31 @@ async function main(): Promise<void> {
     assert.doesNotMatch(source.command, /ELECTRON_RUN_AS_NODE/)
     assert.match(source.command, /-- node "\/repo with spaces\/app\/out\/mcp-server\.cjs"/)
 
-    console.log('8/8 persistence and registration checks passed')
+    const prefDir = path.join(dir, 'user-data')
+    await writePreparerInitials(prefDir, ' cjb ')
+    assert.equal(await readPreparerInitials(prefDir), 'CJB')
+    assert.deepEqual(await writeMarkSize(prefDir, 'tick', 0), { key: 'tick', size: 10 })
+    assert.deepEqual(await writeMarkSize(prefDir, 'text:F', 999), { key: 'text:F', size: 72 })
+    assert.deepEqual(await readMarkSizes(prefDir), { tick: 10, 'text:F': 72 })
+
+    // Both preference families can be written together without a stale
+    // read-modify-write dropping whichever one reached disk first.
+    await Promise.all([
+      writePreparerInitials(prefDir, 'ab'),
+      writeMarkSize(prefDir, 'cross', 16)
+    ])
+    assert.equal(await readPreparerInitials(prefDir), 'AB')
+    assert.deepEqual(await readMarkSizes(prefDir), { tick: 10, 'text:F': 72, cross: 16 })
+    assert.equal(await writeMarkSize(prefDir, 'not-a-tool', 20), null)
+    if (process.platform !== 'win32') {
+      assert.equal(
+        (await stat(path.join(prefDir, 'preferences.json'))).mode & 0o077,
+        0,
+        'preferences must not be group/world readable'
+      )
+    }
+
+    console.log('17/17 persistence, preferences and registration checks passed')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

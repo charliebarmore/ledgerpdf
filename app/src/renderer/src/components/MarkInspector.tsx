@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import { MARK_SIZE_MAX, MARK_SIZE_MIN, STAMP_MAX_LEN, type Mark } from '../session'
+import {
+  MARK_SIZE_MAX,
+  MARK_SIZE_MIN,
+  STAMP_MAX_LEN,
+  dateMarkText,
+  type Mark
+} from '../session'
 import { MARK_COLOR, MARK_GLYPH } from './MarkLayer'
 
 /**
@@ -68,11 +74,17 @@ export function MarkInspector({
 
       <div className="mi-id">
         <span className="mi-glyph" style={{ color: MARK_COLOR[mark.kind] }}>
-          {mark.kind === 'text' || mark.kind === 'conn' ? mark.text : MARK_GLYPH[mark.kind]}
+          {mark.kind === 'text' || mark.kind === 'conn'
+            ? mark.text
+            : mark.kind === 'date'
+              ? dateMarkText(mark)
+              : MARK_GLYPH[mark.kind]}
         </span>
         <span className="mi-kind">
           {mark.kind === 'text'
             ? 'Lettered stamp'
+            : mark.kind === 'date'
+              ? 'Date stamp'
             : mark.kind === 'conn'
               ? // Say which half of the reference this is. An unpaired connector
                 // looks identical to a paired one on the page, and the whole

@@ -93,6 +93,12 @@ import {
   type ToolKind
 } from './session'
 import { reviewSnapshot } from './review'
+import {
+  clampMarkSize,
+  markSizePreferenceKey,
+  preferredMarkSize,
+  type MarkSizePreferences
+} from './mark-preferences'
 
 const MOD = window.wpt.platform === 'darwin' ? '⌘' : 'Ctrl'
 
@@ -202,7 +208,7 @@ export default function App(): React.JSX.Element {
   const [tapeBuffer, setTapeBuffer] = useState('')
   const [tapeOp, setTapeOp] = useState<TapeOp>('+')
   const [keypadOpen, setKeypadOpen] = useState(true)
-  const [markSize] = useState(MARK_SIZE_DEFAULT)
+  const [markSizes, setMarkSizes] = useState<MarkSizePreferences>({})
   const [shapeColor, setShapeColor] = useState<ShapeColor>('red')
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
@@ -426,6 +432,7 @@ export default function App(): React.JSX.Element {
     // moment it is visible again.
     void window.wpt.recentBinders().then(setRecents)
     void window.wpt.preparerInitials().then(setPreparerInitials)
+    void window.wpt.markSizes().then(setMarkSizes)
     // Opened from Finder while already running: pushed to this listener.
     window.wpt.onOpenPath((target) => void openRef.current(target))
     // Opened from Finder on a COLD start: the path was waiting before this
@@ -507,6 +514,9 @@ export default function App(): React.JSX.Element {
       }
       window.wpt.liveReply(req.id, { ok: true })
     })
+    // Register the request listener first. Main queues any request that arrived
+    // during mount and sends it only after this signal.
+    window.wpt.liveReady()
   }, [])
 
   /**
@@ -825,7 +835,8 @@ export default function App(): React.JSX.Element {
       if (isShapeKind(armed.kind)) return
       if (armed.kind === 'conn') {
         const label = (armed.text ?? '').trim() || '1'
-        const res = placeConnector(from, { page: pageId, nx, ny, size: markSize, label }, who)
+        const size = preferredMarkSize(markSizes, armed)
+        const res = placeConnector(from, { page: pageId, nx, ny, size, label }, who)
         apply(
           res.session,
           res.paired
@@ -851,7 +862,7 @@ export default function App(): React.JSX.Element {
         kind: armed.kind,
         nx,
         ny,
-        size: markSize,
+        size: preferredMarkSize(markSizes, armed),
         ...(armed.text ? { text: armed.text } : {})
       })
       // `|| armed.kind` because a lettered mark with no letters is possible —
@@ -869,7 +880,7 @@ export default function App(): React.JSX.Element {
       // tool off is the reviewer asking for one and done.
       if (!keepMark) setArmed(null)
     },
-    [pages, armed, session, markSize, apply, initialsPrompt, preparerInitials, keepMark]
+    [pages, armed, session, markSizes, apply, initialsPrompt, preparerInitials, keepMark]
   )
 
   /**
@@ -979,13 +990,32 @@ export default function App(): React.JSX.Element {
     [session.marks, selectedMarkId]
   )
 
+  const rememberMarkSize = useCallback((mark: Pick<Mark, 'kind' | 'text'>, value: number) => {
+    const key = markSizePreferenceKey(mark)
+    if (!key) return
+    const size = clampMarkSize(value)
+    setMarkSizes((current) => ({ ...current, [key]: size }))
+    // A preference write must not block editing. Main serializes preference
+    // updates so a near-simultaneous initials write cannot overwrite this one.
+    void window.wpt.setMarkSize(key, size).then((stored) => {
+      if (stored) setMarkSizes((current) => ({ ...current, [stored.key]: stored.size }))
+    })
+  }, [])
+
   /** Inspector edits — note, author, letters, size — on the selected mark. */
   const editMark = useCallback(
     (patch: Partial<Mark>) => {
       if (!selectedMarkId) return
-      apply(updateMark(session, selectedMarkId, patch), 'Mark updated.')
+      const mark = (session.marks ?? []).find((candidate) => candidate.id === selectedMarkId)
+      if (!mark) return
+      const next = updateMark(session, selectedMarkId, patch)
+      if (typeof patch.size === 'number') {
+        const updated = (next.marks ?? []).find((candidate) => candidate.id === selectedMarkId)
+        if (updated) rememberMarkSize(mark, updated.size)
+      }
+      apply(next, 'Mark updated.')
     },
-    [selectedMarkId, session, apply]
+    [selectedMarkId, session, apply, rememberMarkSize]
   )
 
   // ---------------------------------------------------------- calculator tape
@@ -1848,6 +1878,51 @@ export default function App(): React.JSX.Element {
             await until('the agent panel to open', () => devPlay.current.agentPanelOpen)
             continue
           }
+          // stamp:<letters> — arm a real lettered stamp. Keeping the text in
+          // the tool identity is what lets the size preference distinguish F
+          // from GL, so a generic arm:text step cannot cover this path.
+          const stamp = raw.match(/^stamp:(.*)$/i)
+          if (stamp) {
+            const text = stamp[1].trim()
+            if (!text) throw new Error('dev place script: stamp needs letters')
+            devPlay.current.setArmed({ kind: 'text', text })
+            await until(
+              `the ${text} stamp to arm`,
+              () =>
+                devPlay.current.armed?.kind === 'text' &&
+                devPlay.current.armed.text === text
+            )
+            continue
+          }
+          // size:<points> — drive the selected mark's REAL inspector buttons.
+          // This is deliberately DOM-facing: calling updateMark here would
+          // prove the model and skip the inspector -> preference -> next
+          // placement wiring that a preparer actually uses.
+          const preferredSize = raw.match(/^size:(\d+)$/i)
+          if (preferredSize) {
+            const want = Number(preferredSize[1])
+            const value = (): number =>
+              Number(document.querySelector<HTMLElement>('.mi-size-val')?.textContent ?? NaN)
+            for (let i = 0; i < 20 && value() !== want; i++) {
+              const buttons = document.querySelectorAll<HTMLButtonElement>('.mi-size button')
+              const button = want < value() ? buttons[0] : buttons[1]
+              if (!button || button.disabled) {
+                throw new Error(`dev place script: cannot resize selected mark to ${want}pt`)
+              }
+              const before = value()
+              button.click()
+              await until(
+                `the selected mark size to change from ${before}`,
+                () => value() !== before
+              )
+            }
+            if (value() !== want) {
+              throw new Error(
+                `dev place script: selected mark reached ${value()}pt, expected ${want}pt`
+              )
+            }
+            continue
+          }
           // arm:<kind> — select a tool without using it. Explicit, so a drag can
           // demand the tool already be armed and thereby TEST the lock.
           const arm = raw.match(/^arm:([a-z]+)$/i)
@@ -2315,17 +2390,19 @@ export default function App(): React.JSX.Element {
           className="move"
           onClick={() => nudge(-1)}
           disabled={!count || minSelectedIndex <= 0}
+          aria-label="Move selected pages earlier"
           title={`Move the selected page(s) earlier in the binder  ${MOD}↑`}
         >
-          Move ↑
+          ↑
         </button>
         <button
           className="move"
           onClick={() => nudge(1)}
           disabled={!count || maxSelectedIndex >= pages.length - 1}
+          aria-label="Move selected pages later"
           title={`Move the selected page(s) later in the binder  ${MOD}↓`}
         >
-          Move ↓
+          ↓
         </button>
         <button onClick={remove} disabled={!count} title="Delete (undoable)  ⌫">
           Delete
@@ -2398,6 +2475,14 @@ export default function App(): React.JSX.Element {
             }
           >
             {reviewerInitials || '··'}
+          </button>
+          <button
+            className={armed?.kind === 'date' ? 'on' : ''}
+            style={{ color: MARK_COLOR.date }}
+            onClick={() => setArmed({ kind: 'date' })}
+            title="Date stamp — uses today's local calendar date. Click the page to place."
+          >
+            Date
           </button>
           <button
             className={armed?.kind === 'tape' ? 'on' : ''}
