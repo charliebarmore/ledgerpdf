@@ -471,6 +471,53 @@ if (existsSync(PLACE_PDF)) {
   )
 }
 
+// ----------------------------------- remembered placement size, driven for real
+//
+// Charlie hit this on a generated form: shrinking an F to fit its "Verified by"
+// box fixed only that one mark, and the next F went back to 24pt. The model and
+// persistence checks cover the two pieces independently; this run closes the
+// user-facing seam by clicking the actual inspector buttons and then placing
+// through placeTool again.
+const SIZE_PDF = path.join(REPO, 'spike', 'out', 'app_marksize_binder.pdf')
+rmSync(SIZE_PDF, { force: true })
+const markSize = await run('npm', ['run', 'dev'], {
+  cwd: APP,
+  shell: process.platform === 'win32',
+  env: {
+    ...process.env,
+    WPT_DEV_OPEN: a,
+    WPT_DEV_EXPORT: SIZE_PDF,
+    WPT_DEV_SHOT: path.join(REPO, 'spike', 'out', 'app_marksize_window.png'),
+    WPT_DEV_PLACE:
+      'lock:on;stamp:F;keep:text@0.20,0.20;answer:RV;size:12;' +
+      'keep:text@0.20,0.40;arm:tick;keep:tick@0.20,0.60',
+    WPT_DEV_USERDATA: home('marksize'),
+    WPT_DEV_EXIT: '1'
+  }
+})
+check('remembered-size run exited cleanly', markSize.code === 0, `exit=${markSize.code}`)
+check('remembered-size run produced a binder', existsSync(SIZE_PDF), SIZE_PDF)
+if (existsSync(SIZE_PDF)) {
+  const sized = await engine({ cmd: 'probe', path: SIZE_PDF })
+  const annotations = sized.ok
+    ? sized.probe.pages.flatMap((pg) => pg.annotations ?? [])
+    : []
+  const fs = annotations.filter(
+    (annotation) => annotation.wpt_kind === 'text' && annotation.wpt_data?.text === 'F'
+  )
+  const ticks = annotations.filter((annotation) => annotation.wpt_kind === 'tick')
+  check(
+    'resizing F makes the next F use the same size',
+    fs.length === 2 && fs.every((annotation) => annotation.wpt_data?.size === 12),
+    `F sizes: ${fs.map((annotation) => annotation.wpt_data?.size).join(', ') || 'none'}`
+  )
+  check(
+    'the F preference does not change the tick size',
+    ticks.length === 1 && ticks[0]?.wpt_data?.size === 24,
+    `tick sizes: ${ticks.map((annotation) => annotation.wpt_data?.size).join(', ') || 'none'}`
+  )
+}
+
 // ---------------------------------------------------------------- Keep tool
 //
 // A drawing tool normally deselects after one shape, because the next click is

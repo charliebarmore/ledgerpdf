@@ -4,7 +4,9 @@ import {
   MARK_COLOR,
   MARK_GLYPH,
   connectorFontSize,
+  dateMarkText,
   markCursor,
+  textMarkSize,
   type Mark,
   type ToolKind
 } from '../session'
@@ -82,7 +84,11 @@ export function MarkLayer({
         height,
         // A stamp shows as its own glyph; drag tools keep the crosshair.
         cursor:
-          armed && (armed.kind === 'tick' || armed.kind === 'cross' || armed.kind === 'text')
+          armed &&
+          (armed.kind === 'tick' ||
+            armed.kind === 'cross' ||
+            armed.kind === 'text' ||
+            armed.kind === 'date')
             ? markCursor(armed.kind, armed.text)
             : undefined
       }}
@@ -97,6 +103,9 @@ export function MarkLayer({
         // occupies the same fraction of the page at any zoom — and the same
         // fraction of the sheet once exported.
         const px = m.size * scale
+        const text = m.kind === 'date' ? dateMarkText(m) : m.text ?? ''
+        const textBox =
+          m.kind === 'text' || m.kind === 'date' ? textMarkSize(text, m.size) : null
         return (
           <span
             key={m.id}
@@ -109,8 +118,8 @@ export function MarkLayer({
             style={{
               left: `${m.nx * 100}%`,
               top: `${m.ny * 100}%`,
-              width: px,
-              height: px,
+              width: textBox ? textBox.width * scale : px,
+              height: textBox ? textBox.height * scale : px,
               color: MARK_COLOR[m.kind],
               // The ring is drawn in CSS here and as a Bezier in the engine, so
               // its stroke has to be stated in both. `is-conn` in styles.css
@@ -120,20 +129,24 @@ export function MarkLayer({
                     fontSize: connectorFontSize(px, m.text ?? ''),
                     borderWidth: Math.max(1, px * CONN_STROKE_RATIO)
                   }
-                : { fontSize: m.kind === 'text' ? px * 0.62 : px })
+                : { fontSize: m.kind === 'text' || m.kind === 'date' ? px * 0.5 : px })
             }}
             title={
               m.kind === 'conn'
                 ? `Connector ${m.text}${m.refTarget ? ' · tied to another page' : ' · waiting for its other end'}${
                     m.author ? ` · ${m.author}` : ''
                   }`
-                : `${m.kind === 'text' ? m.text : m.kind}${m.author ? ` · ${m.author}` : ''}${
+                : `${m.kind === 'text' ? m.text : m.kind === 'date' ? text : m.kind}${m.author ? ` · ${m.author}` : ''}${
                     m.created ? ` · ${new Date(m.created).toLocaleString()}` : ''
                   }`
             }
             onPointerDown={(e) => startDrag(e, m.id)}
           >
-            {m.kind === 'text' || m.kind === 'conn' ? m.text : MARK_GLYPH[m.kind]}
+            {m.kind === 'text' || m.kind === 'conn'
+              ? m.text
+              : m.kind === 'date'
+                ? text
+                : MARK_GLYPH[m.kind]}
           </span>
         )
       })}

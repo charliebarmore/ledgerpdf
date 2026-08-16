@@ -33,11 +33,11 @@ npm run verify     # typecheck + model verification + GUI smoke test
 | Script | What it proves |
 |---|---|
 | `typecheck` | main/preload and renderer both typecheck |
-| `verify:persistence` | 8 checks proving atomic session replacement, private POSIX permissions, recovery, temporary-file cleanup, and shell-independent installed MCP registration |
-| `verify:model` | 283 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity, owner-only working copies, atomic-output failure paths, reorder, rotation, bookmarks, marks, custom stamps, flattening, and review/preflight decisions) |
+| `verify:persistence` | 17 checks proving atomic session replacement, private POSIX permissions, recovery, serialized user preferences, clamped per-mark sizes, temporary-file cleanup, and shell-independent installed MCP registration |
+| `verify:model` | 302 checks on the pure session model, ending in **real engine exports + re-probes** (including source-integrity, owner-only working copies, atomic-output failure paths, reorder, rotation, bookmarks, links across reopen, marks, date stamps, custom stamps, flattening, and review/preflight decisions) |
 | `verify:text` | 68 checks that extracted/OCR text lands where the text actually is — against fixture coordinates and rendered pixels, including hostile page geometry |
 | `verify:live` | 18 checks that an agent and the running app share ONE binder, plus document identity, socket permissions, authentication, approved roots, saving, follow behavior, and forged-push containment |
-| `verify:closed-window` | 4 macOS checks that a live agent receives an actionable error when the binder window closes and succeeds after it reopens (other platforms quit when their last window closes) |
+| `verify:closed-window` | 4 macOS checks that mount-gap requests queue until ready, dirty-close calls name the open dialog, closing the binder ends live access, and no blank replacement window inherits it (other platforms quit when their last window closes) |
 | `verify:mcp` | more than 100 checks driving the **MCP server** as a real client through a whole binder build, its filesystem guardrails, and its page-text privacy disclosure |
 | `smoke` | drives the **actual Electron app** headlessly: imports two PDFs, a receipt photo and a two-sheet workbook → renders → places marks incl. a custom stamp → exports through IPC + engine → asserts page count, nested/retargeted bookmarks, mark coordinates in pdfium, `qpdf --check`, and snapshots the window to a PNG |
 | `verify:package` | reads every Electron fuse from the packaged binary, launches the packaged main process, pings its frozen engine, checks required PDF.js assets in ASAR, confirms the renderer loaded from `ledgerpdf://app`, renders a synthetic PDF, and captures the native window — **asserting the binder that loaded is the expected 3 pages from 1 source, and that a real export completed through the frozen sidecar**, because a failed import or export still paints a window, still screenshots, and still exits 0 |
@@ -650,10 +650,13 @@ alongside a standard `/Stamp` annotation. Initials are set in **Status ▸
 Options**, next to the stamp that displays them most visibly; the same initials
 author every mark, tape and shape.
 
-Kinds: `tick` (agreed), `cross` (does not agree), and `text` (a short lettered
-stamp — `F` for footed, or your initials). Adding another *kind* is an appearance
-stream in `engine/workpaper_engine/appearance.py` plus a palette entry; adding
-another *letter* needs no code at all (see custom stamps below).
+Kinds: `tick` (agreed), `cross` (does not agree), `text` (a short lettered stamp
+— `F` for footed, or your initials), and `date`. A date mark stores both the
+full UTC placement timestamp and the local calendar date shown on the page; the
+visible date is not an editable text field and cannot be supplied by an agent.
+Adding another *kind* is an appearance stream in
+`engine/workpaper_engine/appearance.py` plus a palette entry; adding another
+*letter* needs no code at all (see custom stamps below).
 
 **Custom stamps.** Every firm has its own tick-mark legend, so the fixed palette
 can't be the whole story. Hit `+` at the end of the mark palette, type a stamp
@@ -663,10 +666,11 @@ it's the same gesture: arm it, click the page. The legend lives in the binder, s
 it travels with it. Removing a stamp (`×`) never touches marks already placed
 with it.
 
-**Mark inspector.** Select a mark and the side panel exposes its letters, size,
-author and note for editing after the fact — a review record has to be
-correctable without deleting and re-placing the mark. The timestamp is the one
-field that is *not* editable: a record you can backdate is not a record.
+**Mark inspector.** Select a mark and the side panel exposes its letters (when
+applicable), size, author and note for editing after the fact — a review record
+has to be correctable without deleting and re-placing the mark. The timestamp
+and a date stamp's visible calendar date are not editable: a record you can
+backdate is not a record.
 
 **An armed stamp becomes the cursor.** Arm the tick and the pointer is a tick,
 drawn at the point of aim rather than only shown in the toolbar — including
@@ -1297,8 +1301,9 @@ Findings from dogfooding actual tax-software output, each pinned by a test:
   in `../RELEASING.md` and final clean-machine installation checks.
 - Windows OCR is not implemented; scanned pages need OCR from a supported macOS
   build or another approved workflow.
-- No links UI yet — that is Phase 4. The engine already supports links (proven
-  in the Phase 0 spike). Marks (Phase 2) and tapes (Phase 3) are done.
+- Cross-page workpaper references have UI through paired connectors, and
+  `binder_tie` creates the same stable links for agents. There is no
+  general-purpose link inspector or arbitrary link-rectangle authoring yet.
 - A tape's caption and drag position are not individually undoable — they fold
   into the undo entry that opened the gesture, like the reviewer-initials field.
 - Flatten burns **our** marks only; annotations that came in on a source page

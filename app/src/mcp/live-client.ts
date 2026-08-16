@@ -78,6 +78,9 @@ class LiveLink {
   }
 
   send(verb: string, payload: Record<string, unknown> = {}): Promise<Reply> {
+    if (this.socket.destroyed) {
+      return Promise.resolve({ ok: false, error: 'the binder window closed' })
+    }
     const id = ++this.seq
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {

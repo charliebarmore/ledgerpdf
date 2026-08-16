@@ -16,7 +16,7 @@
  * silently destroying an audit trail. The version guard makes such a build
  * refuse to open the file instead, which is the right failure for a record.
  */
-export const SESSION_FORMAT_VERSION = 2
+export const SESSION_FORMAT_VERSION = 3
 
 // ------------------------------------------------------------------- types
 
@@ -156,7 +156,9 @@ export interface UserBookmark extends Provenance {
  * hanging the question off a tick puts an "agreed" glyph on the very thing it
  * is questioning.
  */
-export type MarkKind = 'tick' | 'cross' | 'text' | 'note' | 'conn'
+export type MarkKind = 'tick' | 'cross' | 'text' | 'note' | 'conn' | 'date'
+
+const MARK_KINDS: readonly MarkKind[] = ['tick', 'cross', 'text', 'note', 'conn', 'date']
 
 /**
  * Mark glyphs and colours. These mirror engine appearance.MARK_COLORS: they are
@@ -171,7 +173,9 @@ export const MARK_GLYPH: Record<MarkKind, string> = {
   // A universal symbol, per the project's glyph rule — this one needs no word.
   note: '✎',
   // Drawn as a ring around its label, so the glyph is the label itself.
-  conn: ''
+  conn: '',
+  // Drawn from the stored calendar date, not from a symbolic glyph.
+  date: ''
 }
 
 export const MARK_COLOR: Record<MarkKind, string> = {
@@ -186,7 +190,53 @@ export const MARK_COLOR: Record<MarkKind, string> = {
   // connector asserts NOTHING about the figure — it says "this is the same
   // number as that one over there" — so it must not read as an agreed or a
   // disagreed. Must match engine appearance.MARK_COLORS['conn'].
-  conn: 'rgb(112,58,148)'
+  conn: 'rgb(112,58,148)',
+  // Same content family as lettered stamps: factual blue, not a judgment.
+  date: 'rgb(26,84,153)'
+}
+
+/** Calendar date as seen on the machine where the mark was placed. */
+export function localCalendarDate(now = new Date()): string {
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+export function formatCalendarDate(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return ''
+  const [, yearText, monthText, dayText] = match
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const day = Number(dayText)
+  const check = new Date(Date.UTC(year, month - 1, day))
+  if (
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() !== month - 1 ||
+    check.getUTCDate() !== day
+  ) {
+    return ''
+  }
+  return `${month}/${day}/${year}`
+}
+
+export function dateMarkText(mark: Pick<Mark, 'date'>): string {
+  return formatCalendarDate(mark.date) || '?'
+}
+
+// Mirrored by appearance.py text_mark_size and checked in verify:model.
+export const TEXT_MARK_FONT_RATIO = 0.5
+export const TEXT_MARK_PAD = 4
+export const TEXT_MARK_CHAR_RATIO = 0.556
+
+export function textMarkSize(text: string, size: number): { width: number; height: number } {
+  const font = size * TEXT_MARK_FONT_RATIO
+  return {
+    width: Math.max(text.length, 1) * font * TEXT_MARK_CHAR_RATIO + 2 * TEXT_MARK_PAD,
+    height: font + 2 * TEXT_MARK_PAD
+  }
 }
 
 const XML_ESCAPE: Record<string, string> = {
@@ -209,12 +259,17 @@ const XML_ESCAPE: Record<string, string> = {
  * 32×32 is deliberate: macOS silently ignores larger cursors.
  */
 export function markCursor(kind: MarkKind, text = ''): string {
-  const glyph = (kind === 'text' || kind === 'conn' ? text : MARK_GLYPH[kind]) || '?'
+  const glyph =
+    (kind === 'date'
+      ? formatCalendarDate(localCalendarDate())
+      : kind === 'text' || kind === 'conn'
+        ? text
+        : MARK_GLYPH[kind]) || '?'
   const safe = glyph.replace(/[&<>"']/g, (c) => XML_ESCAPE[c])
   // Shrink lettered stamps so longer ones ("A/R", initials) still fit the box.
   // A connector's ring is fixed, so its label shrinks harder to stay inside it.
   const size =
-    kind === 'text'
+    kind === 'text' || kind === 'date'
       ? Math.max(9, Math.min(20, 34 / Math.max(1, glyph.length)))
       : kind === 'conn'
         ? Math.max(8, Math.min(15, 26 / Math.max(1, glyph.length)))
@@ -433,6 +488,8 @@ export interface Mark extends Provenance {
   size: number
   /** For kind 'text' — the letters, e.g. "F", "T", or reviewer initials. */
   text?: string
+  /** For kind 'date' — local calendar date at placement, YYYY-MM-DD. */
+  date?: string
   author?: string
   note?: string
   /**
@@ -1096,12 +1153,14 @@ export function addMark(
 ): { session: Session; id: string } {
   const seq = session.seq + 1
   const id = `mk_${seq}`
+  const placed = new Date()
   const next: Mark = {
     ...mark,
     ...stamp(session),
     id,
     author: mark.author ?? session.reviewer ?? '',
-    created: new Date().toISOString()
+    created: placed.toISOString(),
+    ...(mark.kind === 'date' ? { text: undefined, date: localCalendarDate(placed) } : {})
   }
   return { session: { ...session, seq, marks: [...(session.marks ?? []), next] }, id }
 }
@@ -1123,21 +1182,30 @@ export function addLink(
 export function updateMark(session: Session, id: string, patch: Partial<Mark>): Session {
   return {
     ...session,
-    marks: (session.marks ?? []).map((m) =>
-      m.id === id
-        ? {
-            ...m,
-            ...patch,
-            // keep a mark on its page and inside it
-            nx: patch.nx === undefined ? m.nx : Math.min(1, Math.max(0, patch.nx)),
-            ny: patch.ny === undefined ? m.ny : Math.min(1, Math.max(0, patch.ny)),
-            size:
-              patch.size === undefined
-                ? m.size
-                : Math.min(MARK_SIZE_MAX, Math.max(MARK_SIZE_MIN, patch.size))
-          }
-        : m
-    )
+    marks: (session.marks ?? []).map((m) => {
+      if (m.id !== id) return m
+      // Identity and timestamp fields are evidence, not inspector inputs.
+      const {
+        id: _id,
+        page: _page,
+        kind: _kind,
+        created: _created,
+        date: _date,
+        ...editable
+      } = patch
+      if (m.kind === 'date') delete editable.text
+      return {
+        ...m,
+        ...editable,
+        // keep a mark on its page and inside it
+        nx: patch.nx === undefined ? m.nx : Math.min(1, Math.max(0, patch.nx)),
+        ny: patch.ny === undefined ? m.ny : Math.min(1, Math.max(0, patch.ny)),
+        size:
+          patch.size === undefined
+            ? m.size
+            : Math.min(MARK_SIZE_MAX, Math.max(MARK_SIZE_MIN, patch.size))
+      }
+    })
   }
 }
 
@@ -1798,7 +1866,7 @@ export type Legend = Record<string, string>
  * row per number and bury the marks that do carry meaning.
  */
 export function markToken(mark: Pick<Mark, 'kind' | 'text'>): string | null {
-  if (mark.kind === 'conn') return null
+  if (mark.kind === 'conn' || mark.kind === 'date') return null
   if (mark.kind === 'text') return normalizeStamp(mark.text ?? '') || null
   return mark.kind
 }
@@ -2580,6 +2648,9 @@ export function toExportSpec(
         ny: m.ny,
         size: m.size,
         ...(m.text ? { text: m.text } : {}),
+        ...(m.kind === 'date'
+          ? { date: m.date, date_text: formatCalendarDate(m.date) }
+          : {}),
         ...(m.author ? { author: m.author } : {}),
         // The printed reference is rendered HERE, from the target's position in
         // the binder being exported — so it is correct for this artifact rather
@@ -2747,7 +2818,32 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
         ? { bookmarks: s.bookmarks.filter((b) => pageIds.has(b.page)) }
         : {}),
       ...(Array.isArray(s.marks)
-        ? { marks: s.marks.filter((m) => pageIds.has(m.page)) }
+        ? {
+            marks: s.marks.filter(
+              (m) =>
+                !!m &&
+                typeof m.kind === 'string' &&
+                (MARK_KINDS as readonly string[]).includes(m.kind) &&
+                pageIds.has(m.page) &&
+                (m.kind !== 'date' || !!formatCalendarDate(m.date))
+            )
+          }
+        : {}),
+      ...(Array.isArray(s.links)
+        ? {
+            links: s.links.filter(
+              (link) =>
+                !!link &&
+                typeof link.id === 'string' &&
+                typeof link.page === 'string' &&
+                typeof link.target === 'string' &&
+                pageIds.has(link.page) &&
+                pageIds.has(link.target) &&
+                Array.isArray(link.rect) &&
+                link.rect.length === 4 &&
+                link.rect.every((value) => typeof value === 'number' && Number.isFinite(value))
+            )
+          }
         : {}),
       ...(Array.isArray(s.statusDefs) ? { statusDefs: s.statusDefs } : {}),
       ...(s.statuses && typeof s.statuses === 'object'

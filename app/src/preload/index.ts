@@ -111,6 +111,7 @@ const api = {
   ): void => {
     ipcRenderer.on('live:request', (_e, req) => cb(req))
   },
+  liveReady: (): void => ipcRenderer.send('live:ready'),
   liveReply: (id: number, payload: unknown): void => ipcRenderer.send('live:reply', id, payload),
   /** Main announces changes after the initial authoritative pull. */
   onLiveState: (cb: (state: { on: boolean; socketPath?: string }) => void): void => {
@@ -130,6 +131,9 @@ const api = {
   preparerInitials: (): Promise<string> => ipcRenderer.invoke('prefs:initials:get'),
   setPreparerInitials: (value: string): Promise<string> =>
     ipcRenderer.invoke('prefs:initials:set', value),
+  markSizes: (): Promise<Record<string, number>> => ipcRenderer.invoke('prefs:mark-sizes:get'),
+  setMarkSize: (key: string, size: number): Promise<{ key: string; size: number } | null> =>
+    ipcRenderer.invoke('prefs:mark-size:set', key, size),
   /**
    * Folders a standalone agent may read and write. `addAgentRoot` takes no
    * argument on purpose — the folder is chosen in a dialog owned by main, so a

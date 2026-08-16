@@ -1,6 +1,6 @@
 {
   "name": "workpaper-tool",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "author": "Ledger Labs LLC",
   "description": "Tax workpaper binder — organize, mark up, and export PDF binders locally",

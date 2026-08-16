@@ -1,38 +1,14 @@
 /**
- * An agent asking for a binder whose WINDOW was closed (macOS only).
+ * Live access during an unsaved-changes dialog and after its binder window
+ * closes (macOS only).
  *
  *   npm run verify:closed-window
  *
- * macOS leaves the app running on ⌘W, so live access stays on and the socket
- * keeps listening with nothing behind it. This surfaced in the first real
- * end-to-end test: every call failed with "no open binder window", which names
- * no cause and no remedy while the Dock icon looks perfectly healthy.
- *
- * The fix reopens the window and refuses THIS request with an instruction to
- * retry — deliberately not a silent fall back to standalone, which would have
- * the agent quietly working on its own copy, the exact failure live mode exists
- * to prevent.
- *
- * ---------------------------------------------------------------------------
- * IF THIS FAILS WITH "the binder window did not respond", SUSPECT THE MACHINE
- * BEFORE THE CODE.
- *
- * `app.on('activate')` recreates a window whenever macOS activates the app, and
- * quitting or killing ANOTHER Electron process hands focus around. So a second
- * Electron app starting or dying during the 64-second wait can reopen the
- * window behind this check's back: the request then finds a live window that
- * has not mounted its `live:request` listener yet, and times out at 15s instead
- * of taking the reopen branch.
- *
- * Seen on 2026-08-08 and very nearly recorded as a regression in the commit
- * that happened to be checked out. Both suspect commits passed 2/2 once the
- * machine was quiet. Before bisecting: close other Electron apps, `pkill -f
- * electron`, wait a few seconds, and run it again.
- *
- * Not papered over with a retry, and that is deliberate. Check 2 asserts the
- * message you get with the window closed — and the first call REOPENS the
- * window, so a retry would find it open and fail honestly. The flake has to be
- * removed from the environment, not from the assertion.
+ * The close dialog used to be synchronous, blocking main and making every
+ * agent call wait 15 seconds before a generic timeout. It is now asynchronous,
+ * so the call fails immediately and names the dialog. If the reviewer discards
+ * the binder and closes the window, live access ends with that exact document;
+ * a request can never be routed into a newly mounted empty session.
  */
 import { spawn } from 'node:child_process'
 import path from 'node:path'
@@ -47,6 +23,7 @@ const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const REPO = path.resolve(APP, '..')
 const SERVER = path.join(APP, 'out', 'mcp-server.cjs')
 const ENDPOINT = path.join(REPO, 'spike', 'out', 'closed-window-endpoint.json')
+const FIXTURE = path.join(REPO, 'spike', 'fixtures', 'fixture_a.pdf')
 const CLOSED_ACCESS = isolatedAgentAccess(
   path.join(REPO, 'spike', 'out', 'agent-profile-closed-window'),
   [path.join(REPO, 'spike')]
@@ -67,7 +44,9 @@ const check = (name, ok, detail = '') => {
   console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name}${detail ? `  — ${detail}` : ''}`)
 }
 
-// Launch with live on, a binder open, and the window set to close after 6s.
+// Launch with live on, a dirty binder, and a test-held close dialog. The dev
+// hook follows the real close state machine but supplies the response without
+// asking a headless run to click a native modal.
 const app = spawn('npm', ['run', 'dev'], {
   cwd: APP,
   // On Windows npm is a .cmd shim. Node's command-spawn hardening refuses to
@@ -80,16 +59,14 @@ const app = spawn('npm', ['run', 'dev'], {
     ...CLOSED_ACCESS.env,
     WPT_LIVE_ENDPOINT: ENDPOINT,
     WPT_DEV_LIVE: '1',
-    // NO binder opened, on purpose. An open binder is DIRTY, and win.close()
-    // then hits the unsaved-changes guard: a synchronous modal that nothing in a
-    // headless run can dismiss. The window stays open, the renderer sits blocked
-    // behind the dialog, and the agent times out after 15s with "the binder
-    // window did not respond" — which is what the first version of this check
-    // produced, and it tested the guard rather than the fix.
     WPT_DEV_USERDATA: path.join(REPO, 'spike', 'out', 'userdata-closedwin'),
-    WPT_DEV_CLOSE_WINDOW_MS: '60000',
-    // Forward the renderer's authoritative live-state pull so this check proves
-    // the REOPENED window's indicator, not merely that the socket still works.
+    WPT_DEV_CLOSE_WINDOW_MS: '10000',
+    // Deterministically hold main's readiness acknowledgement so the first
+    // live request exercises the mount queue rather than merely hoping to win
+    // a naturally tiny race.
+    WPT_DEV_LIVE_READY_DELAY_MS: '1500',
+    WPT_DEV_CLOSE_DIALOG_HOLD_MS: '5000',
+    WPT_DEV_CLOSE_DIALOG_RESPONSE: 'discard',
     ELECTRON_ENABLE_LOGGING: '1'
   }
 })
@@ -125,59 +102,52 @@ const call = async (name, args = {}) => {
   return { text: (r.content ?? []).map((c) => c.text ?? '').join('\n'), isError: !!r.isError }
 }
 
-// 1. While the window is open, live mode works — the control.
-//
-// Retried, because the endpoint appearing does NOT mean the renderer is ready:
-// main advertises live access from `whenReady`, while the listener that answers
-// `live:request` is registered when React mounts. A request landing in that gap
-// waits out the full 15s timeout and reports "the binder window did not
-// respond". This check saw both outcomes on consecutive runs, which makes it
-// flaky — and a flaky check is worse than none, because it fails often enough on
-// correct code that people learn to re-run it.
-//
-// Worth naming as a product fact too, not just a test annoyance: for a moment
-// after the window appears, an agent's request times out instead of being
-// queued. Rare in practice, since a person connects an agent to an app they are
-// already looking at.
-let before = { isError: true, text: '' }
-for (let attempt = 0; attempt < 3; attempt++) {
-  before = await call('binder_status')
-  if (!before.isError && /LIVE/.test(before.text)) break
-}
+// 1. The endpoint is not useful until the renderer listener has signalled
+// ready, so this first request succeeds without a retry loop.
+const firstStarted = Date.now()
+const before = await call('binder_status')
+const firstWait = Date.now() - firstStarted
+const imported = await call('binder_add_pdfs', { paths: [FIXTURE] })
 check(
-  'with a window open, the agent reaches the live binder',
-  !before.isError && /LIVE/.test(before.text),
-  before.text.split('\n').slice(0, 2).join(' | ').slice(0, 110)
+  'a request during renderer mount queues, then reaches the live binder once',
+  !before.isError &&
+    /LIVE/.test(before.text) &&
+    firstWait >= 1000 &&
+    !imported.isError &&
+    /3 page\(s\)/.test(imported.text),
+  `${firstWait}ms; ${imported.text.split('\n')[0].slice(0, 80)}`
 )
 
-// 2. Wait for the seam to close it, then ask again.
-await new Promise((r) => setTimeout(r, 64_000))
+// 2. Find the held dialog window. Calls before the close event remain valid;
+// once it opens the error must be immediate and specific.
+let duringDialog = { isError: false, text: '' }
+const dialogDeadline = Date.now() + 20_000
+while (Date.now() < dialogDeadline) {
+  duringDialog = await call('binder_status')
+  if (duringDialog.isError && /unsaved-changes dialog/i.test(duringDialog.text)) break
+  await new Promise((r) => setTimeout(r, 200))
+}
+check(
+  'a live call during the close dialog fails immediately with the named reason',
+  duringDialog.isError && /unsaved-changes dialog/i.test(duringDialog.text),
+  duringDialog.text.split('\n')[0].slice(0, 110)
+)
+
+// 3. The dev response discards and closes. Live access belongs to that exact
+// binder window, so the socket closes and later calls fail rather than opening
+// a blank replacement document.
+await new Promise((r) => setTimeout(r, 6500))
 const afterClose = await call('binder_status')
 check(
-  'a request with the window closed explains itself and says what to do',
-  afterClose.isError && /window was closed/i.test(afterClose.text) && /again/i.test(afterClose.text),
-  afterClose.text.split('\n')[0].slice(0, 110)
+  'closing the binder window ends the attached agent session',
+  afterClose.isError && /binder window closed/i.test(afterClose.text),
+  afterClose.text.split('\n')[0]
 )
 
-// 3. And the retry works, because the window was reopened rather than left shut.
-await new Promise((r) => setTimeout(r, 4000))
-const retry = await call('binder_status')
+const indicatorSyncs = (log.match(/\[live-indicator\] on/g) ?? []).length
 check(
-  'the window is reopened, so the very next request succeeds',
-  !retry.isError && /page\(s\)/.test(retry.text),
-  retry.text.split('\n')[0]
-)
-
-// The first renderer and the renderer recreated after ⌘W each pull state.
-// Before the fix, the second started at false and no event ever corrected it.
-let indicatorSyncs = (log.match(/\[live-indicator\] on/g) ?? []).length
-for (let attempt = 0; attempt < 20 && indicatorSyncs < 2; attempt++) {
-  await new Promise((r) => setTimeout(r, 100))
-  indicatorSyncs = (log.match(/\[live-indicator\] on/g) ?? []).length
-}
-check(
-  'the reopened window visibly reports live access as on',
-  indicatorSyncs >= 2,
+  'no replacement renderer silently inherited live access',
+  indicatorSyncs === 1,
   `${indicatorSyncs} renderer(s) reported on`
 )
 

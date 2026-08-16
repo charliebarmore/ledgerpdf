@@ -41,10 +41,13 @@ MARK_COLORS: dict[str, tuple[float, float, float]] = {
     # number as that one" — so it must not read as agreed or disagreed.
     # Mirrored in session.ts MARK_COLOR['conn'].
     "conn": (0.44, 0.23, 0.58),
+    # A factual stamp, not a judgment — same family as lettered text marks.
+    "date": (0.10, 0.33, 0.60),
 }
 TEXT_MARK_FONT_SIZE = 12.0
 TEXT_MARK_PAD = 4.0
-TEXT_MARK_CHAR_W = TEXT_MARK_FONT_SIZE * 0.556  # Helvetica average advance
+TEXT_MARK_CHAR_RATIO = 0.556  # Helvetica average advance
+TEXT_MARK_CHAR_W = TEXT_MARK_FONT_SIZE * TEXT_MARK_CHAR_RATIO
 TAPE_FONT_SIZE = 9.0
 TAPE_LINE_HEIGHT = 11.0
 TAPE_PAD = 6.0
@@ -278,7 +281,7 @@ def conn_appearance(
 def text_mark_size(text: str, font_size: float = TEXT_MARK_FONT_SIZE) -> tuple[float, float]:
     """Visual (w, h) for a short text mark such as "F", "TB", or initials."""
     chars = max(len(text), 1)
-    w = chars * font_size * 0.556 + 2 * TEXT_MARK_PAD
+    w = chars * font_size * TEXT_MARK_CHAR_RATIO + 2 * TEXT_MARK_PAD
     h = font_size + 2 * TEXT_MARK_PAD
     return (w, h)
 
@@ -479,8 +482,8 @@ def make_mark(
 ) -> pikepdf.Object:
     """Place one review mark. `spec` mirrors the app's Mark model:
 
-        {kind: "tick"|"cross"|"text", nx, ny, size?, text?, author?, note?,
-         created?}
+        {kind: "tick"|"cross"|"text"|"date", nx, ny, size?, text?,
+         date_text?, author?, note?, created?}
 
     The full spec is embedded as private /WPT_Data so the app can reopen and
     edit the mark later — and so a future tie-out layer has structured data to
@@ -498,6 +501,12 @@ def make_mark(
         text = str(spec.get("text", "")).strip() or "?"
         form, w, h = text_appearance(pdf, text, geom.rotate, size * 0.5, color, agent=agent)
         note = spec.get("note") or f"Mark: {text}"
+    elif kind == "date":
+        text = str(spec.get("date_text", "")).strip()
+        if not text:
+            raise ValueError("date mark needs its stored calendar date")
+        form, w, h = text_appearance(pdf, text, geom.rotate, size * 0.5, color, agent=agent)
+        note = spec.get("note") or f"Date stamped: {text}"
     elif kind == "note":
         form = note_appearance(pdf, geom.rotate, size, agent=agent)
         note = spec.get("note") or ""
@@ -510,14 +519,16 @@ def make_mark(
         # this with the resolved page number when the connector has a twin.
         note = spec.get("note") or f"Reference {label}"
         w = h = size
-    else:
-        if kind == "cross":
-            form = cross_appearance(pdf, geom.rotate, size, color, agent=agent)
-            note = spec.get("note") or "Does not agree"
-        else:
-            form = tick_appearance(pdf, geom.rotate, size, color, agent=agent)
-            note = spec.get("note") or "Agreed"
+    elif kind == "cross":
+        form = cross_appearance(pdf, geom.rotate, size, color, agent=agent)
+        note = spec.get("note") or "Does not agree"
         w = h = size
+    elif kind == "tick":
+        form = tick_appearance(pdf, geom.rotate, size, color, agent=agent)
+        note = spec.get("note") or "Agreed"
+        w = h = size
+    else:
+        raise ValueError(f"unknown mark kind: {kind}")
 
     rect = visual_rect_to_user_rect(geom, float(spec["nx"]), float(spec["ny"]), w, h)
     # /Text, not /Stamp, for a note: that is the subtype Acrobat collects into
@@ -583,4 +594,9 @@ def make_link(
         NM=String(nm),
         Dest=dest,
     )
+    # Links are regenerated from the embedded session just like visible marks.
+    # Carry the same ownership marker so clean_copy can remove the previous
+    # generation without touching links that arrived on a client's source PDF.
+    annot[Name("/WPT_Kind")] = String("link")
+    annot[Name("/WPT_Data")] = String('{"kind":"link"}')
     return pdf.make_indirect(annot)

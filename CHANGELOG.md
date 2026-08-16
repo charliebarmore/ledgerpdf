@@ -5,6 +5,34 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-15
+
+### Added
+
+- Remembered placement size separately for each mark and lettered stamp, as a
+  per-user preference that survives reopening the app without altering binders.
+- Added a placeable date stamp for people and MCP agents. It records the local
+  calendar day separately from the UTC placement timestamp, exports and
+  flattens like other marks, and cannot be backdated through editable text.
+
+### Changed
+
+- Advanced the embedded session format to v3 for the new date-mark record.
+  Older v1/v2 binders remain readable; builds that only understand v2 reject a
+  v3 binder explicitly instead of silently drawing a date mark as a tick.
+- Bound live agent access to the exact binder window that enabled it. Closing
+  that window now ends the socket rather than reopening a blank session under
+  the same connection.
+
+### Fixed
+
+- Preserved clickable connector and binder-tie links when a saved binder is
+  reopened, while removing the prior generated links from its working copy so
+  repeated saves neither drop nor duplicate PDF link annotations.
+- Queued live-agent calls until the renderer has registered its listener, and
+  replaced the blocking unsaved-changes close dialog with an asynchronous one
+  that immediately tells agents what is blocking them instead of timing out.
+
 ## [0.2.1] - 2026-08-14
 
 ### Changed
@@ -118,7 +146,8 @@ Initial public alpha.
 - Added platform-independent MCP registration and complete macOS notarization
   credential handling.
 
-[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/charliebarmore/ledgerpdf/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.2.1
 [0.2.0]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.2.0
 [0.1.4]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.1.4

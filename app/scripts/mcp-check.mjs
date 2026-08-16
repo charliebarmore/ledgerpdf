@@ -249,6 +249,19 @@ const stamped = await call('binder_place_mark', {
   note: 'Tied to trial balance'
 })
 check('binder_place_mark places a lettered stamp', stamped.text.includes('"TB"'), stamped.text)
+const dated = await call('binder_place_mark', {
+  pageId: pageIds[0],
+  kind: 'date',
+  nx: 0.52,
+  ny: 0.45
+})
+check('binder_place_mark places a date chosen by the model, not the caller', dated.text.includes('date'), dated.text)
+check(
+  'binder_place_mark refuses caller-supplied date text',
+  (await call('binder_place_mark', {
+    pageId: pageIds[0], kind: 'date', nx: 0.6, ny: 0.45, text: '1/1/2000'
+  })).isError
+)
 
 const tape = await call('binder_add_tape', {
   pageId: pageIds[0],
@@ -268,7 +281,10 @@ const markIds = [...listed.text.matchAll(/\bmk_\d+\b/g)].map((m) => m[0])
 const tapeIds = [...listed.text.matchAll(/\btp_\d+\b/g)].map((m) => m[0])
 check(
   'binder_annotations exposes the ids, positions and totals of what was placed',
-  markIds.length === 2 && tapeIds.length === 1 && listed.text.includes('1,490.00'),
+  markIds.length === 3 &&
+    tapeIds.length === 1 &&
+    listed.text.includes('date "') &&
+    listed.text.includes('1,490.00'),
   listed.text.split('\n').join(' | ')
 )
 check(
@@ -282,7 +298,7 @@ const spare = [...(await call('binder_annotations', { pageId: pageIds[1] })).tex
 const removed = await call('binder_remove_marks', { markIds: [spare[0][0]] })
 check(
   'binder_remove_marks deletes exactly the named annotation',
-  removed.text.includes('Removed 1') && removed.text.includes('2 mark(s)'),
+  removed.text.includes('Removed 1') && removed.text.includes('3 mark(s)'),
   removed.text
 )
 
@@ -297,7 +313,7 @@ const firstExport = readFileSync(OUT_PDF)
 // The safe iteration loop: further agent work may replace this binder's own
 // exact prior export at the same canonical path. Remove the temporary mark and
 // export once more so the downstream content assertions still exercise the
-// original two review marks.
+// original three review marks.
 await call('binder_place_mark', {
   pageId: pageIds[0],
   kind: 'cross',
@@ -468,7 +484,7 @@ const reopened = await call('binder_open', { path: OUT_BINDER })
 check(
   'a saved binder reopens with its pages, marks and tapes intact',
   reopened.text.includes('6 page(s)') &&
-    reopened.text.includes('2 mark(s)') &&
+    reopened.text.includes('3 mark(s)') &&
     reopened.text.includes('1 tape(s)'),
   reopened.text.split('\n')[0]
 )

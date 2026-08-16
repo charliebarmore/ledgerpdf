@@ -269,10 +269,12 @@ def strip_wpt_annotations(pdf: pikepdf.Pdf) -> int:
     the previous generation has to come off first or every save would stack
     another copy on top.
 
-    Identified by `/WPT_Data`, which only our own annotations carry. Annotations
-    that arrived on the client's original PDF have no such key and are left
-    exactly where they were — the app must never quietly delete someone else's
-    review notes.
+    Identified by `/WPT_Data`, which only our own annotations carry. LedgerPDF
+    versions through 0.2.1 omitted that marker from generated links, so their
+    reserved `wpt-link-` annotation name is also recognized during cleanup.
+    Annotations that arrived on the client's original PDF have neither marker
+    and are left exactly where they were — the app must never quietly delete
+    someone else's review notes.
 
     Flattened marks cannot be removed by anything, because flattening paints
     them into the page content on purpose. That is why the working file is never
@@ -286,7 +288,11 @@ def strip_wpt_annotations(pdf: pikepdf.Pdf) -> int:
         keep = []
         for annot in annots:
             try:
-                is_ours = WPT_DATA in annot
+                is_legacy_link = (
+                    annot.get(Name.Subtype, None) == Name.Link
+                    and str(annot.get(Name.NM, "")).startswith("wpt-link-")
+                )
+                is_ours = WPT_DATA in annot or is_legacy_link
             except Exception:
                 is_ours = False
             if is_ours:
