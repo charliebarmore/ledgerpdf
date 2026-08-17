@@ -45,6 +45,7 @@ import {
   pageForSourceIndex,
   parseSession,
   parseAmount,
+  recoverBinderAutosave,
   rebindToBinder,
   tapeKeyPress,
   toTapeEntry,
@@ -1455,7 +1456,7 @@ export default function App(): React.JSX.Element {
       if (previousBinder && previousBinder !== next) await window.wpt.releaseBinder(previousBinder)
     }
     const releaseFailedNext = async (next: string): Promise<void> => {
-      if (previousBinder !== next) await window.wpt.releaseBinder(next)
+      if (previousBinder !== next) await window.wpt.releaseBinderPreservingAutosave(next)
     }
 
     const res = await window.wpt.openBinder(target)
@@ -1523,22 +1524,61 @@ export default function App(): React.JSX.Element {
         return setStatus(`Cannot open ${baseName(res.path)} — ${rebound.error}`)
       }
 
+      let nextSession = rebound.session
+      let recoveredAutosave = false
+
+      if (res.pendingAutosave !== undefined) {
+        const recovery = recoverBinderAutosave(
+          res.pendingAutosave,
+          parsed.session,
+          rebound.session,
+          probed.probe as ProbeWire,
+          res.workingPath,
+          baseName(res.path)
+        )
+        const choice = await window.wpt.chooseAutosave(
+          res.path,
+          recovery.savedAt,
+          !('error' in recovery)
+        )
+        if (choice === 'cancel') {
+          await releaseFailedNext(res.path)
+          return setStatus(
+            'error' in recovery
+              ? `Open cancelled — the recovery file was preserved because ${recovery.error}.`
+              : 'Open cancelled — the unsaved recovery file was preserved.'
+          )
+        }
+        if (choice === 'saved') {
+          try {
+            await window.wpt.discardBinderAutosave(res.path)
+          } catch {
+            await releaseFailedNext(res.path)
+            return setStatus(
+              `Open cancelled — LedgerPDF could not discard the recovery file, so it was preserved.`
+            )
+          }
+        } else if (!('error' in recovery)) {
+          nextSession = recovery.session
+          recoveredAutosave = true
+        }
+      }
+
       // The pages moved since this session was written. The marks will load and
       // will look fine, and some of them will be in the wrong place. Say that
       // plainly rather than opening quietly.
       const moved = !res.geometryMatches
-      const stale = res.pendingAutosave !== undefined
 
       await releasePrevious(res.path)
       adoptSession(
-        rebound.session,
+        nextSession,
         res.path,
         moved
-          ? `Opened ${baseName(res.path)} — WARNING: another program changed the pages since this was saved, so marks may no longer line up. Check before relying on them.`
-          : stale
-            ? `Opened ${baseName(res.path)} — it was last closed without saving; unsaved edits from that session were not applied.`
-            : `Opened ${baseName(res.path)} — ${rebound.session.pages.length} pages.`,
-        !moved
+          ? `${recoveredAutosave ? 'Recovered unsaved changes in' : 'Opened'} ${baseName(res.path)} — WARNING: another program changed the pages since this was saved, so marks may no longer line up. Check before relying on them${recoveredAutosave ? ', then Save.' : '.'}`
+          : recoveredAutosave
+            ? `Recovered unsaved changes in ${baseName(res.path)} — review them, then Save to make them permanent.`
+            : `Opened ${baseName(res.path)} — ${nextSession.pages.length} pages.`,
+        !moved && !recoveredAutosave
       )
       return
     }
@@ -1642,7 +1682,8 @@ export default function App(): React.JSX.Element {
     keepDraw,
     keepMark,
     setAgentPanelOpen,
-    agentPanelOpen
+    agentPanelOpen,
+    binderPath
   })
   devPlay.current = {
     placeTool,
@@ -1658,7 +1699,8 @@ export default function App(): React.JSX.Element {
     keepDraw,
     keepMark,
     setAgentPanelOpen,
-    agentPanelOpen
+    agentPanelOpen,
+    binderPath
   }
   useEffect(() => {
     window.wpt.onDevOpen(async ({ paths, exportTo, seedMarks, preflight, reopen, place, openRecent }) => {
@@ -2102,14 +2144,7 @@ export default function App(): React.JSX.Element {
         // inspector rather than an empty side panel.
         setSelectedMarkId(lettered.id)
       }
-      // An export that fails sets a status and returns; it never throws. Carry
-      // the reason out rather than leaving the smoke to infer it from a
-      // missing file.
       let exported: string | undefined
-      if (exportTo && imported) {
-        const res = await devRefs.current.writeBinder(imported, exportTo)
-        exported = res?.ok ? 'ok' : `failed: ${res?.error ?? 'no result'}`
-      }
       // Report what loaded, not merely that we got here — an import that threw
       // lands on this line too, with `imported` still undefined.
       if (seedMarks) {
@@ -2124,6 +2159,13 @@ export default function App(): React.JSX.Element {
       // refused readSource reached a person before a check did.
       if (reopen) {
         await devRefs.current.openBinderAt(reopen, true)
+        // openBinder resolves after scheduling React state. Wait for the path
+        // itself, not merely a non-empty session: some checks import one binder
+        // and then reopen another, so pages>0 can describe the old document.
+        for (let i = 0; i < 200 && devPlay.current.binderPath !== reopen; i++) {
+          await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 5)))
+        }
+        if (devPlay.current.binderPath === reopen) imported = devPlay.current.session
       }
       // Packaged seam: click the top of "Pick up where you left off". Goes
       // through the SAME openBinder the row does, so what is covered is the
@@ -2144,6 +2186,14 @@ export default function App(): React.JSX.Element {
         for (let i = 0; i < 200 && devPlay.current.session.pages.length === 0; i++) {
           await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 5)))
         }
+      }
+      // An export that fails sets a status and returns; it never throws. Carry
+      // the reason out rather than leaving the smoke to infer it from a
+      // missing file. This runs after reopen so recovery checks export the
+      // session that actually won the prompt, not the empty pre-open state.
+      if (exportTo && imported) {
+        const res = await devRefs.current.writeBinder(imported, exportTo)
+        exported = res?.ok ? 'ok' : `failed: ${res?.error ?? 'no result'}`
       }
       window.wpt.devRendered({
         pages: openRecent

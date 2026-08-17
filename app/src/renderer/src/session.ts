@@ -896,6 +896,107 @@ export function rebindToBinder(
   return { session: { ...rest, sources: [source], pages } }
 }
 
+export type AutosaveRecovery =
+  | { session: Session; savedAt?: string }
+  | { error: string; savedAt?: string }
+
+function sortedRecordEntries(value: Record<string, string> | undefined): Array<[string, string]> {
+  return Object.entries(value ?? {}).sort(([left], [right]) => left.localeCompare(right))
+}
+
+/**
+ * Whether re-pointing `candidate` at the saved binder preserves page identity.
+ *
+ * A binder autosave is the session only; the PDF bytes are still the last
+ * saved binder. Review artifacts are safe to recover when the page structure
+ * is unchanged. A reorder is not: it keeps the same page count, so blindly
+ * calling rebindToBinder would attach page ids (and their marks) to different
+ * physical pages. Rotation, imported/deleted pages and bookmark overrides have
+ * the same problem or would be silently dropped by rebindToBinder.
+ */
+function sameRecoveryStructure(candidate: Session, baseline: Session): boolean {
+  if (candidate.pages.length !== baseline.pages.length) return false
+  if (
+    candidate.pages.some((page, index) => {
+      const other = baseline.pages[index]
+      return (
+        !other ||
+        page.id !== other.id ||
+        page.source !== other.source ||
+        page.index !== other.index ||
+        (page.rotate ?? 0) !== (other.rotate ?? 0)
+      )
+    })
+  ) {
+    return false
+  }
+
+  if (
+    JSON.stringify(sortedRecordEntries(candidate.titles)) !==
+    JSON.stringify(sortedRecordEntries(baseline.titles))
+  ) {
+    return false
+  }
+  if (
+    JSON.stringify(sortedRecordEntries(candidate.bookmarkPages)) !==
+    JSON.stringify(sortedRecordEntries(baseline.bookmarkPages))
+  ) {
+    return false
+  }
+
+  const bookmarks = (session: Session): UserBookmark[] =>
+    [...(session.bookmarks ?? [])].sort((left, right) => left.id.localeCompare(right.id))
+  return JSON.stringify(bookmarks(candidate)) === JSON.stringify(bookmarks(baseline))
+}
+
+/**
+ * Validate and safely rebind a newer hidden autosave to the binder being opened.
+ *
+ * Autosaves made immediately after the first Save still describe the original
+ * source files; autosaves made after a reopen already describe the binder as a
+ * single source. Accept either known-good structural baseline, then use the
+ * same self-contained rebind path as a normal open.
+ */
+export function recoverBinderAutosave(
+  raw: unknown,
+  embedded: Session,
+  rebound: Session,
+  probe: ProbeWire,
+  workingPath: string,
+  binderName: string
+): AutosaveRecovery {
+  const wrapper = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : null
+  const savedAt = typeof wrapper?.savedAt === 'string' ? wrapper.savedAt : undefined
+  if (!wrapper || !('session' in wrapper)) {
+    return { error: 'the recovery file is incomplete', ...(savedAt ? { savedAt } : {}) }
+  }
+
+  const parsed = parseSession(wrapper.session)
+  if ('error' in parsed) {
+    return {
+      error: `the recovery file cannot be read (${parsed.error})`,
+      ...(savedAt ? { savedAt } : {})
+    }
+  }
+
+  if (
+    !sameRecoveryStructure(parsed.session, embedded) &&
+    !sameRecoveryStructure(parsed.session, rebound)
+  ) {
+    return {
+      error:
+        'the recovery includes page order, page rotation, added or removed pages, or bookmark changes',
+      ...(savedAt ? { savedAt } : {})
+    }
+  }
+
+  const recovered = rebindToBinder(parsed.session, probe, workingPath, binderName)
+  if (recovered.error) {
+    return { error: recovered.error, ...(savedAt ? { savedAt } : {}) }
+  }
+  return { session: recovered.session, ...(savedAt ? { savedAt } : {}) }
+}
+
 // ------------------------------------------------------------------ mutations
 
 /**

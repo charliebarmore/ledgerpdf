@@ -294,7 +294,7 @@ async function releaseBinderLease(binder: string): Promise<void> {
  * is exactly the kind of thing a firm should never find. The autosave sibling
  * goes too, because a clean save means there is nothing left to recover.
  */
-async function releaseBinder(binder: string): Promise<void> {
+async function releaseBinder(binder: string, preserveAutosave = false): Promise<void> {
   const absolute = path.resolve(binder)
   // Only a binder opened or saved by this main process has siblings or a lease
   // to release. A trusted-but-compromised renderer must not turn this into a
@@ -304,9 +304,20 @@ async function releaseBinder(binder: string): Promise<void> {
   openWorkingCopies.delete(absolute)
   await Promise.all([
     working ? rm(working, { force: true }).catch(() => {}) : Promise.resolve(),
-    rm(binderRecoveryPathFor(absolute), { force: true }).catch(() => {}),
+    preserveAutosave
+      ? Promise.resolve()
+      : rm(binderRecoveryPathFor(absolute), { force: true }).catch(() => {}),
     releaseBinderLease(absolute)
   ])
+}
+
+function openedBinderPath(binder: unknown): string {
+  if (typeof binder !== 'string') throw new Error('refused: invalid binder path')
+  const absolute = path.resolve(binder)
+  if (!openWorkingCopies.has(absolute) && !binderLocks.has(absolute)) {
+    throw new Error('refused: binder is not open in this process')
+  }
+  return absolute
 }
 let rendererDirty = false
 /** Live access started once by whichever dev seam fires first. */
@@ -655,7 +666,14 @@ async function openBinderAt(target: string): Promise<unknown> {
       const recoveryPath = binderRecoveryPathFor(target)
       const [recoveryStat, binderStat] = await Promise.all([stat(recoveryPath), stat(target)])
       if (recoveryStat.mtimeMs > binderStat.mtimeMs) {
-        pendingAutosave = JSON.parse(await readFile(recoveryPath, 'utf8'))
+        try {
+          pendingAutosave = JSON.parse(await readFile(recoveryPath, 'utf8'))
+        } catch {
+          // A corrupt recovery is still recovery evidence. Hand a deliberately
+          // invalid wrapper to the renderer so it stops and offers Preserve or
+          // explicit Discard instead of opening normally and deleting it later.
+          pendingAutosave = { error: 'recovery file is not valid JSON' }
+        }
       }
     } catch {
       // No autosave sibling is the normal case.
@@ -1028,6 +1046,19 @@ function registerIpc(): void {
     await releaseBinder(path.resolve(binder))
   })
 
+  /** Cancel an open attempt without destroying the crash-recovery evidence. */
+  ipcMain.handle('binder:releasePreservingAutosave', async (event, binder: unknown) => {
+    assertTrustedIpc(event)
+    await releaseBinder(openedBinderPath(binder), true)
+  })
+
+  /** The reviewer explicitly chose the last saved binder over the autosave. */
+  ipcMain.handle('binder:discardAutosave', async (event, binder: unknown) => {
+    assertTrustedIpc(event)
+    const target = openedBinderPath(binder)
+    await rm(binderRecoveryPathFor(target), { force: true })
+  })
+
   /**
    * Open a saved binder — or an older `.wptsession.json`, once, so nothing
    * made before the single-file model is stranded.
@@ -1144,6 +1175,54 @@ function registerIpc(): void {
     })
     return result.response === 1
   })
+
+  ipcMain.handle(
+    'session:chooseAutosave',
+    async (event, binder: unknown, savedAt: unknown, recoverable: unknown) => {
+      assertTrustedIpc(event)
+      const target = openedBinderPath(binder)
+      const canRecover = recoverable === true
+      const parsedAt = typeof savedAt === 'string' ? new Date(savedAt) : null
+      const when = parsedAt && Number.isFinite(parsedAt.getTime()) ? parsedAt.toLocaleString() : null
+
+      // Focused UI checks can choose without automating a native dialog. This
+      // seam is development-only and never exists in a packaged release.
+      const scripted = isDev ? process.env.WPT_DEV_RECOVERY_RESPONSE : undefined
+      if (scripted === 'cancel' || scripted === 'saved') return scripted
+      if (scripted === 'recover' && canRecover) return scripted
+
+      if (!canRecover) {
+        const result = await dialog.showMessageBox({
+          type: 'warning',
+          title: 'Unsaved page changes need attention',
+          message: `${path.basename(target)} has unsaved work that this version cannot safely restore.`,
+          detail:
+            `${when ? `Autosaved ${when}. ` : ''}` +
+            'Its page order, rotations, added or removed pages, or bookmarks differ from the saved binder. ' +
+            'Cancel preserves the recovery file. Open the last saved binder only if you intend to discard those unsaved changes.',
+          buttons: ['Cancel', 'Open saved binder and discard recovery'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true
+        })
+        return result.response === 1 ? 'saved' : 'cancel'
+      }
+
+      const result = await dialog.showMessageBox({
+        type: 'warning',
+        title: 'Recover unsaved changes?',
+        message: `${path.basename(target)} has unsaved changes from a previous LedgerPDF session.`,
+        detail:
+          `${when ? `Autosaved ${when}. ` : ''}` +
+          'Recover them and Save to make them permanent, or open the last saved binder and discard them.',
+        buttons: ['Recover unsaved changes', 'Open saved binder', 'Cancel'],
+        defaultId: 0,
+        cancelId: 2,
+        noLink: true
+      })
+      return result.response === 0 ? 'recover' : result.response === 1 ? 'saved' : 'cancel'
+    }
+  )
 
   ipcMain.on('session:setDirty', (_e, dirty: unknown) => {
     assertTrustedIpc(_e)
@@ -1300,8 +1379,13 @@ function createWindow(): void {
       // binder. Without this, WPT_DEV_REOPEN only fired when WPT_DEV_OPEN was
       // also set, so the reopen seam could not reproduce a cold "just open a
       // binder" — the exact path a user reported broken.
+      const exportTo = process.env.WPT_DEV_EXPORT
+        ? path.resolve(process.env.WPT_DEV_EXPORT)
+        : undefined
+      if (exportTo) allowedOutputs.add(exportTo)
       win.webContents.send('dev:open', {
         paths: [],
+        exportTo,
         seedMarks: false,
         reopen: process.env.WPT_DEV_REOPEN
       })
