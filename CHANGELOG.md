@@ -5,6 +5,22 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-17
+
+### Added
+
+- Added a crash-recovery choice when a newer hidden autosave is found. Review
+  marks, notes, shapes, tapes, statuses, and journal work can be recovered into
+  the open binder and remain dirty until the reviewer saves.
+
+### Fixed
+
+- Preserved recovery evidence when the reviewer cancels an open or when the
+  autosave is corrupt or contains unsaved page-order, rotation, add/remove, or
+  bookmark changes. Those structural changes are stopped with an explicit
+  warning instead of being rebound to the wrong physical pages or discarded
+  silently.
+
 ## [0.3.0] - 2026-08-15
 
 ### Added
@@ -146,7 +162,8 @@ Initial public alpha.
 - Added platform-independent MCP registration and complete macOS notarization
   credential handling.
 
-[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/charliebarmore/ledgerpdf/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.3.1
 [0.3.0]: https://github.com/charliebarmore/ledgerpdf/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.2.1
 [0.2.0]: https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.2.0

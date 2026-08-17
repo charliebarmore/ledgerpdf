@@ -50,6 +50,7 @@ import {
   nudgeBookmarkDepth,
   parseAmount,
   parseSession,
+  recoverBinderAutosave,
   rebindToBinder,
   popTapeEntry,
   pushTapeEntry,
@@ -856,6 +857,109 @@ async function main(): Promise<number> {
   check('newer format rejected', 'error' in tooNew, 'error' in tooNew ? tooNew.error : 'accepted!')
   const dangling = parseSession({ ...s, sources: [] })
   check('dangling source rejected', 'error' in dangling)
+
+  // --- crash recovery: restore review work only when page identity is provable
+  const recoveryProbe: ProbeWire = {
+    path: '/engagement/.binder-working.pdf',
+    n_pages: s.pages.length,
+    pages: s.pages.map((page, index) => ({
+      index,
+      rotate: 0,
+      mediabox: [0, 0, page.w ?? 612, page.h ?? 792],
+      cropbox: null
+    })),
+    outline: []
+  }
+  const savedRebound = rebindToBinder(
+    s,
+    recoveryProbe,
+    recoveryProbe.path,
+    'binder.pdf'
+  ).session
+  const autosavedMark = addMark(s, {
+    page: s.pages[0].id,
+    kind: 'note',
+    nx: 0.2,
+    ny: 0.3,
+    size: 18,
+    note: 'Recovered review note'
+  }).session
+  const recoveredFromOriginalSources = recoverBinderAutosave(
+    { savedAt: '2026-08-16T12:00:00.000Z', session: autosavedMark },
+    s,
+    savedRebound,
+    recoveryProbe,
+    recoveryProbe.path,
+    'binder.pdf'
+  )
+  check(
+    'autosave recovers review work made after the first save',
+    'session' in recoveredFromOriginalSources &&
+      recoveredFromOriginalSources.session.marks?.some(
+        (mark) => mark.note === 'Recovered review note'
+      ) === true &&
+      recoveredFromOriginalSources.session.sources.length === 1 &&
+      recoveredFromOriginalSources.session.pages.every(
+        (page) => page.source === recoveredFromOriginalSources.session.sources[0].id
+      ),
+    'error' in recoveredFromOriginalSources ? recoveredFromOriginalSources.error : ''
+  )
+
+  const afterReopenMark = addMark(savedRebound, {
+    page: savedRebound.pages[1].id,
+    kind: 'tick',
+    nx: 0.6,
+    ny: 0.4,
+    size: 14
+  }).session
+  const recoveredAfterReopen = recoverBinderAutosave(
+    { session: afterReopenMark },
+    s,
+    savedRebound,
+    recoveryProbe,
+    recoveryProbe.path,
+    'binder.pdf'
+  )
+  check(
+    'autosave also recovers review work made after reopening a binder',
+    'session' in recoveredAfterReopen && recoveredAfterReopen.session.marks?.length === 1,
+    'error' in recoveredAfterReopen ? recoveredAfterReopen.error : ''
+  )
+
+  const unsafeRecoveries: Array<[string, Session]> = [
+    ['reorder', movePages(s, [s.pages[0].id], s.pages.length)],
+    ['rotation', rotatePages(s, [s.pages[0].id], 90)],
+    ['page deletion', deletePages(s, [s.pages[0].id])],
+    ['bookmark change', addBookmark(s, s.pages[0].id, 'Unsaved bookmark').session]
+  ]
+  for (const [change, candidate] of unsafeRecoveries) {
+    const refused = recoverBinderAutosave(
+      { session: candidate },
+      s,
+      savedRebound,
+      recoveryProbe,
+      recoveryProbe.path,
+      'binder.pdf'
+    )
+    check(
+      `autosave refuses unsafe ${change} recovery`,
+      'error' in refused && refused.error.includes('page order'),
+      'error' in refused ? refused.error : 'accepted'
+    )
+  }
+  const incompleteRecovery = recoverBinderAutosave(
+    { savedAt: '2026-08-16T12:00:00.000Z' },
+    s,
+    savedRebound,
+    recoveryProbe,
+    recoveryProbe.path,
+    'binder.pdf'
+  )
+  check(
+    'autosave refuses an incomplete recovery wrapper',
+    'error' in incompleteRecovery && incompleteRecovery.error.includes('incomplete'),
+    'error' in incompleteRecovery ? incompleteRecovery.error : 'accepted'
+  )
 
   // --- Phase 2: review marks
   let marked: Session = { ...s, reviewer: 'ABC' }

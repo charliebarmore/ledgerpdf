@@ -145,17 +145,19 @@ Developer ID certificate, notarized by Apple, and stapled — so it opens with n
 warning and no right-click dance, offline included. Unsigned or ad-hoc local
 packages are never release artifacts.
 
-**Windows releases are not code-signed yet, and ship anyway.** Azure Trusted
-Signing requires three years of verifiable business history and Ledger Labs LLC
-was formed in June 2025, so that route is closed until 2028; an interim
-certificate is in progress. Signing is a fast-follow, not a release gate,
-because the functional blocker was mark-of-the-web and the installer already
-solves that — what remains is one publisher warning, described below.
+**Windows releases are not code-signed yet, and ship anyway.** Microsoft now
+calls its service [Azure Artifact Signing](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart#prerequisites),
+and public-trust onboarding is available to U.S. organizations. LedgerPDF has
+not completed that identity-validation and signing setup, so the current
+installer still carries no verified publisher identity. Signing is a
+fast-follow, not a release gate, because the functional blocker was
+mark-of-the-web and the installer already solves that — what remains is one
+publisher warning, described below.
 
 ### Getting a build
 
 Download the current installers and checksums from the
-**[LedgerPDF v0.2.1 release](https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.2.1)**.
+**[LedgerPDF v0.3.1 release](https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.3.1)**.
 
 On **macOS**, download the `.dmg` or the `.zip`, open it, and drag LedgerPDF to
 Applications. It is notarized and stapled, so it launches with no warning.
@@ -163,9 +165,9 @@ Apple silicon only — the frozen Python engine is arm64.
 
 On **Windows**, run the installer. Because it is not signed yet, SmartScreen
 **may** show an "unrecognised publisher" warning once: click **More info →
-Run anyway**. That prompt is about *identity verification* — nobody has paid a
-certificate authority to vouch for the publisher's name — and not about anything
-the software does. Signing will remove it; until then
+Run anyway**. That prompt is about *identity verification* — the installer does
+not yet carry a certificate that verifies the publisher's name — and not about
+anything the software does. Signing will remove it; until then
 [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md) walks the install and says
 plainly what the prompt means rather than telling anyone to click through it. On
 a first real test (2026-08-07, Windows 11, Defender on, mark-of-the-web applied)

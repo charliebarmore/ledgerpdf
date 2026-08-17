@@ -48,7 +48,7 @@ const api = {
         session: unknown
         payloadIntact: boolean
         geometryMatches: boolean
-        pendingAutosave?: { savedAt?: string; session?: unknown }
+        pendingAutosave?: unknown
       }
     | { kind: 'plain'; path: string; reason?: string; flattened?: boolean }
     | {
@@ -71,6 +71,14 @@ const api = {
   releaseBinder: (binderPath: string): Promise<void> =>
     ipcRenderer.invoke('binder:release', binderPath),
 
+  /** Cancel an open while keeping its crash-recovery sibling for the next try. */
+  releaseBinderPreservingAutosave: (binderPath: string): Promise<void> =>
+    ipcRenderer.invoke('binder:releasePreservingAutosave', binderPath),
+
+  /** Explicitly discard the recovery sibling after the reviewer chooses saved state. */
+  discardBinderAutosave: (binderPath: string): Promise<void> =>
+    ipcRenderer.invoke('binder:discardAutosave', binderPath),
+
   /**
    * Write the tickmark legend to a markdown file and hand back its path, so it
    * can be imported as a normal typeset page.
@@ -84,6 +92,13 @@ const api = {
     ipcRenderer.invoke('binder:writeLegendDoc', markdown),
 
   confirmDiscard: (): Promise<boolean> => ipcRenderer.invoke('session:confirmDiscard'),
+
+  chooseAutosave: (
+    binderPath: string,
+    savedAt: string | undefined,
+    recoverable: boolean
+  ): Promise<'recover' | 'saved' | 'cancel'> =>
+    ipcRenderer.invoke('session:chooseAutosave', binderPath, savedAt, recoverable),
 
   relinkSource: (sourceName: string): Promise<string | null> =>
     ipcRenderer.invoke('dialog:relinkSource', sourceName),

@@ -1,7 +1,9 @@
 # Releasing LedgerPDF
 
-Release binaries must come from a clean checkout and must be signed. Local
-`package:dir` output is for verification only and must never be distributed.
+Release binaries must come from a clean checkout. macOS release binaries must
+be signed and notarized; Windows currently follows the explicitly unsigned
+release path documented below. Local `package:dir` output is for verification
+only and must never be distributed.
 
 ## 1. Prepare the source release
 
@@ -17,7 +19,7 @@ The packaged verifier reads the actual binary's complete Electron fuse wire,
 requires the renderer to load from `ledgerpdf://app`, checks that the MCP server
 and legal/SBOM resources are present, and rejects stale test bundles.
 
-## 2. Build signed artifacts
+## 2. Build release artifacts
 
 `npm run dist` refuses unsigned distribution. On macOS, provide a Developer ID
 identity plus one complete notarization credential path:
@@ -73,12 +75,14 @@ WPT_SIGNED_RELEASE=true npm run dist
 
 ### Windows
 
-Windows releases are **not signed yet and ship anyway**. Azure Trusted Signing
-requires three years of verifiable business history and Ledger Labs LLC was
-formed in June 2025, so `WPT_AZURE_*` (documented in
-`app/electron-builder.config.cjs`) cannot be satisfied until 2028. An interim
-OV certificate is in progress; when it lands, sign in the tag-triggered release
-workflow only.
+Windows releases are **not signed yet and ship anyway**. Microsoft now calls
+the service [Azure Artifact Signing](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart#prerequisites),
+and public-trust onboarding is available to U.S. organizations. LedgerPDF has
+not completed identity validation and certificate-profile setup. The
+`WPT_AZURE_*` integration is already present in
+`app/electron-builder.config.cjs`; once onboarding is complete, use it only in
+a dedicated release build and verify the exact signed installer before
+publication.
 
 Shipping unsigned is a deliberate decision, not an oversight. The functional
 blocker was mark-of-the-web, which the NSIS installer already defeats — MOTW
@@ -88,7 +92,7 @@ explain as identity verification rather than a safety verdict.
 
 Verify the exact final DMG/installer, record SHA-256 hashes, and retain the
 matching source commit and generated SBOMs. Do not substitute a locally modified
-artifact after signing.
+artifact after signing or after final unsigned Windows verification.
 
 ## 3. Publish the sanitized source tree
 
