@@ -21,6 +21,7 @@ import {
   type Session,
   type StatusDef
 } from './session'
+import { handoffItems, type HandoffItem, type CompilationHandoff } from './handoff'
 
 export type ReviewFindingKind = 'note' | 'cross'
 
@@ -81,6 +82,7 @@ export type ReadinessKind =
   | 'source-coverage'
   | 'without-status'
   | 'missing-attribution'
+  | 'compilation-handoff'
 
 export interface ReadinessFinding {
   kind: ReadinessKind
@@ -92,9 +94,12 @@ export interface ReadinessFinding {
 
 export interface ReviewSnapshot {
   pageCount: number
+  pageNumbers: Record<string, number>
   sourceCount: number
   statusDefs: StatusDef[]
   statuses: ReturnType<typeof statusCounts>
+  /** Agent-proposed statuses are displayed separately from human statuses. */
+  agentStatuses: Record<string, number>
   active: ReviewPage[]
   resolved: ReviewPage[]
   sources: SourceCoverage[]
@@ -104,6 +109,8 @@ export interface ReviewSnapshot {
   agentCreatedItems: number
   runs: ReviewRun[]
   readiness: ReadinessFinding[]
+  handoff?: CompilationHandoff
+  handoffPending: HandoffItem[]
 }
 
 function parsedTime(value?: string): number | null {
@@ -306,7 +313,18 @@ export function reviewSnapshot(session: Session): ReviewSnapshot {
   const stale = coverIsStale(session)
   const attributionGaps = attributionGapCount(session)
   const statuses = statusCounts(session)
+  const agentStatuses: Record<string, number> = {}
+  for (const page of session.pages) {
+    const record = session.statuses?.[page.id]
+    if (record?.agent) agentStatuses[record.status] = (agentStatuses[record.status] ?? 0) + 1
+  }
   const readiness: ReadinessFinding[] = []
+  const handoffPending = handoffItems(session).filter((item) => !item.resolved)
+  if (handoffPending.length) readiness.push({
+    kind: 'compilation-handoff', level: 'attention', count: handoffPending.length,
+    message: `${plural(handoffPending.length, 'compilation item')} needs human review`,
+    pageIds: [...new Set(handoffPending.flatMap((item) => item.pageIds))]
+  })
 
   if (pages.active.length) {
     readiness.push({
@@ -370,9 +388,13 @@ export function reviewSnapshot(session: Session): ReviewSnapshot {
 
   return {
     pageCount: session.pages.length,
+    pageNumbers: Object.fromEntries(session.pages.map((page, index) => [page.id, index + 1])),
     sourceCount: session.sources.length,
     statusDefs: statusDefs(session),
     statuses,
+    agentStatuses,
+    handoff: session.handoff,
+    handoffPending,
     active: pages.active,
     resolved: pages.resolved,
     sources,

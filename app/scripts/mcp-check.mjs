@@ -11,6 +11,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -114,7 +115,9 @@ check(
 
 /** Call a tool and return its text, asserting it did not error. */
 async function call(name, args = {}) {
-  const res = await client.callTool({ name, arguments: args })
+  const res = await client.callTool({ name, arguments: args }).catch((error) => {
+    throw new Error(`${name} failed: ${error.message}`, { cause: error })
+  })
   const body = (res.content ?? []).map((c) => c.text ?? '').join('\n')
   return { text: body, isError: !!res.isError }
 }
@@ -1217,6 +1220,50 @@ check(
   `${atomicFailure.stdout}${atomicFailure.stderr}`.trim()
 )
 
+// Fresh compilation handoff crosses the real MCP -> model -> PDF -> reopen boundary.
+await call('binder_new')
+await call('binder_add_pdfs', { paths: [a] })
+const handoffIds = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+const draftHandoff = {
+  inputs: [{ path: a, disposition: 'included', reason: 'Synthetic current-year support', pageIds: handoffIds }],
+  checks: [{ label: 'No comparison supplied', outcome: 'unchecked', detail: 'The requested second document has not arrived', evidence: [] }],
+  findings: [{ label: 'Missing required statement', detail: 'Required by the synthetic engagement instructions', pageIds: [] }]
+}
+const forbiddenHandoff = await call('binder_record_handoff', { ...draftHandoff,
+  inputs: [{ ...draftHandoff.inputs[0], path: path.join(APP, 'package.json'), pageIds: [] }]
+})
+check('handoff input hashes cannot read outside approved roots', forbiddenHandoff.isError)
+const wrongSourceHandoff = await call('binder_record_handoff', { ...draftHandoff,
+  inputs: [{ ...draftHandoff.inputs[0], path: b }]
+})
+check('handoff cannot attribute pages to a different source', wrongSourceHandoff.isError)
+const noEvidenceHandoff = await call('binder_record_handoff', { ...draftHandoff,
+  checks: [{ label: 'Unsupported assertion', outcome: 'agrees', detail: 'No evidence supplied', evidence: [] }]
+})
+check('a claimed performed check without evidence is refused', noEvidenceHandoff.isError)
+const handoffResult = await call('binder_record_handoff', draftHandoff)
+check('fresh binder accepts a structured compilation handoff', !handoffResult.isError, handoffResult.text)
+check('a second handoff cannot replace the first compilation record', (await call('binder_record_handoff', draftHandoff)).isError)
+const handoffQueue = await call('binder_review_queue')
+check('a missing document without a page is in the MCP review queue', handoffQueue.text.includes('Missing required statement'))
+const handoffOutput = path.join(REPO, 'spike/out/mcp_handoff.pdf')
+rmSync(handoffOutput, { force: true })
+const handoffCover = path.join(REPO, 'spike/out/mcp_handoff.md')
+rmSync(handoffCover, { force: true })
+check('structured handoff produces a cover without duplicating the action log',
+  !(await call('binder_add_cover', { path: handoffCover })).isError &&
+  !readFileSync(handoffCover, 'utf8').includes('## Agent activity'))
+check('handoff binder saves', !(await call('binder_save', { path: handoffOutput })).isError)
+const handoffOnDisk = await engine({ cmd: 'open_binder', path: handoffOutput })
+check('the saved PDF contains the handoff and an engine-computed input hash',
+  handoffOnDisk.ok && handoffOnDisk.binder.session?.handoff?.inputs[0]?.sha256 === createHash('sha256').update(readFileSync(a)).digest('hex') &&
+  handoffOnDisk.binder.session.handoff.findings[0].pageIds.length === 0)
+await call('binder_new')
+check('handoff binder reopens', !(await call('binder_open', { path: handoffOutput })).isError)
+check('missing-document findings survive reopen without the agent conversation',
+  (await call('binder_review_queue')).text.includes('Missing required statement'))
+check('handoff appears in the generated binder summary',
+  (await call('binder_summary')).text.includes('Missing required statement'))
 await client.close()
 
 // No root means no filesystem capability at all. This is the default when a

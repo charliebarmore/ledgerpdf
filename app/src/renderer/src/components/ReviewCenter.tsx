@@ -1,7 +1,8 @@
+import { useEffect, useRef } from 'react'
 import { SHAPE_COLORS } from '../session'
 import type { ReviewSnapshot } from '../review'
 
-export type ReviewTab = 'attention' | 'coverage' | 'ai'
+export type ReviewTab = 'attention' | 'coverage' | 'ai' | 'handoff'
 
 function plural(n: number, one: string): string {
   return `${n} ${one}${n === 1 ? '' : 's'}`
@@ -28,6 +29,7 @@ export function ReviewCenter({
   onJump,
   onResolve,
   onRevert,
+  onResolveHandoff,
   onClose
 }: {
   snapshot: ReviewSnapshot
@@ -36,20 +38,44 @@ export function ReviewCenter({
   onJump: (pageId: string) => void
   onResolve: (pageId: string, status: 'reviewed' | 'na') => void
   onRevert: (run: string) => void
+  onResolveHandoff: (id: string) => void
   onClose: () => void
 }): React.JSX.Element {
   const attentionChecks = snapshot.readiness.filter((finding) => finding.level === 'attention')
   const advisoryChecks = snapshot.readiness.filter((finding) => finding.level === 'advisory')
   const agentRuns = snapshot.runs.filter((run) => run.run !== 'you')
+  const drawer = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
+    drawer.current?.querySelector<HTMLButtonElement>('.review-close')?.focus()
+    return () => { if (previous?.isConnected) previous.focus() }
+  }, [])
 
   return (
     <div className="review-backdrop" onMouseDown={onClose}>
       <aside
+        ref={drawer}
         className="review-drawer"
         role="dialog"
         aria-modal="true"
         aria-label="Review center"
         onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key !== 'Tab') return
+          const controls = [...event.currentTarget.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), input:not(:disabled), summary, [tabindex="0"]'
+          )]
+          const first = controls[0]
+          const last = controls[controls.length - 1]
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault()
+            last?.focus()
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault()
+            first?.focus()
+          }
+        }}
       >
         <header className="review-head">
           <div>
@@ -57,7 +83,8 @@ export function ReviewCenter({
             <p>
               {snapshot.active.length
                 ? `${plural(snapshot.active.length, 'page')} ${snapshot.active.length === 1 ? 'needs' : 'need'} attention`
-                : 'No open review items'}
+                : snapshot.handoffPending.length ? 'Compilation needs review' : 'No flagged findings'}
+              {' · '}{plural(snapshot.statuses.unset, 'page')} without review status
             </p>
           </div>
           <button className="review-close" onClick={onClose} aria-label="Close review center">
@@ -67,16 +94,16 @@ export function ReviewCenter({
 
         <div className="review-overview" aria-label="Binder review overview">
           <div><b>{snapshot.pageCount}</b><span>pages</span></div>
-          <div className={snapshot.active.length ? 'has-attention' : ''}>
-            <b>{snapshot.active.length}</b><span>open</span>
+          <div className={snapshot.active.length || snapshot.handoffPending.length ? 'has-attention' : ''}>
+            <b>{snapshot.active.length + snapshot.handoffPending.length}</b><span>open items</span>
           </div>
-          <div><b>{snapshot.resolved.length}</b><span>resolved</span></div>
-          <div><b>{snapshot.statuses.unset}</b><span>not set</span></div>
+          <div><b>{snapshot.resolved.length + Object.keys(snapshot.handoff?.resolutions ?? {}).length}</b><span>resolved</span></div>
+          <div><b>{snapshot.statuses.unset}</b><span>without status</span></div>
         </div>
 
         <nav className="review-tabs" aria-label="Review center sections">
           <button className={tab === 'attention' ? 'is-current' : ''} onClick={() => onTab('attention')}>
-            Needs attention{snapshot.active.length ? ` ${snapshot.active.length}` : ''}
+            Needs attention{snapshot.active.length + snapshot.handoffPending.length ? ` ${snapshot.active.length + snapshot.handoffPending.length}` : ''}
           </button>
           <button className={tab === 'coverage' ? 'is-current' : ''} onClick={() => onTab('coverage')}>
             Coverage
@@ -84,12 +111,15 @@ export function ReviewCenter({
           <button className={tab === 'ai' ? 'is-current' : ''} onClick={() => onTab('ai')}>
             AI work{snapshot.agentCreatedItems ? ` ${snapshot.agentCreatedItems}` : ''}
           </button>
+          {snapshot.handoff && (
+            <button className={tab === 'handoff' ? 'is-current' : ''} onClick={() => onTab('handoff')}>Compilation</button>
+          )}
         </nav>
 
         <div className="review-body">
           {tab === 'attention' && (
             <>
-              {attentionChecks.filter((finding) => finding.kind !== 'open-items').map((finding) => (
+              {attentionChecks.filter((finding) => finding.kind !== 'open-items' && finding.kind !== 'compilation-handoff').map((finding) => (
                 <div className="review-alert" key={finding.kind}>
                   <b>Check:</b> {finding.message}
                 </div>
@@ -116,10 +146,28 @@ export function ReviewCenter({
                 </div>
               ))}
 
-              {snapshot.active.length === 0 ? (
+              {snapshot.handoffPending.map((item) => (
+                <article className="review-item" key={item.id}>
+                  <b>{item.label}</b>
+                  <p>{item.detail}</p>
+                  <div className="review-actions">
+                    {[...new Set(item.pageIds)].filter((id) => snapshot.pageNumbers[id]).map((id) => (
+                      <button key={id} onClick={() => onJump(id)}>Evidence p.{snapshot.pageNumbers[id]}</button>
+                    ))}
+                    <button onClick={() => onResolveHandoff(item.id)}>Resolve item</button>
+                  </div>
+                </article>
+              ))}
+
+              {snapshot.active.length === 0 && snapshot.handoffPending.length === 0 ? (
                 <div className="review-empty">
-                  <b>No open review items.</b>
-                  <span>Coverage and send-out checks may still have advisories.</span>
+                  <b>No flagged findings.</b>
+                  <span>
+                    {snapshot.statuses.unset
+                      ? `${plural(snapshot.statuses.unset, 'page')} still ${snapshot.statuses.unset === 1 ? 'has' : 'have'} no review status.`
+                      : 'Page statuses and agent work are recorded separately.'}
+                    {' '}Open Coverage to see page statuses and remaining checks.
+                  </span>
                 </div>
               ) : (
                 <div className="review-items">
@@ -183,6 +231,37 @@ export function ReviewCenter({
             </>
           )}
 
+          {tab === 'handoff' && snapshot.handoff && (
+            <section className="review-section">
+              <h3>Compilation record</h3>
+              <p>Agent preparation snapshot · {shortTime(snapshot.handoff.recordedAt)}. Outcomes are agent-reported; inspect the evidence. Human review is separate.</p>
+              <h3>{snapshot.handoff.inputs.length} input dispositions</h3>
+              {snapshot.handoff.inputs.map((input) => (
+                <div className="review-item" key={input.path}>
+                  <b>{input.path.split(/[\\/]/).pop()} · {input.disposition}</b>
+                  <p>{input.reason}</p>
+                  <details><summary>Source identity</summary><code className="handoff-hash">SHA-256 {input.sha256}</code></details>
+                </div>
+              ))}
+              <h3>{snapshot.handoff.checks.length} recorded checks</h3>
+              {snapshot.handoff.checks.map((check, i) => (
+                <div className="review-item" key={i}>
+                  <b>{check.label} · {check.outcome}</b>
+                  <p>{check.detail}</p>
+                  {check.evidence.map((e, j) => (
+                    <div key={j}>
+                      {snapshot.pageNumbers[e.pageId]
+                        ? <button onClick={() => onJump(e.pageId)}>p.{snapshot.pageNumbers[e.pageId]} · {e.sourceName} (source p.{e.sourcePage})</button>
+                        : <b>Evidence page removed · {e.sourceName}</b>}
+                      <p>{e.quote}{e.sheet ? ` · ${e.sheet}` : ''}{e.cells ? `!${e.cells}` : ''}</p>
+                    </div>
+                  ))}
+                </div>
+              ))}
+              <p>{Object.keys(snapshot.handoff.resolutions).length} compilation item(s) resolved by a human. The original record is retained.</p>
+            </section>
+          )}
+
           {tab === 'coverage' && (
             <>
               <section className="review-section">
@@ -206,10 +285,17 @@ export function ReviewCenter({
                     <div key={definition.id}>
                       <i style={{ background: SHAPE_COLORS[definition.color] }} />
                       <span>{definition.label}</span>
-                      <b>{snapshot.statuses.byId[definition.id] ?? 0}</b>
+                      <b>{(snapshot.statuses.byId[definition.id] ?? 0) - (snapshot.agentStatuses[definition.id] ?? 0)}</b>
                     </div>
                   ))}
-                  <div><i /><span>Not set</span><b>{snapshot.statuses.unset}</b></div>
+                  {snapshot.statusDefs.filter((definition) => snapshot.agentStatuses[definition.id]).map((definition) => (
+                    <div key={`agent-${definition.id}`}>
+                      <i style={{ background: SHAPE_COLORS[definition.color] }} />
+                      <span>{definition.label} · AI proposed</span>
+                      <b>{snapshot.agentStatuses[definition.id]}</b>
+                    </div>
+                  ))}
+                  <div><i /><span>Without review status</span><b>{snapshot.statuses.unset}</b></div>
                 </div>
               </section>
 

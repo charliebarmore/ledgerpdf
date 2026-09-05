@@ -5,6 +5,33 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+### Added
+
+- Added a binder-owned compilation handoff with input hashes/dispositions,
+  agent-reported checks and source references, and findings without page targets.
+  These findings appear in Review, MCP queues and send-out preflight; humans can
+  resolve them while retaining the preparation record. MCP records a handoff once
+  in a fresh unsaved binder with `binder_record_handoff`.
+- Added a reproducible synthetic engagement acceptance packet, an opt-in external
+  Claude Code runner, an independent artifact verifier, and a compilation skill.
+
+### Changed
+
+- Advanced the embedded session format to v4 so earlier builds refuse the new
+  compilation record rather than silently discarding it. v1-v3 binders remain readable.
+
+- Added a visible Review binder entry above the document. Empty review queues
+  now say "No flagged findings" and show pages without review status; Coverage
+  separates AI-proposed statuses from human statuses. The review drawer receives
+  keyboard focus, contains Tab navigation, and returns focus when closed.
+- Recorded the engagement-compilation direction, external-agent boundary,
+  binder-owned handoff, prior-year reference, and fresh-binder scope in DECISIONS.md.
+
+### Fixed
+
+- Prevented a delayed mark-size preference response from replacing a newer
+  placement size while a reviewer resizes and immediately places another mark.
+
 ## [0.3.1] - 2026-08-17
 
 ### Added

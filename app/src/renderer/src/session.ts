@@ -16,7 +16,10 @@
  * silently destroying an audit trail. The version guard makes such a build
  * refuse to open the file instead, which is the right failure for a record.
  */
-export const SESSION_FORMAT_VERSION = 3
+import { handoffSchema, type CompilationHandoff } from './handoff'
+
+// v4 preserves compilation evidence that older loaders would silently discard.
+export const SESSION_FORMAT_VERSION = 4
 
 // ------------------------------------------------------------------- types
 
@@ -657,6 +660,7 @@ export interface Session {
    * it travels with the session and is never pruned automatically.
    */
   journal?: JournalEntry[]
+  handoff?: CompilationHandoff
   /**
    * The run currently being recorded into. Set while an agent is working; new
    * artifacts are stamped with it. Absent means a person is at the keyboard.
@@ -2889,10 +2893,13 @@ export function parseSession(raw: unknown): { session: Session } | { error: stri
     if (!known.has(p.source)) return { error: `page ${p.id} references unknown source ${p.source}` }
   }
   const pageIds = new Set(s.pages.map((p) => p.id))
+  const handoff = s.handoff === undefined ? undefined : handoffSchema.safeParse(s.handoff)
+  if (handoff && !handoff.success) return { error: 'The compilation handoff is damaged or unsupported; it was not discarded.' }
   const seq = typeof s.seq === 'number' ? s.seq : s.pages.length + s.sources.length
   return {
     session: {
       formatVersion: SESSION_FORMAT_VERSION,
+      ...(handoff?.success ? { handoff: handoff.data } : {}),
       // Sessions written before image support have no `kind`; they were all PDFs.
       sources: s.sources.map((x) => ({
         ...x,
