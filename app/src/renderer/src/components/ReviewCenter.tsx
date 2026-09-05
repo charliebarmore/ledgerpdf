@@ -147,7 +147,7 @@ export function ReviewCenter({
               ))}
 
               {snapshot.handoffPending.map((item) => (
-                <article className="review-item" key={item.id}>
+                <article className="review-item handoff-item" key={item.id}>
                   <b>{item.label}</b>
                   <p>{item.detail}</p>
                   <div className="review-actions">
@@ -237,7 +237,7 @@ export function ReviewCenter({
               <p>Agent preparation snapshot · {shortTime(snapshot.handoff.recordedAt)}. Outcomes are agent-reported; inspect the evidence. Human review is separate.</p>
               <h3>{snapshot.handoff.inputs.length} input dispositions</h3>
               {snapshot.handoff.inputs.map((input) => (
-                <div className="review-item" key={input.path}>
+                <div className="review-item handoff-item" key={input.path}>
                   <b>{input.path.split(/[\\/]/).pop()} · {input.disposition}</b>
                   <p>{input.reason}</p>
                   <details><summary>Source identity</summary><code className="handoff-hash">SHA-256 {input.sha256}</code></details>
@@ -245,7 +245,7 @@ export function ReviewCenter({
               ))}
               <h3>{snapshot.handoff.checks.length} recorded checks</h3>
               {snapshot.handoff.checks.map((check, i) => (
-                <div className="review-item" key={i}>
+                <div className="review-item handoff-item" key={i}>
                   <b>{check.label} · {check.outcome}</b>
                   <p>{check.detail}</p>
                   {check.evidence.map((e, j) => (

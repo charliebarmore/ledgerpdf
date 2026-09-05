@@ -124,6 +124,10 @@ skill validation also passed. The combined verification command initially stoppe
 at recovery after Electron process crashes; recovery and the remaining suites
 passed when rerun sequentially. This is a passing set of checks after retries,
 not a clean uninterrupted full-suite run.
+The saved integration binder was also opened in an isolated development window:
+both findings without pages appeared in Review, alongside the Compilation tab
+and four pages without review status. Its generated cover was rendered and
+visually inspected. The public-tree export validator passed.
 
 Test-run transcripts and credentials are not source documentation and are not
 published. Generated binders are local test artifacts, not reference masters.

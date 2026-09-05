@@ -2378,6 +2378,11 @@ button.review-close {
   background: var(--surface);
 }
 
+.handoff-item {
+  padding: var(--md);
+  margin-bottom: var(--md);
+}
+
 .review-item-head {
   display: flex;
   align-items: center;
