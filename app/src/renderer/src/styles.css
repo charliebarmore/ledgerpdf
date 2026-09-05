@@ -131,6 +131,33 @@ body {
   flex: 1;
 }
 
+.binder-review-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.binder-review-bar > span {
+  font-size: 13px;
+}
+
+.binder-review-bar button {
+  font-weight: 600;
+}
+
+.binder-review-bar button.has-open {
+  color: var(--warning);
+}
+
+.handoff-hash {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
 button {
   font: inherit;
   color: var(--text);
@@ -2260,7 +2287,8 @@ button.review-close {
 
 .review-tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   padding: 0 var(--md);
   border-bottom: 1px solid var(--border);
 }
@@ -2348,6 +2376,11 @@ button.review-close {
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--surface);
+}
+
+.handoff-item {
+  padding: var(--md);
+  margin-bottom: var(--md);
 }
 
 .review-item-head {

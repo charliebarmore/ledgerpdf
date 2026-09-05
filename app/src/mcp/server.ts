@@ -100,6 +100,7 @@ import {
   type Session
 } from '../renderer/src/session'
 import { reviewSnapshot } from '../renderer/src/review'
+import { handoffDraftShape, handoffSchema } from '../renderer/src/handoff'
 
 // ------------------------------------------------------------------- state
 
@@ -1451,6 +1452,33 @@ function summaryMarkdown(narrative?: string, coverPages = 0): string {
   // reviewer cannot trust are worse than no numbers, so they are computed
   // against the binder AS DELIVERED, cover included.
   const pageOf = new Map(session.pages.map((p, i) => [p.id, i + 1 + coverPages]))
+  if (session.handoff) {
+    const h = session.handoff
+    const review = reviewSnapshot(session)
+    const cell = (value: string): string => value.replace(/[|\r\n]/g, ' ')
+    const at = (ids: string[]): string => [...new Set(ids)].map((id) =>
+      pageOf.has(id) ? `p.${pageOf.get(id)}` : 'page removed'
+    ).join(', ') || 'No binder page'
+    return [
+      '# Compilation handoff', '',
+      `${h.inputs.length} input dispositions · ${h.checks.length} recorded checks · ${review.handoffPending.length} items need human review.`,
+      `Agent preparation snapshot: ${h.recordedAt}. Checks are agent-reported; human review is separate.`, '',
+      ...(narrative?.trim() ? [narrative.trim(), ''] : []),
+      '## Needs human review', '',
+      ...(review.handoffPending.length ? review.handoffPending.map((item) =>
+        `- **${item.label}** (${at(item.pageIds)}): ${item.detail}`
+      ) : ['No unresolved compilation items. Page review status is recorded separately.']), '',
+      ...review.active.map((page) => `- **${at([page.pageId])} also needs attention:** ${page.findings.map((finding) => finding.note ?? finding.kind).join('; ')}`), '',
+      '## Input dispositions', '', '| Input | Disposition | Location |', '| --- | --- | --- |',
+      ...h.inputs.map((input) => `| ${cell(baseName(input.path))} | ${input.disposition} | ${at(input.pageIds)} |`), '',
+      '## Recorded checks', '',
+      ...h.checks.flatMap((check) => [
+        `**${check.label} — ${check.outcome}.** ${check.detail}`,
+        ...check.evidence.map((e) => `- ${at([e.pageId])}: ${e.quote}${e.sheet ? ` (${e.sheet}${e.cells ? `!${e.cells}` : ''})` : ''}`), ''
+      ]),
+      'Input hashes, disposition reasons, original evidence references and agent history are preserved in the editable binder. Open Review for the full record.'
+    ].join('\n')
+  }
   const marks = session.marks ?? []
   const tapes = session.tapes ?? []
   const shapes = session.shapes ?? []
@@ -1978,6 +2006,60 @@ registerTool(
 )
 
 registerTool(
+  'binder_record_handoff',
+  {
+    title: 'Record the compilation handoff',
+    description: 'Persist the input manifest, agent check outcomes with evidence, and findings in a fresh binder. Findings may have no page (e.g. a missing required document). File hashes and source provenance are recorded by LedgerPDF. This is an agent preparation snapshot, not human sign-off. Call once, before the first save, after assembly and checks. Use binder_find coordinates for evidence; never guess positions. Use findings for missing requirements and inputs for failed or ambiguous files; non-agreeing checks automatically require human review.',
+    inputSchema: handoffDraftShape
+  },
+  async ({ inputs, checks, findings }) => {
+    if (sessionPath || session.handoff) return fail('Record the handoff once in a fresh, unsaved binder. Recompilation is not supported.')
+    if (!session.pages.length) return fail('Compile the binder pages before recording its handoff.')
+    try {
+      const ids = new Set(session.pages.map((page) => page.id))
+      const requirePages = (pages: string[]): void => {
+        if (pages.some((id) => !ids.has(id))) throw new Error('Handoff refers to a page outside this binder')
+      }
+      const paths = new Set<string>()
+      const recordedInputs = []
+      for (const input of inputs) {
+        requirePages(input.pageIds)
+        const file = resolveAllowedPath(input.path, { mustExist: true, purpose: 'recording a compilation input' })
+        if (!statSync(file).isFile()) throw new Error('A compilation input must be a file')
+        if (paths.has(file)) throw new Error('List each input path once')
+        paths.add(file)
+        if (input.disposition === 'included' && !input.pageIds.length) throw new Error('An included input needs its binder pages')
+        if (['excluded', 'unreadable', 'unsupported'].includes(input.disposition) && input.pageIds.length) {
+          throw new Error('An excluded or failed input cannot claim included pages')
+        }
+        for (const id of input.pageIds) {
+          const page = session.pages.find((p) => p.id === id)!
+          const source = session.sources.find((s) => s.id === page.source)!
+          if (realpathSync(source.path) !== file) throw new Error('Input pages belong to a different source file')
+        }
+        recordedInputs.push({ ...input, path: file, sha256: await sha256File(file) })
+      }
+      const recordedChecks = checks.map((check) => ({ ...check, evidence: check.evidence.map((evidence) => {
+        requirePages([evidence.pageId])
+        const page = session.pages.find((p) => p.id === evidence.pageId)!
+        const source = session.sources.find((s) => s.id === page.source)!
+        return { ...evidence, sourceName: source.name, sourcePage: page.index + 1,
+          ...(source.fingerprint ? { sourceSha256: source.fingerprint.sha256 } : {}) }
+      }) }))
+      findings.forEach((finding) => requirePages(finding.pageIds))
+      mutating('handoff', `Recorded ${inputs.length} input dispositions, ${checks.length} checks and ${findings.length} findings`)
+      const handoff = handoffSchema.parse({ version: 1, recordedAt: new Date().toISOString(),
+        by: 'agent', run: session.activeRun!, inputs: recordedInputs, checks: recordedChecks,
+        findings, resolutions: {} })
+      session = { ...session, handoff }
+      return text(`Compilation handoff recorded in the binder. ${reviewSnapshot(session).handoffPending.length} item(s) need human review. Save the editable binder to preserve it.`)
+    } catch (error) {
+      return fail(String((error as Error).message))
+    }
+  }
+)
+
+registerTool(
   'binder_summary',
   {
     title: "The binder's account of itself",
@@ -2157,9 +2239,10 @@ registerTool(
       return bits.join('  ')
     })
     const legend = `statuses in this binder: ${review.statusDefs.map((d) => `${d.id} (${d.label})`).join(', ')}`
+    rows.push(...review.handoffPending.map((item) => `Compilation ${item.id}: ${item.label}\n      ${item.detail}`))
     return text(
       rows.length
-        ? `${rows.length} page(s) need attention:\n\n${rows.join('\n')}\n\n${legend}`
+        ? `${rows.length} review item(s) need attention:\n\n${rows.join('\n')}\n\n${legend}`
         : `Nothing flagged. ${legend}`
     )
   }

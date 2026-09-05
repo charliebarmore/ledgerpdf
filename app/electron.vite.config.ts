@@ -15,10 +15,10 @@ const devConnectSrc = {
 
 export default defineConfig({
   main: {
-    // Packaging intentionally excludes node_modules. The lock implementation
-    // is runtime code used by Electron main, so bundle it into out/main rather
-    // than leaving a require() that works in dev and fails only after install.
-    plugins: [externalizeDepsPlugin({ exclude: ['proper-lockfile'] })],
+    // Packaging intentionally excludes node_modules. Bundle the runtime lock
+    // and handoff validator into main rather than leaving a require() that
+    // works in dev and fails only after install.
+    plugins: [externalizeDepsPlugin({ exclude: ['proper-lockfile', 'zod'] })],
     build: { rollupOptions: { input: resolve(__dirname, 'src/main/index.ts') } }
   },
   preload: {

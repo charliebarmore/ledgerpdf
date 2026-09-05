@@ -111,6 +111,7 @@ import {
   reviewRuns,
   reviewSnapshot
 } from '../src/renderer/src/review'
+import { handoffItems, handoffSchema, resolveHandoffItem } from '../src/renderer/src/handoff'
 import {
   markSizePreferenceKey,
   preferredMarkSize
@@ -2355,6 +2356,54 @@ async function main(): Promise<number> {
     }
   }
   const review = reviewSnapshot(reviewBase)
+  {
+    const pageId = reviewBase.pages[0].id
+    const handoff = handoffSchema.parse({
+      version: 1, recordedAt: '2026-09-05T09:00:00Z', by: 'agent', run: 'run_handoff',
+      inputs: [{ path: '/synthetic/source.pdf', sha256: 'a'.repeat(64), disposition: 'included', reason: 'Current year', pageIds: [pageId] }],
+      checks: [{ label: 'Receipts tie', outcome: 'agrees', detail: '100 vs 100', evidence: [{
+        pageId, quote: '100.00', nx: 0.5, ny: 0.2, sourceName: 'source.pdf', sourcePage: 1, sourceSha256: 'a'.repeat(64)
+      }] }],
+      findings: [{ label: 'Lease statement missing', detail: 'Required by current-year instructions', pageIds: [] }], resolutions: {}
+    })
+    const compiled: Session = { ...reviewBase, handoff }
+    const again = parseSession(JSON.parse(JSON.stringify(toSaved(compiled))))
+    check('the compilation handoff survives session save/reopen with its source identity',
+      'session' in again && JSON.stringify(again.session.handoff) === JSON.stringify(handoff))
+    const pending = reviewSnapshot(compiled)
+    check('a finding with no page reaches review and send-out readiness',
+      pending.handoffPending.some((item) => item.label === 'Lease statement missing' && !item.pageIds.length) &&
+      pending.readiness.some((finding) => finding.kind === 'compilation-handoff' && finding.level === 'attention'))
+    const resolved = resolveHandoffItem(compiled, 'finding:0', 'RV')
+    check('a human resolution retains the original finding as evidence',
+      reviewSnapshot(resolved).handoffPending.length === 0 && resolved.handoff?.findings.length === 1 &&
+      resolved.handoff.resolutions['finding:0'].by === 'RV')
+    const agent = beginRun(compiled).session
+    check('an agent cannot resolve its own compilation finding', resolveHandoffItem(agent, 'finding:0', 'AI') === agent)
+    const removed = deletePages(resolved, [pageId])
+    check('removing checked evidence creates an unresolved compilation warning',
+      handoffItems(removed).some((item) => item.id.startsWith('missing:') && !item.resolved))
+    check('a damaged handoff is refused rather than silently dropped',
+      'error' in parseSession({ ...compiled, handoff: { ...handoff, version: 99 } }))
+    check('older binders without a handoff remain readable', 'session' in parseSession({ ...reviewBase, formatVersion: 3 }))
+  }
+  {
+    const page = reviewBase.pages[0].id
+    const proposed = setPageStatus(beginRun(reviewBase).session, [page], 'reviewed', 'AI')
+    const pending = reviewSnapshot(proposed)
+    check(
+      'review coverage separates AI-proposed status from human status',
+      pending.agentStatuses.reviewed === 1 &&
+        pending.statuses.byId.reviewed - pending.agentStatuses.reviewed === 1 &&
+        pending.active.some((item) => item.pageId === page)
+    )
+    const confirmed = reviewSnapshot(setPageStatus(endRun(proposed), [page], 'reviewed', 'RV'))
+    check(
+      'human confirmation moves a proposed status into human coverage',
+      !confirmed.agentStatuses.reviewed && confirmed.statuses.byId.reviewed === 2 &&
+        !confirmed.active.some((item) => item.pageId === page)
+    )
+  }
   check(
     'open review work is attention; missing page statuses are advisory',
     review.readiness.some((finding) => finding.kind === 'open-items' && finding.level === 'attention') &&
