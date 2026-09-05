@@ -29,6 +29,8 @@ Versioning once a stable compatibility promise is published.
 
 ### Fixed
 
+- Bundle the handoff validator into Electron main so the packaged app starts
+  without relying on development-only `node_modules`.
 - Prevented a delayed mark-size preference response from replacing a newer
   placement size while a reviewer resizes and immediately places another mark.
 
