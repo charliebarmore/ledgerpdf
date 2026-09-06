@@ -657,11 +657,29 @@ check(
   )
   const within = await call('binder_tie', {
     label: 'Rounding',
+    size: 18,
     a: { pageId: ids[0], amount: '1,000.00', nx: 0.3, ny: 0.3 },
     b: { pageId: ids[1], amount: '999.99', nx: 0.3, ny: 0.3 },
     toleranceCents: 1
   })
   check('a tolerance the reviewer sets is respected', within.text.startsWith('TIES'), within.text.split('\n')[0])
+  const tieOutput = path.join(REPO, 'spike/out/mcp_tie_sizes.pdf')
+  rmSync(tieOutput, { force: true })
+  await call('binder_save', { path: tieOutput })
+  const tieSaved = (await engine({ cmd: 'open_binder', path: tieOutput })).binder.session
+  const tieMarks = tieSaved.marks.filter((mark) => mark.refTarget)
+  check('saved automatic ties use compact marks for normal workpaper rows',
+    tieMarks.filter((mark) => !mark.note.startsWith('Rounding')).every((mark) => mark.size === 14))
+  check('an explicitly requested tie size survives save',
+    tieMarks.filter((mark) => mark.note.startsWith('Rounding')).every((mark) => mark.size === 18))
+  const footStamp = tieSaved.marks.find((mark) => mark.text === 'F')
+  const footTape = tieSaved.tapes.find((tape) => tape.page === footStamp.page)
+  check('the footing stamp is outside the tape that would otherwise paint over it',
+    (footTape.ny - footStamp.ny) * 792 > 78 / 2 + footStamp.size / 2)
+  const firstLink = tieSaved.links[0]
+  check('tie link hit areas fit the actual mark footprint',
+    Math.abs((firstLink.rect[2] - firstLink.rect[0]) * 612 - 14) < 0.001 &&
+    Math.abs((firstLink.rect[3] - firstLink.rect[1]) * 792 - 14) < 0.001)
 }
 
 // ------------------------------------------------------------ folder intake
@@ -1081,7 +1099,7 @@ check(
 )
 
 const found = await call('binder_find', { query: '84,200.00' })
-const hit = found.text.match(/\[page (pg_\d+)\s+nx ([\d.]+)\s+ny ([\d.]+)/)
+const hit = found.text.match(/\[page (pg_\d+)\s+nx ([\d.]+)\s+ny ([\d.]+)\s+beside nx ([\d.]+)/)
 check('binder_find locates a figure and reports where it is', !!hit, found.text.split('\n')[1] ?? found.text)
 check(
   'binder_find reports the page that actually holds the figure',
@@ -1091,14 +1109,22 @@ check(
 
 // The whole ergonomic claim — a hit's coordinates go straight into a mark.
 if (hit) {
+  const located = await engine({ cmd: 'text', path: a, pages: [0], words: true })
+  const words = located.text.pages[0].words
+  const left = Number(hit[4]) - 12 / 612
+  const right = Number(hit[4]) + 12 / 612
+  const top = Number(hit[3]) - 12 / 792
+  const bottom = Number(hit[3]) + 12 / 792
+  check('beside reserves clearance for the whole default mark, including adjacent rows',
+    !words.some(({ box }) => box[0] < right && box[2] > left && box[1] < bottom && box[3] > top))
   const placed = await call('binder_place_mark', {
     pageId: hit[1],
     kind: 'tick',
-    nx: Number(hit[2]),
+    nx: Number(hit[4]),
     ny: Number(hit[3])
   })
   check(
-    "a find hit's coordinates are directly usable as a mark position",
+    "a find hit's beside coordinates are directly usable as a mark position",
     !placed.isError && placed.text.includes('Placed tick'),
     placed.text
   )

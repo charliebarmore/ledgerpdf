@@ -17,6 +17,11 @@ Versioning once a stable compatibility promise is published.
 
 ### Changed
 
+- Shortened compilation covers by linking to page review notes instead of
+  repeating them, and tightened compilation instructions around actionable
+  findings, unreadable inputs and superseded versions.
+- Expanded the engagement verifier to check source hashes, dispositions,
+  evidence provenance, bookmark order and actual annotation footprints.
 - Advanced the embedded session format to v4 so earlier builds refuse the new
   compilation record rather than silently discarding it. v1-v3 binders remain readable.
 
@@ -29,6 +34,13 @@ Versioning once a stable compatibility promise is published.
 
 ### Fixed
 
+- `binder_find` now reserves room for the whole mark and nearby text, using
+  displayed page dimensions. It reports when no nearby position fits instead
+  of clamping a mark onto the page edge. Optional `markSize` controls clearance.
+- Automatic ties use 14-point marks by default, with matching link areas, so
+  adjacent workpaper rows remain distinct. Callers can request another size.
+- Footing stamps sit outside their calculator tapes using the tape's actual
+  height; the tape no longer paints over the stamp.
 - Bundle the handoff validator into Electron main so the packaged app starts
   without relying on development-only `node_modules`.
 - Prevented a delayed mark-size preference response from replacing a newer

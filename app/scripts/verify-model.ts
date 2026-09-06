@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile, readdir, stat as statFile } from 'node:fs/promises'
 import path from 'node:path'
+import { besideText } from '../src/mcp/mark-position'
 import {
   SESSION_FORMAT_VERSION,
   MARK_SIZE_DEFAULT,
@@ -180,6 +181,21 @@ function flatten(nodes: any[], depth = 0): Array<[number, string, number | null]
 }
 
 async function main(): Promise<number> {
+  const amountHit = { box: [0.6, 0.4, 0.7, 0.42], ny: 0.41 }
+  const pageDimensions = { w: 612, h: 792 }
+  const nearby = { box: [0.6, 0.425, 0.73, 0.438] }
+  const beside = besideText(amountHit, [amountHit], pageDimensions, 24)
+  check('a beside mark clears the complete source amount', beside !== null && (beside - 0.7) * 612 - 12 > 1.9)
+  const adjacent = besideText(amountHit, [amountHit, nearby], pageDimensions, 24)
+  check('a taller mark also clears an adjacent row that reaches farther right', adjacent !== null && (adjacent - 0.73) * 612 - 12 > 1.9)
+  check('a larger mark reserves its actual width',
+    (besideText(amountHit, [amountHit], pageDimensions, 48) ?? 0) - (beside ?? 0) > 0.019)
+  const landscape = besideText(amountHit, [amountHit], { w: 792, h: 612 }, 24)
+  check('beside spacing uses displayed page dimensions', landscape !== null && Math.abs((landscape - 0.7) * 792 - 14) < 0.01)
+  const edge = { box: [0.91, 0.4, 0.99, 0.42], ny: 0.41 }
+  check('a figure against the right edge gets no clipped beside position', besideText(edge, [edge], pageDimensions, 24) === null)
+  check('a busy neighboring column gets no distant or overlapping suggestion',
+    besideText(amountHit, [amountHit, { box: [0.71, 0.4, 0.94, 0.42] }], pageDimensions, 24) === null)
   const fa = path.join(FIXTURES, 'fixture_a.pdf')
   const fb = path.join(FIXTURES, 'fixture_b.pdf')
   if (!existsSync(fa) || !existsSync(fb)) {
