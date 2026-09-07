@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs'
 import { readFile, readdir, stat as statFile } from 'node:fs/promises'
 import path from 'node:path'
 import { besideText } from '../src/mcp/mark-position'
+import { recordFiling, routeUnfiled } from '../src/mcp/filing'
 import {
   SESSION_FORMAT_VERSION,
   MARK_SIZE_DEFAULT,
@@ -2432,6 +2433,33 @@ async function main(): Promise<number> {
       findings: [{ label: 'Lease statement missing', detail: 'Required by current-year instructions', pageIds: [] }], resolutions: {}
     })
     const compiled: Session = { ...reviewBase, handoff }
+    const section = addSectionBookmark(s, s.pages[0].id, 'Support')
+    if ('error' in section) throw new Error(section.error)
+    const input = { ...handoff.inputs[0], pageIds: [s.pages[0].id], filing: {
+      section: 'Support', reason: 'Business purpose established from the source',
+      evidence: [{ pageId: s.pages[0].id, quote: 'Current year business expenses' }]
+    } }
+    const reader = async () => ({ text: 'Current year\n business expenses', source: 'text' })
+    const supported = await recordFiling(section.session, input, reader)
+    check('filing evidence tolerates extraction whitespace and records provenance',
+      supported.filing?.status === 'supported' && supported.filing.evidence[0].sourceSha256 === input.sha256)
+    const invented = await recordFiling(section.session, input, async () => ({ text: '', source: 'none' }))
+    const foreign = await recordFiling(section.session, { ...input, filing: { ...input.filing,
+      evidence: [{ ...input.filing.evidence[0], pageId: s.pages[1].id }] } }, reader)
+    const absent = await recordFiling(section.session, { ...input, filing: undefined }, reader)
+    check('invented, foreign-page, and absent filing evidence all require a decision',
+      [invented, foreign, absent].every((item) => item.disposition === 'needs-decision' && item.filing?.section === 'Needs filing'))
+    let wrongSection = false
+    try { await recordFiling(section.session, { ...input, filing: { ...input.filing, section: 'Missing section' } }, reader) }
+    catch { wrongSection = true }
+    check('verified text cannot justify a section that does not contain the input', wrongSection)
+    const unknownAll = { ...absent, pageIds: section.session.pages.map((p) => p.id) }
+    const routedAll = routeUnfiled(section.session, [unknownAll])
+    check('an entirely unclassified binder retains every page beneath Needs filing',
+      routedAll.pages.length === section.session.pages.length && buildBookmarks(routedAll).length === 1 &&
+      buildBookmarks(routedAll)[0].title === 'Needs filing')
+    check('v2 handoffs refuse retained inputs without a filing decision',
+      !handoffSchema.safeParse({ ...handoff, version: 2 }).success)
     const again = parseSession(JSON.parse(JSON.stringify(toSaved(compiled))))
     check('the compilation handoff survives session save/reopen with its source identity',
       'session' in again && JSON.stringify(again.session.handoff) === JSON.stringify(handoff))

@@ -271,3 +271,75 @@ explicitly awaiting a decision. This run shows that adding a prose instruction
 alone does not reliably enforce that behavior. Practitioner orientation and
 correction timings, unseen-packet accuracy, and release packaging remain untested
 in this follow-up.
+
+### September 7, 2026: recorded filing evidence
+
+Handoff version 2 records a filing section, business-purpose reason, and verified
+source quotations for each retained input. Validation reads the input's own
+pages locally, normalizes extraction whitespace, and records source hashes and
+text/OCR attribution. A quote must contain at least twelve characters. A quote
+from another input, an invented quote, or missing evidence cannot support a
+business filing choice. The interpretation of a valid quote is still the
+agent's responsibility and remains subject to human review.
+
+Unsupported choices become one needs-decision input and are moved as a group
+to a final Needs filing section. If a moved input anchored a business divider,
+that divider is retargeted to its remaining documents. Empty dividers are removed;
+readable document order, stable page IDs, marks and evidence links are preserved.
+The manifest must account for every retained page. Recording must precede the
+cover and first save; validation completes before the session is mutated.
+Review shows the filing reason and page-linked source quotes, while the cover
+shows each input's section. The rejected section proposal remains in the record.
+
+Session format v6 protects the new record. v1-v5 binders and handoff v1 remain
+readable; old handoffs are labeled as lacking filing evidence rather than being
+treated as verified. This initial validation needs evidence in the input itself
+and treats each input as one filing unit; cross-document instructions and
+unsupported visual interpretation do not bypass that constraint.
+
+The full local suite passed, including 340 model checks and 162 MCP checks.
+Regression cases include missing/invented/foreign-page evidence, wrong section
+membership, all inputs awaiting filing, legacy handoffs, and a real MCP replay
+that deliberately files an image with an invented quote. That replay verifies
+automatic routing, retargeting the original divider, source hashes, and the
+persisted review item through actual PDF save/reopen. It is an integration test,
+not the autonomous acceptance result. Skill validation and whitespace checks passed.
+
+Verifier version 4 additionally requires persisted filing decisions, supported
+filing for readable inputs, independently matching source quotations and hashes,
+and an explicitly unresolved receipt classification. It therefore cannot pass
+merely by moving every document into Needs filing. The prior `sections-v1`
+artifact scores 69/74 under this verifier: its original filing failure plus the
+four absent filing-record checks. Its historical artifact and report are unchanged.
+
+The fresh blind `filing-v1` run completed in 437 seconds (50 turns; reported cost
+$1.85). **All 74 artifact checks passed.** It produced eleven pages with a
+two-page handoff, seven supported input filing decisions, and one unresolved
+receipt classification under Needs filing. Four arithmetic checks and seven
+compilation review items remain recorded. Fee approval, missing/damaged inputs,
+the unreadable receipt, and the expense discrepancy remain human work; no page
+was marked human reviewed and all source hashes remained unchanged.
+
+The quote check initially reported a difference between raw PDF character order
+and positioned reading order: three title quotes omitted a short separator
+hyphen that extraction placed on its own line. The verifier now re-extracts
+positioned text from the saved PDF, matching the kind of reading supplied to the
+agent, without consulting its transcript. The titles were also inspected against
+raw page text; their words were unchanged. This verifies extracted quotations,
+not verbatim typography. A valid baseline passed, and four in-memory mutations
+were rejected: invented quote, wrong source hash, foreign evidence page, and an
+unclassified readable input.
+
+Rendered covers and marked pages were inspected, and a separate isolated app
+window reopened the PDF with Needs filing at page 11 and its page-linked review
+item intact. Review showed seven compilation items plus two page flags and zero
+resolved items. PDFium/Poppler conformance also passed. The cover still has a
+cosmetic pagination issue: its input-table header sits at the bottom of page 1
+while the rows continue on page 2. This does not invalidate the filing record,
+but the candidate is not a polished final report.
+
+The previously failing filing criterion is now satisfied for this synthetic
+packet. This is not evidence of general semantic classification accuracy or
+practitioner usability. Next, measure a human's orientation, evidence navigation,
+filing correction and resolution time, then test an unseen packet. No release
+or installed-app update was performed here.

@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 import sys
+import unicodedata
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -28,7 +29,7 @@ def amount(value: str) -> Decimal | None:
         return None
 
 
-def verify_handoff(session: dict, truth: dict, check, bookmarks=()) -> None:
+def verify_handoff(session: dict, truth: dict, check, bookmarks=(), page_text=None) -> None:
     """Validate saved records against the fixture, independently of agent prose."""
     h = session.get('handoff')
     check('structured handoff survives save', isinstance(h, dict))
@@ -105,6 +106,24 @@ def verify_handoff(session: dict, truth: dict, check, bookmarks=()) -> None:
         receipt_pages & set(f.get('pageIds', [])) for f in h.get('findings', [])
     ) or any(c.get('outcome') == 'unchecked' and receipt_pages & {e.get('pageId') for e in c.get('evidence', [])} for c in checks)
     check('unreadable receipt has an actionable handoff item linked to its page', bool(receipt_pages) and receipt_linked)
+    check('filing decisions use the persisted v2 handoff', h.get('version') == 2)
+    retained = [item for item in inputs if item.get('pageIds')]
+    readable = [item for item in retained if Path(item['path']).name != 'receipt-photo.png']
+    check('readable inputs retain supported filing decisions', bool(readable) and all(
+        item.get('filing', {}).get('status') == 'supported' and item['filing'].get('reason') and item['filing'].get('evidence')
+        for item in readable
+    ))
+    normalized = lambda text: ' '.join(unicodedata.normalize('NFKC', text).lower().split())
+    filing_evidence = [(item, e) for item in retained for e in item.get('filing', {}).get('evidence', [])]
+    check('filing quotes match extracted text on their own source pages and independent hashes', bool(filing_evidence) and all(
+        e.get('pageId') in item['pageIds'] and e.get('sourceName') == Path(item['path']).name and
+        e.get('sourceSha256') == expected.get(e.get('sourceName')) and
+        e.get('sourcePage') == pages[e['pageId']]['index'] + 1 and e.get('method') == 'text' and
+        len(normalized(e.get('quote', ''))) >= 12 and normalized(e.get('quote', '')) in normalized((page_text or {}).get(e.get('pageId'), ''))
+        for item, e in filing_evidence
+    ))
+    check('unreadable receipt classification remains explicitly Needs filing',
+          receipt.get('filing', {}).get('status') == 'needs-decision' and receipt['filing'].get('section') == 'Needs filing')
 
 
 def verify(output: Path) -> int:
@@ -217,7 +236,11 @@ def verify(output: Path) -> int:
         sources = {s['id']: s for s in session.get('sources', [])}
         source_names = {p['id']: sources[p['source']]['name'].replace('client-sales-copy.pdf', 'client-sales.pdf') for p in session.get('pages', [])}
         tied = [m for m in marks if m.get('refTarget')]
-        extracted = extract_text({'path': str(master), 'pages': sorted({positions[m['page']] for m in tied if m['page'] in positions}), 'words': True})
+        # Quotes are readings of positioned text. Raw PDF character-stream order
+        # can interleave a title's short hyphen differently from its other words.
+        # Re-extract the saved artifact's positioned lines, without trusting the
+        # agent transcript, rather than treating character order as reading order.
+        extracted = extract_text({'path': str(master), 'pages': list(range(len(session['pages']))), 'words': True})
         words = {page['index']: page.get('words', []) for page in extracted['pages']}
         placed = []
         unobscured = []
@@ -245,9 +268,9 @@ def verify(output: Path) -> int:
             pa == pb and a[0] < b[2] and a[2] > b[0] and a[1] < b[3] and a[3] > b[1]
             for i, (pa, a) in enumerate(mark_boxes) for pb, b in mark_boxes[i + 1:]
         ))
-        verify_handoff(session, truth, check, bookmarks)
+        verify_handoff(session, truth, check, bookmarks, {session['pages'][p['index']]['id']: p['text'] for p in extracted['pages']})
         print(f"Inspected {page_count} pages, {len(marks)} marks, {len(session.get('tapes', []))} tapes.")
-    result = {"verifier_version": 3, "checks": checks, "passed": sum(c["passed"] for c in checks), "total": len(checks),
+    result = {"verifier_version": 4, "checks": checks, "passed": sum(c["passed"] for c in checks), "total": len(checks),
               "manual_review_required": True}
     (output / "verification.json").write_text(json.dumps(result, indent=2) + "\n")
     return 0 if result["passed"] == result["total"] else 1

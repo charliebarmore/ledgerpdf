@@ -57,7 +57,7 @@ the raw text-center coordinate as a substitute.
 Record agreement, discrepancy, and inability to check separately. Make findings
 specific and actionable. Agent-created checks never constitute human review.
 
-Call binder_record_handoff after assembly/checks and before the first save. Its
+Call binder_record_handoff after assembly/checks and before the cover or first save. Its
 inputs are file dispositions with their actual page IDs; checks include outcomes,
 quotes, page coordinates, and worksheet/cell references where applicable. Add
 the worksheet name in sheet and the bare range (such as B3:B6) in cells. Add
@@ -65,6 +65,18 @@ missing requirements as findings with an empty pageIds array. Failed/ambiguous
 inputs and non-agreeing checks already create review items: avoid duplicate
 findings for the same issue. A resolved duplicate or explicitly superseded file
 belongs in the manifest rather than a review note that creates another open item.
+
+For every retained input, supply filing with section, reason, and evidence
+containing pageId and a verbatim quote of at least 12 characters from that input's
+own pages. The quote must support the business purpose, not merely its file type
+or a number. Use the exact section title and explain the interpretation. LedgerPDF
+checks the quote against source text/OCR; it does not validate your interpretation.
+When that support is unavailable, use section Needs filing, explain why, and
+leave evidence empty. Unsupported choices are automatically moved there and
+made needs-decision, even if you initially put them under a business section.
+Inspect inventory and bookmarks after recording; generate the cover only then.
+This v1 verification requires readable evidence in the input itself; a filename,
+another document, or an unverified visual assertion cannot substitute for it.
 Findings are actionable unresolved work only. Explain retired requirements and
 other settled organizing decisions briefly in the cover narrative; adding them
 as findings incorrectly asks the human to resolve something already settled.
