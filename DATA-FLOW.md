@@ -67,8 +67,8 @@ Optional MCP client ─local stdio─ MCP server ─same session model/engine─
   disposition reasons, selected evidence quotations and page/cell locations,
   findings, and human resolutions. It does not embed separate page images or a
   full extracted-text cache. The binder does not need the originals present in
-  order to open. Session format v4 protects this handoff from being silently
-  discarded by older builds.
+  order to open. Session format v5 protects the handoff and section hierarchy
+  from being silently discarded or flattened by older builds.
 - While a binder is open, two hidden siblings sit beside it and are deleted on a
   clean close: `.<name>.wpt-working.pdf`, the binder with our own marks stripped
   so the app can draw its interactive layer without doubling them, and

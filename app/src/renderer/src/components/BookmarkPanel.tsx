@@ -85,6 +85,7 @@ export function BookmarkPanel({
     nodes.flatMap((n, i) => {
       const pad = 8 + depth * 14
       const isUser = n.key.startsWith(USER_BOOKMARK_PREFIX)
+      const isSection = isUser && session.bookmarks?.some((b) => `${USER_BOOKMARK_PREFIX}${b.id}` === n.key && b.section)
       const renamed = session.titles?.[n.key] !== undefined
       const isEditing = editing?.key === n.key
 
@@ -173,24 +174,28 @@ export function BookmarkPanel({
               // they do, and this panel is where the binder's structure is
               // edited — the one place guessing is expensive.
               <span className="bm-tools">
-                <span
-                  title="Move this bookmark out one level"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onIndent(n.key, -1)
-                  }}
-                >
-                  Out
-                </span>
-                <span
-                  title="Nest this bookmark under the one above it"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onIndent(n.key, 1)
-                  }}
-                >
-                  In
-                </span>
+                {!isSection && (
+                  <>
+                    <span
+                      title="Move this bookmark out one level"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onIndent(n.key, -1)
+                      }}
+                    >
+                      Out
+                    </span>
+                    <span
+                      title="Nest this bookmark under the one above it"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onIndent(n.key, 1)
+                      }}
+                    >
+                      In
+                    </span>
+                  </>
+                )}
                 <span
                   title="Remove this bookmark (the pages stay in the binder)"
                   onClick={(e) => {

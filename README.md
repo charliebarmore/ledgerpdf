@@ -21,6 +21,11 @@ and review building blocks; the complete compilation workflow is under
 acceptance testing. [DECISIONS.md](DECISIONS.md) records the scope and ownership
 of the handoff. The desktop application's network behavior remains unchanged.
 
+The development build provides `binder_add_section` to nest imported document
+bookmarks beneath engagement sections. Its editable saves use session format v5;
+use this build to open them. It also reads older v1-v4 binders. See the
+[acceptance results](docs/ENGAGEMENT-ACCEPTANCE.md) for tested behavior and limits.
+
 ## What it does
 
 - **One binder, one file.** The binder PDF *is* the document. Saving overwrites

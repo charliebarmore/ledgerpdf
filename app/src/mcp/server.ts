@@ -49,10 +49,12 @@ import path from 'node:path'
 import { isPathInsideRoot, readAgentRootsSync } from '../shared/agent-roots'
 import { z } from 'zod'
 import { runEngine } from './engine'
+import { besideText } from './mark-position'
 import { workingCopyPathFor } from '../main/persistence'
 import { acquireBinderLock, withBinderLock, type BinderLease } from '../shared/binder-lock'
 import {
   addBookmark,
+  addSectionBookmark,
   addLink,
   addMark,
   agentWork,
@@ -72,6 +74,7 @@ import {
   formatCalendarDate,
   formatCents,
   parseMoney,
+  pageSize,
   movePages,
   newSession,
   parseSession,
@@ -90,6 +93,7 @@ import {
   statusDefs,
   statusOf,
   tapeTotal,
+  tapeSize,
   toTapeEntry,
   toExportSpec,
   toSaved,
@@ -100,7 +104,7 @@ import {
   type Session
 } from '../renderer/src/session'
 import { reviewSnapshot } from '../renderer/src/review'
-import { handoffDraftShape, handoffSchema } from '../renderer/src/handoff'
+import { evidenceLocation, handoffDraftShape, handoffSchema } from '../renderer/src/handoff'
 
 // ------------------------------------------------------------------- state
 
@@ -781,6 +785,25 @@ registerTool(
     const res = addBookmark(session, pageId, title, depth ?? 0)
     session = res.session
     return text(`Added bookmark "${title}" on ${pageId} (key ${res.key}).`)
+  }
+)
+
+registerTool(
+  'binder_add_section',
+  {
+    title: 'Group document bookmarks into a section',
+    description: 'Add a top-level section at an existing document bookmark. Imported document bookmarks and their children nest beneath it until the next section. Arrange pages first, then add sections at document boundaries; inspect binder_bookmarks afterwards. Page order and source outlines are preserved.',
+    inputSchema: { pageId: z.string(), title: z.string().trim().min(1).max(200) }
+  },
+  async ({ pageId, title }) => {
+    const result = addSectionBookmark(session, pageId, title)
+    if ('error' in result) return fail(result.error)
+    mutating('add_section', `Grouped documents under "${title}"`)
+    // Recompute after mutating starts the agent run so attribution is retained.
+    const added = addSectionBookmark(session, pageId, title)
+    if ('error' in added) return fail(added.error)
+    session = added.session
+    return text(`Added section "${title}" (key ${added.key}).\n${flatBookmarks(buildBookmarks(session)).join('\n')}`)
   }
 )
 
@@ -1468,13 +1491,13 @@ function summaryMarkdown(narrative?: string, coverPages = 0): string {
       ...(review.handoffPending.length ? review.handoffPending.map((item) =>
         `- **${item.label}** (${at(item.pageIds)}): ${item.detail}`
       ) : ['No unresolved compilation items. Page review status is recorded separately.']), '',
-      ...review.active.map((page) => `- **${at([page.pageId])} also needs attention:** ${page.findings.map((finding) => finding.note ?? finding.kind).join('; ')}`), '',
+      ...(review.active.length ? [`Page review flags: ${at(review.active.map((page) => page.pageId))}. Open those pages or Review for their notes.`, ''] : []),
       '## Input dispositions', '', '| Input | Disposition | Location |', '| --- | --- | --- |',
       ...h.inputs.map((input) => `| ${cell(baseName(input.path))} | ${input.disposition} | ${at(input.pageIds)} |`), '',
       '## Recorded checks', '',
       ...h.checks.flatMap((check) => [
         `**${check.label} — ${check.outcome}.** ${check.detail}`,
-        ...check.evidence.map((e) => `- ${at([e.pageId])}: ${e.quote}${e.sheet ? ` (${e.sheet}${e.cells ? `!${e.cells}` : ''})` : ''}`), ''
+        ...check.evidence.map((e) => `- ${at([e.pageId])}: ${e.quote}${evidenceLocation(e) ? ` (${evidenceLocation(e)})` : ''}`), ''
       ]),
       'Input hashes, disposition reasons, original evidence references and agent history are preserved in the editable binder. Open Review for the full record.'
     ].join('\n')
@@ -1708,6 +1731,7 @@ registerTool(
       "Check that a figure on one page equals a figure on another, and record the result IN THE BINDER: ticks and a cross-reference on both when they agree, notes carrying the difference and an open-item flag on both when they do not. The comparison is exact integer cents — never do this arithmetic yourself. Give the amounts exactly as they appear on the page; (350.67) is read as a negative.",
     inputSchema: {
       label: z.string().describe('What is being tied, e.g. "Wages — 1040 line 1 to W-2 box 1"'),
+      size: z.number().min(10).max(72).optional().describe('Mark size in points, default 14 for ordinary workpaper rows. Reserve this size when using binder_find.'),
       a: z.object({
         pageId: z.string(),
         amount: z.string().describe('As it appears on the page'),
@@ -1729,7 +1753,8 @@ registerTool(
         .describe('Difference to accept, in cents. Default 0 — exact. Materiality is your call, not mine.')
     }
   },
-  async ({ label, a, b, toleranceCents }) => {
+  async ({ label, a, b, size, toleranceCents }) => {
+    const markSize = size ?? 14
     for (const side of [a, b]) {
       if (!session.pages.some((p) => p.id === side.pageId)) {
         return fail(`unknown page id: ${side.pageId}`)
@@ -1762,27 +1787,28 @@ registerTool(
     // A clickable link each way, alongside the printed reference. The rect is
     // the tick's own footprint in visual coords, so the thing a reader clicks
     // is the mark they are already looking at.
-    const linkRect = (nx: number, ny: number): [number, number, number, number] => [
-      Math.max(0, nx - 0.02),
-      Math.max(0, ny - 0.015),
-      Math.min(1, nx + 0.02),
-      Math.min(1, ny + 0.015)
-    ]
+    const linkRect = (side: typeof a): [number, number, number, number] => {
+      const dimensions = pageSize(session.pages.find((page) => page.id === side.pageId)!)
+      const hx = markSize / (2 * dimensions.w)
+      const hy = markSize / (2 * dimensions.h)
+      return [Math.max(0, side.nx - hx), Math.max(0, side.ny - hy),
+        Math.min(1, side.nx + hx), Math.min(1, side.ny + hy)]
+    }
     const crossLink = (): void => {
       session = addLink(session, {
-        page: a.pageId, target: b.pageId, rect: linkRect(a.nx, a.ny), label
+        page: a.pageId, target: b.pageId, rect: linkRect(a), label
       }).session
       session = addLink(session, {
-        page: b.pageId, target: a.pageId, rect: linkRect(b.nx, b.ny), label
+        page: b.pageId, target: a.pageId, rect: linkRect(b), label
       }).session
     }
 
     if (agrees) {
       session = addMark(session, {
-        page: a.pageId, kind: 'tick', nx: a.nx, ny: a.ny, size: 20, note: refA, refTarget: b.pageId
+        page: a.pageId, kind: 'tick', nx: a.nx, ny: a.ny, size: markSize, note: refA, refTarget: b.pageId
       }).session
       session = addMark(session, {
-        page: b.pageId, kind: 'tick', nx: b.nx, ny: b.ny, size: 20, note: refB, refTarget: a.pageId
+        page: b.pageId, kind: 'tick', nx: b.nx, ny: b.ny, size: markSize, note: refB, refTarget: a.pageId
       }).session
       crossLink()
     } else {
@@ -1793,11 +1819,11 @@ registerTool(
         `${label} — DOES NOT TIE. This page shows ${formatCents(mine)}, ` +
         `the other shows ${formatCents(theirs)}. Difference ${formatCents(diff)}.`
       session = addMark(session, {
-        page: a.pageId, kind: 'note', nx: a.nx, ny: a.ny, size: 20,
+        page: a.pageId, kind: 'note', nx: a.nx, ny: a.ny, size: markSize,
         note: detailFor(ca, cb), refTarget: b.pageId
       }).session
       session = addMark(session, {
-        page: b.pageId, kind: 'note', nx: b.nx, ny: b.ny, size: 20,
+        page: b.pageId, kind: 'note', nx: b.nx, ny: b.ny, size: markSize,
         note: detailFor(cb, ca), refTarget: a.pageId
       }).session
       crossLink()
@@ -1827,7 +1853,7 @@ registerTool(
       label: z.string().describe('What is being footed, e.g. "Total expenses"'),
       amounts: z.array(z.string()).min(2).describe('The column, as the figures appear'),
       expectedTotal: z.string().describe('The stated total on the page'),
-      nx: z.number().min(0).max(1).describe('Where to leave the tape'),
+      nx: z.number().min(0).max(1).describe('Center of the tape; leave clear space around it for the footing stamp'),
       ny: z.number().min(0).max(1),
       toleranceCents: z.number().min(0).optional()
     }
@@ -1841,6 +1867,16 @@ registerTool(
     const sum = parts.reduce((t, c) => t + c, 0)
     const diff = sum - stated
     const foots = Math.abs(diff) <= (toleranceCents ?? 0)
+    const tapeDraft = { page: pageId, nx, ny, entries: parts.map((c) => toTapeEntry(c / 100)), title: label.slice(0, 28) }
+    const dimensions = pageSize(session.pages.find((page) => page.id === pageId)!)
+    const tapeHeight = tapeSize({ ...tapeDraft, id: '', created: '', author: '' }).h
+    const stampSize = 20
+    const offset = (tapeHeight / 2 + stampSize / 2 + 4) / dimensions.h
+    const above = ny - offset
+    const below = ny + offset
+    const halfStamp = stampSize / (2 * dimensions.h)
+    const stampNy = above >= halfStamp ? above : below <= 1 - halfStamp ? below : null
+    if (stampNy === null) return fail('No room for the footing stamp above or below this tape. Choose a clearer position or a shorter column.')
 
     focus(pageId)
     mutating(
@@ -1851,22 +1887,16 @@ registerTool(
 
     // The tape is the evidence: it shows the addends, so the conclusion is
     // checkable rather than asserted.
-    session = addTape(session, {
-      page: pageId,
-      nx,
-      ny,
-      entries: parts.map((c) => toTapeEntry(c / 100)),
-      title: label.slice(0, 28)
-    }).session
+    session = addTape(session, tapeDraft).session
 
     if (foots) {
       session = addMark(session, {
-        page: pageId, kind: 'text', nx, ny: Math.max(0, ny - 0.04), size: 20, text: 'F',
+        page: pageId, kind: 'text', nx, ny: stampNy, size: stampSize, text: 'F',
         note: `${label} — footed to ${formatCents(sum)}`
       }).session
     } else {
       session = addMark(session, {
-        page: pageId, kind: 'note', nx, ny: Math.max(0, ny - 0.04), size: 20,
+        page: pageId, kind: 'note', nx, ny: stampNy, size: stampSize,
         note:
           `${label} — DOES NOT FOOT. The ${parts.length} lines add to ${formatCents(sum)}, ` +
           `the page states ${formatCents(stated)}. Difference ${formatCents(diff)}.`
@@ -2307,18 +2337,19 @@ registerTool(
   {
     title: 'Find text in the binder',
     description:
-      'Search the binder for a figure or phrase and get back each hit WITH the coordinates to mark it. Pass a hit straight to binder_place_mark: use "beside" to put the mark just right of the figure the way a preparer would, or "nx/ny" to centre it on top. Searches every page unless pageId is given. Case-insensitive substring match.',
+      'Search the binder for a figure or phrase and get back each hit WITH coordinates. Use "beside nx" with the hit ny to place a mark clear of extracted text. Raw nx/ny is the text center and would cover the figure. Beside is unavailable if a mark will not fit nearby; do not guess then. Clearance checks text boxes, not image content. Searches every page unless pageId is given. Case-insensitive substring match.',
     inputSchema: {
       query: z.string().min(1).describe('e.g. "84,200.00" or "Taxable interest"'),
       pageId: z.string().optional().describe('Restrict to one page'),
       limit: z.number().min(1).max(200).optional().describe('Max hits, default 50'),
+      markSize: z.number().min(10).max(144).optional().describe('Mark size in points to reserve clearance for; default 24. Use the actual size if larger.'),
       ocr: z
         .boolean()
         .optional()
         .describe('Also search scanned pages by reading them with OCR. Much slower, and those hits are a machine reading — each carries its confidence.')
     }
   },
-  async ({ query, pageId, limit, ocr }) => {
+  async ({ query, pageId, limit, markSize, ocr }) => {
     const pages = pageId ? session.pages.filter((p) => p.id === pageId) : session.pages
     if (pageId && pages.length === 0) return fail(`unknown page id: ${pageId}`)
     const cap = limit ?? 50
@@ -2341,11 +2372,11 @@ registerTool(
           const read =
             got.source === 'ocr' ? `  OCR ${w.conf !== undefined ? `${w.conf}%` : ''}` : ''
           // A tick centred on a figure covers its digits — no preparer ticks
-          // through a number. Offer the position just past the word's right
-          // edge as well, clamped to the page.
-          const beside = Math.min(0.995, w.box[2] + (w.box[3] - w.box[1]) * 0.35)
+          // through a number. Offer a nearby position only when the whole
+          // mark fits clear of extracted text and the page edge.
+          const beside = besideText(w, got.words, pageSize(page), markSize ?? 24)
           hits.push(
-            `${w.t}   [page ${page.id}  nx ${w.nx}  ny ${w.ny}  beside nx ${Number(beside.toFixed(5))}]${read}`
+            `${w.t}   [page ${page.id}  nx ${w.nx}  ny ${w.ny}  ${beside === null ? 'beside unavailable' : `beside nx ${beside}`}]${read}`
           )
           if (hits.length >= cap) break
         }

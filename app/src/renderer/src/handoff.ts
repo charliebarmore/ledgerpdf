@@ -8,8 +8,8 @@ export const handoffEvidenceDraft = z.object({
   quote: description,
   nx: z.number().min(0).max(1),
   ny: z.number().min(0).max(1),
-  sheet: z.string().min(1).max(200).optional(),
-  cells: z.string().min(1).max(200).optional()
+  sheet: z.string().min(1).max(200).optional().describe('Worksheet name, separate from the cell range'),
+  cells: z.string().min(1).max(200).optional().describe('Cell or range only, e.g. B3:B6; put the worksheet name in sheet')
 }).strict()
 export const handoffInputDraft = z.object({
   path: z.string().min(1),
@@ -49,6 +49,23 @@ export const handoffSchema = z.object({
   resolutions: z.record(z.string(), z.object({ by: z.string(), at: z.string().datetime() }).strict())
 }).strict()
 export type CompilationHandoff = z.infer<typeof handoffSchema>
+
+/** Display both bare and already-qualified references without altering evidence. */
+export function evidenceLocation(evidence: { sheet?: string; cells?: string }): string {
+  const sheet = evidence.sheet?.trim() ?? ''
+  const cells = evidence.cells?.trim() ?? ''
+  if (!sheet) return cells
+  if (!cells) return sheet
+  // A qualified reference may include a quoted sheet name or a workbook name.
+  // Preserve it verbatim, including conflicting sheet names, for human review.
+  if (cells.includes('!')) {
+    const prefix = cells.slice(0, cells.lastIndexOf('!')).replace(/^'|'$/g, '').replace(/''/g, "'")
+    return prefix === sheet ? cells : `${sheet} (cell reference: ${cells})`
+  }
+  const qualifiedSheet = /^[A-Za-z_][A-Za-z0-9_]*$/.test(sheet)
+    ? sheet : `'${sheet.replace(/'/g, "''")}'`
+  return `${qualifiedSheet}!${cells}`
+}
 export interface HandoffItem {
   id: string
   label: string

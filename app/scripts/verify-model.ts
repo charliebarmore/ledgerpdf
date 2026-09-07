@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile, readdir, stat as statFile } from 'node:fs/promises'
 import path from 'node:path'
+import { besideText } from '../src/mcp/mark-position'
 import {
   SESSION_FORMAT_VERSION,
   MARK_SIZE_DEFAULT,
@@ -34,6 +35,7 @@ import {
   addLink,
   addMark,
   addSource,
+  addSectionBookmark,
   addShape,
   assignBookmarkPage,
   clearBookmarkPage,
@@ -111,7 +113,7 @@ import {
   reviewRuns,
   reviewSnapshot
 } from '../src/renderer/src/review'
-import { handoffItems, handoffSchema, resolveHandoffItem } from '../src/renderer/src/handoff'
+import { evidenceLocation, handoffItems, handoffSchema, resolveHandoffItem } from '../src/renderer/src/handoff'
 import {
   markSizePreferenceKey,
   preferredMarkSize
@@ -180,6 +182,31 @@ function flatten(nodes: any[], depth = 0): Array<[number, string, number | null]
 }
 
 async function main(): Promise<number> {
+  check('worksheet evidence renders bare and qualified ranges identically',
+    evidenceLocation({ sheet: 'Expenses', cells: 'B3:B6' }) === 'Expenses!B3:B6' &&
+    evidenceLocation({ sheet: 'Expenses', cells: 'Expenses!B3:B6' }) === 'Expenses!B3:B6')
+  check('worksheet evidence quotes spaces and apostrophes and preserves existing quoting',
+    evidenceLocation({ sheet: "Owner's expenses", cells: 'B6' }) === "'Owner''s expenses'!B6" &&
+    evidenceLocation({ sheet: 'Current year', cells: "'Current year'!B6" }) === "'Current year'!B6")
+  check('partial and conflicting cell evidence remains visible',
+    evidenceLocation({ cells: 'B6' }) === 'B6' && evidenceLocation({ sheet: 'Expenses' }) === 'Expenses' &&
+    evidenceLocation({}) === '' && evidenceLocation({ sheet: 'Expenses', cells: 'Income!B6' }).includes('Income!B6') &&
+    evidenceLocation({ sheet: 'Expenses', cells: 'Income!B6' }).includes('Expenses'))
+  const amountHit = { box: [0.6, 0.4, 0.7, 0.42], ny: 0.41 }
+  const pageDimensions = { w: 612, h: 792 }
+  const nearby = { box: [0.6, 0.425, 0.73, 0.438] }
+  const beside = besideText(amountHit, [amountHit], pageDimensions, 24)
+  check('a beside mark clears the complete source amount', beside !== null && (beside - 0.7) * 612 - 12 > 1.9)
+  const adjacent = besideText(amountHit, [amountHit, nearby], pageDimensions, 24)
+  check('a taller mark also clears an adjacent row that reaches farther right', adjacent !== null && (adjacent - 0.73) * 612 - 12 > 1.9)
+  check('a larger mark reserves its actual width',
+    (besideText(amountHit, [amountHit], pageDimensions, 48) ?? 0) - (beside ?? 0) > 0.019)
+  const landscape = besideText(amountHit, [amountHit], { w: 792, h: 612 }, 24)
+  check('beside spacing uses displayed page dimensions', landscape !== null && Math.abs((landscape - 0.7) * 792 - 14) < 0.01)
+  const edge = { box: [0.91, 0.4, 0.99, 0.42], ny: 0.41 }
+  check('a figure against the right edge gets no clipped beside position', besideText(edge, [edge], pageDimensions, 24) === null)
+  check('a busy neighboring column gets no distant or overlapping suggestion',
+    besideText(amountHit, [amountHit, { box: [0.71, 0.4, 0.94, 0.42] }], pageDimensions, 24) === null)
   const fa = path.join(FIXTURES, 'fixture_a.pdf')
   const fb = path.join(FIXTURES, 'fixture_b.pdf')
   if (!existsSync(fa) || !existsSync(fb)) {
@@ -774,6 +801,44 @@ async function main(): Promise<number> {
   )
 
   // --- user-created bookmarks (the ALFA case: a PDF with no outline at all)
+  {
+    let grouped = addSource(addSource(newSession(), pa.probe as ProbeWire), pb.probe as ProbeWire)
+    const originals = JSON.stringify(grouped.sources)
+    const pageOrder = grouped.pages.map((p) => p.id).join(',')
+    grouped = beginRun(grouped).session
+    const first = addSectionBookmark(grouped, grouped.pages[0].id, '01 Administration')
+    if ('error' in first) throw new Error(first.error)
+    const second = addSectionBookmark(first.session, grouped.pages[3].id, '02 Support')
+    if ('error' in second) throw new Error(second.error)
+    grouped = second.session
+    const sections = buildBookmarks(grouped, { pageCounts: true })
+    check('sections wrap file bookmarks and preserve nested imported outlines',
+      sections.length === 2 && sections[0].children[0].title === 'fixture_a (3 pages)' &&
+      sections[1].children[0].children.length > 0 && sections[0].title === '01 Administration')
+    check('grouping preserves source outlines and physical page order',
+      JSON.stringify(grouped.sources) === originals && grouped.pages.map((p) => p.id).join(',') === pageOrder)
+    check('a section spans its documents rather than a duplicate one-page heading',
+      bookmarkSection(grouped, first.key).length === 3)
+    check('invalid, duplicate, and mid-document section boundaries are refused',
+      'error' in addSectionBookmark(grouped, 'missing', 'Missing') &&
+      'error' in addSectionBookmark(grouped, grouped.pages[0].id, 'Duplicate') &&
+      'error' in addSectionBookmark(grouped, grouped.pages[1].id, 'Split'))
+    const moved = moveBookmarkSection(grouped, second.key, first.key)
+    check('moving a section carries its documents and preserves the other section',
+      moved.pages[0].id === grouped.pages[3].id && buildBookmarks(moved)[0].key === second.key &&
+      bookmarkSection(moved, second.key).length === grouped.pages.length - 3)
+    const parsed = parseSession(JSON.parse(JSON.stringify(toSaved(grouped))))
+    check('section hierarchy survives session serialization', 'session' in parsed &&
+      JSON.stringify(buildBookmarks(parsed.session)) === JSON.stringify(buildBookmarks(grouped)))
+    check('section bookmarks are attributed and deleting a divider preserves its documents',
+      grouped.bookmarks!.every((b) => b.by === 'agent' && b.run === grouped.activeRun) &&
+      removeBookmark(grouped, first.key).pages.length === grouped.pages.length &&
+      buildBookmarks(removeBookmark(grouped, first.key))[0].title === 'fixture_a')
+    const reverted = revertRun(grouped, grouped.activeRun!).session
+    check('reverting agent sections restores the original outline without moving pages',
+      !reverted.bookmarks?.length && reverted.pages.map((p) => p.id).join(',') === pageOrder &&
+      buildBookmarks(reverted)[0].title === 'fixture_a')
+  }
   let noOutline: Session = newSession()
   noOutline = addSource(noOutline, pa.probe as ProbeWire) // fixture_a has no outline
   check('file with no outline has one bookmark', buildBookmarks(noOutline).length === 1)

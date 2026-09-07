@@ -108,9 +108,9 @@ the autonomous run timed out.
 Implemented in response: a validated binder-owned handoff, missing-document queue
 items, actual source hashes, save/reopen coverage, a shorter compilation summary,
 and stricter evidence-location instructions. The integration tests verify these
-mechanisms; **an autonomous acceptance pass is still outstanding**. The next run
-should establish reliable completion before broader UX work, then measure human
-orientation and correction time. Those human timings were not collected here.
+mechanisms; at this stage an autonomous acceptance pass was still outstanding.
+The follow-up below establishes completion and artifact correctness, with
+remaining filing and usability limitations. Human timings were not collected.
 
 New saves use embedded session format v4. Existing v1-v3 binders open in this
 source build; the installed v0.3.1 app cannot open v4 editable binders. No release
@@ -131,3 +131,143 @@ visually inspected. The public-tree export validator passed.
 
 Test-run transcripts and credentials are not source documentation and are not
 published. Generated binders are local test artifacts, not reference masters.
+
+### Follow-up: September 5, 2026 (local time)
+
+Five further blind compilations used the same unchanged synthetic packet. The
+agent received the reusable skill and MCP access, without the hidden answer key.
+The verifier was strengthened as rendered artifacts exposed defects; historical
+check totals above describe the verifier used at that time.
+
+| Run | Result | Observation |
+| --- | --- | --- |
+| `acceptance-v2` | Failed visual acceptance | 272 seconds; 13 pages. Tie marks overlapped amounts; the cover was four pages and included redundant review work. |
+| `acceptance-v3` | Failed visual acceptance | 194 seconds; 12 pages. Handoff improved, but all six tie marks still overlapped source text. |
+| `acceptance-v4` | Failed visual acceptance | 204 seconds; 13 pages. Marks cleared text but touched adjacent marks; the footing stamp was covered by its tape. A retained superseded statement lacked a clear bookmark label. |
+| `acceptance-v5` | Failed visual acceptance | 210 seconds; 11 pages. Compact ties and a two-page handoff worked. The footing stamp remained hidden; the final verifier rejects this artifact. |
+| `acceptance-v6` | Automated artifact pass; human trial candidate | 187 seconds; reported cost $1.03. Eleven pages, including a two-page handoff. All 68 artifact checks passed. Filing and presentation corrections remain below. |
+
+The final binder preserves all 12 input dispositions, four requested checks,
+seven compilation review items, seven editable marks, and one calculator tape.
+Receipts agree at 125,000; corrected interest agrees at 450; expenses foot to
+30,000 and remain discrepant against the return's 30,500. The missing lease,
+unapproved fee versions, unreadable receipt, damaged PDF, and unsupported archive
+remain visible to the reviewer. The retired loan creates no false missing item.
+All original input hashes remain unchanged; no page is human reviewed.
+
+All eleven PDF pages were rendered with Poppler and visually inspected. Source
+amounts remain clear, adjacent marks are distinct, the footing stamp is visible,
+and the wide worksheet retains its rightmost evidence column. Current-year
+figures and worksheet rows agree with the recorded checks. A separate isolated
+development window reopened the saved master without the agent conversation:
+Review showed seven compilation items plus two page flags, zero resolved items,
+and nine pages without review status. These are counts of records/pages, not
+nine independent business decisions.
+
+Remaining manual findings prevent treating this as a polished final master:
+
+- The receipt visibly says office supplies but is filed before the Expenses
+  section, under Income. Its amount is correctly unresolved; its filing needs
+  correction. The compiling agent disclosed that it used text extraction/OCR
+  only and had not visually inspected the image.
+- Section bookmarks appear in the correct order, but file bookmarks are flat
+  siblings rather than a clean section hierarchy. The verifier checks section
+  order, not every document's semantic classification or section counts.
+- The cover repeats the worksheet name in references such as
+  `Expenses!Expenses!B6`. The intended sheet/cells are identifiable, but the
+  presentation needs cleanup. The narrative also exceeds the skill's target.
+
+Implemented fixes reserve space for the entire mark and nearby text, return no
+placement when nearby space is unavailable, use compact 14-point automatic ties
+with matching link areas, and position footing stamps outside their tape's actual
+height. The cover now points to page flags instead of repeating every note.
+Compilation instructions reduce duplicate review work and clarify unresolved
+inputs, supersession, page ordering, and limits of text-only inspection.
+
+The independent verifier now checks source hashes, manifest coverage,
+evidence provenance, section order, mark/text and mark/mark overlap, and visible
+footing stamps. A prior-year reference may optionally appear as a hashed excluded
+manifest entry. A superseded original may be retained only if its actual bookmark
+identifies it as superseded and no current-year check uses it. These alternatives
+honor the packet instructions without requiring one particular agent strategy.
+Six deliberately corrupted handoffs were also rejected: missing input, duplicate
+input, wrong hash, wrong evidence source, missing evidence page, and false retired
+loan finding. Presence checks do not establish semantic correctness; visual review
+remains required.
+
+Final validation passed in one uninterrupted `npm run verify`: typecheck, 324
+model checks, 153 MCP checks, 17 persistence checks, 5 recovery checks, 68 text
+checks, 40 UI smoke checks, 4 closed-window checks, and 18 live-agent checks,
+plus release configuration, disclosures, security, teardown, and icon checks.
+`npm run verify:viewers` passed PDFium and Poppler conformance. Skill validation
+and whitespace checks also passed.
+
+The next acceptance step is a timed practitioner review of this saved candidate:
+find the first actionable issue, navigate to its evidence, correct the filing,
+and resolve one item. Record orientation and correction time separately. This
+single tuned packet demonstrates a working preparation path, not general agent
+accuracy, repeatability on unseen engagements, or satisfactory daily UX. No new
+release or installed-app update was performed during this follow-up.
+
+### September 7, 2026: filing and navigation
+
+The follow-up adds `binder_add_section`: a section divider wraps the existing
+document bookmarks until the next divider, preserving imported child outlines.
+Sections start at document boundaries, reject duplicate starts and boundaries
+that split an imported bookmark tree, and travel with their pages. Removing a
+divider leaves its documents intact. This is a model capability as well as an
+MCP tool; ordinary user bookmarks previously could not group imported roots.
+
+Section metadata requires session format v5. This development build reads
+v1-v4 binders, while earlier builds refuse its new editable saves. Source
+outlines, source files, and physical page order are unchanged by grouping.
+Saved PDFs carry the nested outline, which survives reopening without originals.
+Review and generated covers now share a worksheet-reference formatter so both
+bare ranges and already-qualified references display their sheet name once.
+The original evidence record remains unchanged.
+
+The compilation skill now calls the section tool and verifies the resulting
+tree. A document whose purpose cannot be established from extraction/OCR goes
+under Needs filing with its existing input review item explaining the limitation;
+it is not assigned a business section from a generic filename. This provides an
+honest handoff when the configured tools cannot inspect images visually.
+
+Verifier version 3 adds nested-section and physical-filing checks. Applied to a
+temporary copy of `acceptance-v6`, it passes 68/70 checks and rejects precisely
+the two known defects: flat headings and the receipt under Income (8/9 source
+pages correctly filed). Historical run artifacts and their original reports
+were preserved. An explicitly unfiled receipt is allowed; its amount must still
+remain unresolved with a page-linked review item.
+
+Implementation validation passed: the full `npm run verify` suite, including
+334 model checks and 156 MCP checks; PDFium/Poppler conformance; skill validation;
+and whitespace checks. A final regression confirming that agent sections can be
+reverted brings the model suite to 335 passing checks. New coverage exercises section grouping,
+imported nesting, document spans, moving a section, invalid boundaries,
+attribution, deletion, session serialization, actual PDF save/reopen, and
+bare/qualified/quoted worksheet references.
+
+One fresh blind run, `sections-v1`, completed in 432 seconds (60 turns; reported
+cost $1.89). It produced eleven pages with a two-page handoff, four checks, and
+seven compilation items. **69/70 artifact checks passed; acceptance still fails
+on filing.** The agent used the section tool and produced the correct nested
+outline, but again placed the office-supplies receipt under Income. Its review
+item flags the unreadable amount without acknowledging uncertain classification;
+the new Needs filing instruction was not followed. No additional autonomous
+retries were run, and this result was not relabeled as a pass.
+
+Visual inspection covered the two-page handoff, marked source pages, unreadable
+receipt, and wide worksheet. Worksheet references now read `Expenses!B3:B6` and
+`Expenses!B6` once, and all six ties and the footing stamp remain clear. A separate
+isolated development window reopened the saved PDF with its nested sections,
+seven compilation items plus two page flags, and zero resolved items intact.
+Input hashes remained unchanged. The earlier candidate and this failed filing
+case are retained locally as regression evidence, not finished reference masters.
+
+The section tool and presentation fixes are validated. The next product gap is
+accountable document classification: the agent needs to retain evidence for why
+each document belongs in a business section, and leave unsupported classifications
+explicitly awaiting a decision. This run shows that adding a prose instruction
+alone does not reliably enforce that behavior. Practitioner orientation and
+correction timings, unseen-packet accuracy, and release packaging remain untested
+in this follow-up.

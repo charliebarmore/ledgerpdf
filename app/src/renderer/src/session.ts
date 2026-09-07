@@ -18,8 +18,8 @@
  */
 import { handoffSchema, type CompilationHandoff } from './handoff'
 
-// v4 preserves compilation evidence that older loaders would silently discard.
-export const SESSION_FORMAT_VERSION = 4
+// v5 preserves section hierarchy that older builds would render as flat bookmarks.
+export const SESSION_FORMAT_VERSION = 5
 
 // ------------------------------------------------------------------- types
 
@@ -150,6 +150,8 @@ export interface UserBookmark extends Provenance {
   title: string
   /** Nesting level in the exported outline. 0 = top level. */
   depth: number
+  /** A top-level divider wrapping following document bookmarks until the next divider. */
+  section?: boolean
 }
 
 /** The review-mark palette. Colors and glyphs are defined by the engine. */
@@ -2374,6 +2376,32 @@ export function removeBookmark(session: Session, key: string): Session {
   return { ...session, bookmarks: (session.bookmarks ?? []).filter((b) => b.id !== id) }
 }
 
+/** Add a section at a document boundary, preserving the imported outline. */
+export function addSectionBookmark(
+  session: Session, pageId: string, title: string
+): { session: Session; key: string } | { error: string } {
+  if (!session.pages.some((page) => page.id === pageId)) return { error: `unknown page id: ${pageId}` }
+  if (!title.trim()) return { error: 'A section needs a title.' }
+  if (session.bookmarks?.some((b) => b.section && b.page === pageId)) {
+    return { error: 'A section already starts on this page; rename its bookmark instead.' }
+  }
+  const base = buildBookmarks({ ...session, bookmarks: session.bookmarks?.filter((b) => !b.section) })
+  if (!base.some((node) => node.page === pageId)) {
+    return { error: 'Start a section at an existing top-level document bookmark.' }
+  }
+  const indexOf = new Map(session.pages.map((page, i) => [page.id, i]))
+  const start = indexOf.get(pageId)!
+  // Do not split an imported parent from its children or group a backward
+  // destination under a section it does not belong to.
+  if (base.some((node) => flattenTree([node]).some((entry) =>
+    (indexOf.get(entry.page)! < start) !== (indexOf.get(node.page)! < start)))) {
+    return { error: 'This boundary would split an existing bookmark tree. Choose a document boundary.' }
+  }
+  const added = addBookmark(session, pageId, title.trim())
+  return { ...added, session: { ...added.session, bookmarks: added.session.bookmarks!.map((b) =>
+    `${USER_BOOKMARK_PREFIX}${b.id}` === added.key ? { ...b, section: true } : b) } }
+}
+
 /** Indent (+1) or outdent (-1) a user bookmark. Imported ones keep their level. */
 export function nudgeBookmarkDepth(session: Session, key: string, delta: number): Session {
   if (!key.startsWith(USER_BOOKMARK_PREFIX)) return session
@@ -2381,7 +2409,7 @@ export function nudgeBookmarkDepth(session: Session, key: string, delta: number)
   return {
     ...session,
     bookmarks: (session.bookmarks ?? []).map((b) =>
-      b.id === id ? { ...b, depth: Math.max(0, Math.min(5, b.depth + delta)) } : b
+      b.id === id && !b.section ? { ...b, depth: Math.max(0, Math.min(5, b.depth + delta)) } : b
     )
   }
 }
@@ -2588,6 +2616,22 @@ export function buildBookmarks(session: Session, opts: BookmarkOptions = {}): Bo
 
   const indexOf = new Map(session.pages.map((p, i) => [p.id, i]))
   tree = mergeUserBookmarks(tree, session, indexOf)
+  const sections = (session.bookmarks ?? []).filter((b) => b.section && indexOf.has(b.page))
+    .sort((a, b) => indexOf.get(a.page)! - indexOf.get(b.page)!)
+  if (sections.length) {
+    const dividers: BookmarkNode[] = sections.map((b) => ({
+      key: `${USER_BOOKMARK_PREFIX}${b.id}`, title: b.title, page: b.page, children: []
+    }))
+    const unfiled: BookmarkNode[] = []
+    for (const node of tree) {
+      const at = indexOf.get(node.page)!
+      let owner = -1
+      for (let i = 0; i < sections.length && indexOf.get(sections[i].page)! <= at; i++) owner = i
+      if (owner < 0) unfiled.push(node)
+      else dividers[owner].children.push(node)
+    }
+    tree = [...unfiled, ...dividers]
+  }
 
   // A status colours the bookmark of the page it is on, so the outline reads
   // as a coverage map in any viewer's bookmark panel — not just in this app.
@@ -2649,7 +2693,7 @@ function mergeUserBookmarks(
   session: Session,
   indexOf: Map<string, number>
 ): BookmarkNode[] {
-  const users = (session.bookmarks ?? []).filter((b) => indexOf.has(b.page))
+  const users = (session.bookmarks ?? []).filter((b) => !b.section && indexOf.has(b.page))
   if (users.length === 0) return tree
 
   const entries = flattenTree(tree)
