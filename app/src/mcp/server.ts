@@ -54,6 +54,7 @@ import { workingCopyPathFor } from '../main/persistence'
 import { acquireBinderLock, withBinderLock, type BinderLease } from '../shared/binder-lock'
 import {
   addBookmark,
+  addSectionBookmark,
   addLink,
   addMark,
   agentWork,
@@ -103,7 +104,7 @@ import {
   type Session
 } from '../renderer/src/session'
 import { reviewSnapshot } from '../renderer/src/review'
-import { handoffDraftShape, handoffSchema } from '../renderer/src/handoff'
+import { evidenceLocation, handoffDraftShape, handoffSchema } from '../renderer/src/handoff'
 
 // ------------------------------------------------------------------- state
 
@@ -784,6 +785,25 @@ registerTool(
     const res = addBookmark(session, pageId, title, depth ?? 0)
     session = res.session
     return text(`Added bookmark "${title}" on ${pageId} (key ${res.key}).`)
+  }
+)
+
+registerTool(
+  'binder_add_section',
+  {
+    title: 'Group document bookmarks into a section',
+    description: 'Add a top-level section at an existing document bookmark. Imported document bookmarks and their children nest beneath it until the next section. Arrange pages first, then add sections at document boundaries; inspect binder_bookmarks afterwards. Page order and source outlines are preserved.',
+    inputSchema: { pageId: z.string(), title: z.string().trim().min(1).max(200) }
+  },
+  async ({ pageId, title }) => {
+    const result = addSectionBookmark(session, pageId, title)
+    if ('error' in result) return fail(result.error)
+    mutating('add_section', `Grouped documents under "${title}"`)
+    // Recompute after mutating starts the agent run so attribution is retained.
+    const added = addSectionBookmark(session, pageId, title)
+    if ('error' in added) return fail(added.error)
+    session = added.session
+    return text(`Added section "${title}" (key ${added.key}).\n${flatBookmarks(buildBookmarks(session)).join('\n')}`)
   }
 )
 
@@ -1477,7 +1497,7 @@ function summaryMarkdown(narrative?: string, coverPages = 0): string {
       '## Recorded checks', '',
       ...h.checks.flatMap((check) => [
         `**${check.label} — ${check.outcome}.** ${check.detail}`,
-        ...check.evidence.map((e) => `- ${at([e.pageId])}: ${e.quote}${e.sheet ? ` (${e.sheet}${e.cells ? `!${e.cells}` : ''})` : ''}`), ''
+        ...check.evidence.map((e) => `- ${at([e.pageId])}: ${e.quote}${evidenceLocation(e) ? ` (${evidenceLocation(e)})` : ''}`), ''
       ]),
       'Input hashes, disposition reasons, original evidence references and agent history are preserved in the editable binder. Open Review for the full record.'
     ].join('\n')

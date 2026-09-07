@@ -1250,6 +1250,12 @@ check(
 await call('binder_new')
 await call('binder_add_pdfs', { paths: [a] })
 const handoffIds = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+check('agent can group imported document bookmarks beneath a section',
+  !(await call('binder_add_section', { pageId: handoffIds[0], title: '01 Administration' })).isError &&
+  /01 Administration[^\n]*\n  fixture_a/.test((await call('binder_bookmarks')).text))
+check('duplicate and mid-document sections are refused',
+  (await call('binder_add_section', { pageId: handoffIds[0], title: 'Duplicate' })).isError &&
+  (await call('binder_add_section', { pageId: handoffIds[1], title: 'Split' })).isError)
 const draftHandoff = {
   inputs: [{ path: a, disposition: 'included', reason: 'Synthetic current-year support', pageIds: handoffIds }],
   checks: [{ label: 'No comparison supplied', outcome: 'unchecked', detail: 'The requested second document has not arrived', evidence: [] }],
@@ -1286,6 +1292,8 @@ check('the saved PDF contains the handoff and an engine-computed input hash',
   handoffOnDisk.binder.session.handoff.findings[0].pageIds.length === 0)
 await call('binder_new')
 check('handoff binder reopens', !(await call('binder_open', { path: handoffOutput })).isError)
+check('section hierarchy survives PDF save and reopen',
+  /01 Administration[^\n]*\n  fixture_a/.test((await call('binder_bookmarks')).text))
 check('missing-document findings survive reopen without the agent conversation',
   (await call('binder_review_queue')).text.includes('Missing required statement'))
 check('handoff appears in the generated binder summary',

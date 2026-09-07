@@ -148,9 +148,38 @@ def verify(output: Path) -> int:
                         yield item
                         yield from bookmark_items(item.children)
                 bookmarks = [(item.title, page_objects.get(item.destination[0].objgen)) for item in bookmark_items(outline.root) if isinstance(item.destination, pikepdf.Array)]
+                section_roots = [(item.title, page_objects.get(item.destination[0].objgen), bool(item.children)) for item in outline.root if isinstance(item.destination, pikepdf.Array)]
             sections = truth['required_sections_in_order']
-            section_positions = [next((i for i, title in enumerate(titles) if re.search(r'\b' + section + r'\b', title, re.I)), -1) for section in sections]
+            def section_heading(title, section):
+                return bool(re.search(r'^(?:\d+[ .:-]*)?' + re.escape(section) + r'\b', title, re.I))
+            section_positions = [next((i for i, title in enumerate(titles) if section_heading(title, section)), -1) for section in sections]
             check('prior-year sections appear in the saved bookmark order', all(i >= 0 for i in section_positions) and section_positions == sorted(section_positions), ' | '.join(titles))
+            check('section headings contain document bookmarks', all(
+                any(section_heading(title, section) and children for title, _, children in section_roots)
+                for section in sections
+            ))
+            # This fixture's semantic filing expectations are independent of
+            # filenames chosen by the agent for its section headings. An image
+            # whose purpose could not be read may remain explicitly unfiled.
+            expected_section = {
+                'notes-from-preparer.md': r'Administration',
+                'fee-estimate-a.pdf': r'Administration', 'fee-estimate-b.pdf': r'Administration',
+                'z-return-summary.pdf': r'Return',
+                'client-sales.pdf': r'Income', 'client-sales-copy.pdf': r'Income',
+                'bank-corrected.pdf': r'Income', 'workpapers.xlsx': r'Expenses',
+                'receipt-photo.png': r'Expenses|Needs filing'
+            }
+            source_names_by_id = {s['id']: s['name'] for s in session.get('sources', [])}
+            filing = []
+            for i, page in enumerate(session.get('pages', [])):
+                name = source_names_by_id.get(page['source'])
+                if name not in expected_section:
+                    continue
+                preceding = [(title, position) for title, position, _ in section_roots if position is not None and position <= i and
+                             any(section_heading(title, section) for section in sections + ['Needs filing'])]
+                owner = max(preceding, key=lambda entry: entry[1])[0] if preceding else ''
+                filing.append(bool(re.search(r'\b(?:' + expected_section[name] + r')\b', owner, re.I)))
+            check('documents are filed in their business section or explicitly await filing', bool(filing) and all(filing), f'{sum(filing)}/{len(filing)} source pages correctly filed')
         with pdfium.PdfDocument(master) as doc:
             pages = []
             for page in doc:
@@ -218,7 +247,7 @@ def verify(output: Path) -> int:
         ))
         verify_handoff(session, truth, check, bookmarks)
         print(f"Inspected {page_count} pages, {len(marks)} marks, {len(session.get('tapes', []))} tapes.")
-    result = {"verifier_version": 2, "checks": checks, "passed": sum(c["passed"] for c in checks), "total": len(checks),
+    result = {"verifier_version": 3, "checks": checks, "passed": sum(c["passed"] for c in checks), "total": len(checks),
               "manual_review_required": True}
     (output / "verification.json").write_text(json.dumps(result, indent=2) + "\n")
     return 0 if result["passed"] == result["total"] else 1

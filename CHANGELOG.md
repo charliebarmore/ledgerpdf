@@ -17,6 +17,8 @@ Versioning once a stable compatibility promise is published.
 
 ### Changed
 
+- Session format v5 preserves section dividers; this build continues to read
+  v1-v4 binders. Earlier builds refuse new editable saves.
 - Shortened compilation covers by linking to page review notes instead of
   repeating them, and tightened compilation instructions around actionable
   findings, unreadable inputs and superseded versions.
@@ -34,6 +36,10 @@ Versioning once a stable compatibility promise is published.
 
 ### Fixed
 
+- Compilation section headings now group imported document bookmarks through
+  `binder_add_section`, preserving their nested outlines and page order.
+- Evidence references display the worksheet name once in Review and generated
+  covers, including references already qualified with a sheet name.
 - `binder_find` now reserves room for the whole mark and nearby text, using
   displayed page dimensions. It reports when no nearby position fits instead
   of clamping a mark onto the page edge. Optional `markSize` controls clearance.

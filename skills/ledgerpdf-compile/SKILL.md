@@ -27,13 +27,21 @@ its manifest reason preserves the disposition. If the request calls for retainin
 it, label its bookmark SUPERSEDED and do not use it as current-year check evidence.
 
 Compile a fresh editable binder in prior-year section order, adapted for this
-year. Preserve useful source bookmarks and add navigable section bookmarks. Check
+year. Use binder_add_section at document boundaries to group imported bookmarks
+under section headings; binder_add_bookmark adds an ordinary bookmark and does
+not group imported documents. Preserve useful source bookmarks. Check
 conversion of multi-sheet/wide workbooks and scans; import success alone does
 not establish legibility or completeness. Use current-year labels and periods
 when selecting evidence; comparison columns can contain plausible wrong figures.
 Plan the section order once. binder_move_pages preserves the selected pages'
 existing order; the pageIds array does not specify a new order. Move each section
 as a group and verify the resulting order before placing marks or making a cover.
+Inspect binder_bookmarks after adding sections: each document should be a child
+of the intended section, with its own imported outline retained. Classify from
+document contents and instructions, not a generic filename such as receipt.
+If extraction/OCR cannot establish the document's purpose and visual inspection
+is unavailable, file it under Needs filing and explain the classification decision
+in its existing needs-decision input item. Do not guess a business section.
 
 Use binder_foot and binder_tie for requested arithmetic checks. Read the inputs
 from the actual pages or cells first; retain both evidence locations and values.
@@ -52,6 +60,7 @@ specific and actionable. Agent-created checks never constitute human review.
 Call binder_record_handoff after assembly/checks and before the first save. Its
 inputs are file dispositions with their actual page IDs; checks include outcomes,
 quotes, page coordinates, and worksheet/cell references where applicable. Add
+the worksheet name in sheet and the bare range (such as B3:B6) in cells. Add
 missing requirements as findings with an empty pageIds array. Failed/ambiguous
 inputs and non-agreeing checks already create review items: avoid duplicate
 findings for the same issue. A resolved duplicate or explicitly superseded file

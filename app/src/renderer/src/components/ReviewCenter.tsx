@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { SHAPE_COLORS } from '../session'
 import type { ReviewSnapshot } from '../review'
+import { evidenceLocation } from '../handoff'
 
 export type ReviewTab = 'attention' | 'coverage' | 'ai' | 'handoff'
 
@@ -253,7 +254,7 @@ export function ReviewCenter({
                       {snapshot.pageNumbers[e.pageId]
                         ? <button onClick={() => onJump(e.pageId)}>p.{snapshot.pageNumbers[e.pageId]} · {e.sourceName} (source p.{e.sourcePage})</button>
                         : <b>Evidence page removed · {e.sourceName}</b>}
-                      <p>{e.quote}{e.sheet ? ` · ${e.sheet}` : ''}{e.cells ? `!${e.cells}` : ''}</p>
+                      <p>{e.quote}{evidenceLocation(e) ? ` · ${evidenceLocation(e)}` : ''}</p>
                     </div>
                   ))}
                 </div>

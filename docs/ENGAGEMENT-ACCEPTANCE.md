@@ -208,3 +208,66 @@ and resolve one item. Record orientation and correction time separately. This
 single tuned packet demonstrates a working preparation path, not general agent
 accuracy, repeatability on unseen engagements, or satisfactory daily UX. No new
 release or installed-app update was performed during this follow-up.
+
+### September 7, 2026: filing and navigation
+
+The follow-up adds `binder_add_section`: a section divider wraps the existing
+document bookmarks until the next divider, preserving imported child outlines.
+Sections start at document boundaries, reject duplicate starts and boundaries
+that split an imported bookmark tree, and travel with their pages. Removing a
+divider leaves its documents intact. This is a model capability as well as an
+MCP tool; ordinary user bookmarks previously could not group imported roots.
+
+Section metadata requires session format v5. This development build reads
+v1-v4 binders, while earlier builds refuse its new editable saves. Source
+outlines, source files, and physical page order are unchanged by grouping.
+Saved PDFs carry the nested outline, which survives reopening without originals.
+Review and generated covers now share a worksheet-reference formatter so both
+bare ranges and already-qualified references display their sheet name once.
+The original evidence record remains unchanged.
+
+The compilation skill now calls the section tool and verifies the resulting
+tree. A document whose purpose cannot be established from extraction/OCR goes
+under Needs filing with its existing input review item explaining the limitation;
+it is not assigned a business section from a generic filename. This provides an
+honest handoff when the configured tools cannot inspect images visually.
+
+Verifier version 3 adds nested-section and physical-filing checks. Applied to a
+temporary copy of `acceptance-v6`, it passes 68/70 checks and rejects precisely
+the two known defects: flat headings and the receipt under Income (8/9 source
+pages correctly filed). Historical run artifacts and their original reports
+were preserved. An explicitly unfiled receipt is allowed; its amount must still
+remain unresolved with a page-linked review item.
+
+Implementation validation passed: the full `npm run verify` suite, including
+334 model checks and 156 MCP checks; PDFium/Poppler conformance; skill validation;
+and whitespace checks. A final regression confirming that agent sections can be
+reverted brings the model suite to 335 passing checks. New coverage exercises section grouping,
+imported nesting, document spans, moving a section, invalid boundaries,
+attribution, deletion, session serialization, actual PDF save/reopen, and
+bare/qualified/quoted worksheet references.
+
+One fresh blind run, `sections-v1`, completed in 432 seconds (60 turns; reported
+cost $1.89). It produced eleven pages with a two-page handoff, four checks, and
+seven compilation items. **69/70 artifact checks passed; acceptance still fails
+on filing.** The agent used the section tool and produced the correct nested
+outline, but again placed the office-supplies receipt under Income. Its review
+item flags the unreadable amount without acknowledging uncertain classification;
+the new Needs filing instruction was not followed. No additional autonomous
+retries were run, and this result was not relabeled as a pass.
+
+Visual inspection covered the two-page handoff, marked source pages, unreadable
+receipt, and wide worksheet. Worksheet references now read `Expenses!B3:B6` and
+`Expenses!B6` once, and all six ties and the footing stamp remain clear. A separate
+isolated development window reopened the saved PDF with its nested sections,
+seven compilation items plus two page flags, and zero resolved items intact.
+Input hashes remained unchanged. The earlier candidate and this failed filing
+case are retained locally as regression evidence, not finished reference masters.
+
+The section tool and presentation fixes are validated. The next product gap is
+accountable document classification: the agent needs to retain evidence for why
+each document belongs in a business section, and leave unsupported classifications
+explicitly awaiting a decision. This run shows that adding a prose instruction
+alone does not reliably enforce that behavior. Practitioner orientation and
+correction timings, unseen-packet accuracy, and release packaging remain untested
+in this follow-up.
