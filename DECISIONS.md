@@ -58,3 +58,21 @@ failed or unavailable checks. A scripted MCP replay is an integration test, not
 an autonomous-agent acceptance result. Implementation and run results belong in
 the acceptance documentation; the exploratory review is in
 [docs/UX-REVIEW-2026-09-05.md](docs/UX-REVIEW-2026-09-05.md).
+
+## 7. Filing choices need source evidence
+
+Added September 7, 2026 after the unreadable-receipt acceptance failure.
+Each retained input carries a proposed section, a business-purpose explanation,
+and supporting source quotations in the binder-owned handoff. LedgerPDF verifies
+that quotations occur on that input's own retained pages, with page references,
+source hashes and text/OCR attribution. This verifies provenance, not semantic
+correctness; filing remains an agent proposal for human review.
+
+Missing or unverifiable support places the input under Needs filing, with one
+unresolved input item explaining the limitation. This routing occurs before the
+cover is generated, so printed page references use the final order. The original
+source files remain unchanged. A filename or quoted content from a different
+document cannot substitute for evidence in the input itself in this version.
+An input is filed as a whole; documents requiring multiple business sections or
+visual interpretation beyond available text/OCR remain for human classification.
+Older handoffs remain readable without inventing filing evidence for them.

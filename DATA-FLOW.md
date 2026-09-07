@@ -64,10 +64,11 @@ Optional MCP client ─local stdio─ MCP server ─same session model/engine─
   positions and notes, and calculator tape entries — stored inside the PDF at two
   anchors (`spike/CARRIER-SPIKE.md`). The session records where each page came
   from as provenance. A compilation handoff also retains input paths and hashes,
-  disposition reasons, selected evidence quotations and page/cell locations,
+  disposition reasons, filing proposals and reasons, verified source quotations
+  for filing with their text/OCR method, selected check quotations and page/cell locations,
   findings, and human resolutions. It does not embed separate page images or a
   full extracted-text cache. The binder does not need the originals present in
-  order to open. Session format v5 protects the handoff and section hierarchy
+  order to open. Session format v6 protects filing evidence, the handoff and section hierarchy
   from being silently discarded or flattened by older builds.
 - While a binder is open, two hidden siblings sit beside it and are deleted on a
   clean close: `.<name>.wpt-working.pdf`, the binder with our own marks stripped

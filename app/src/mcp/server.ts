@@ -50,6 +50,7 @@ import { isPathInsideRoot, readAgentRootsSync } from '../shared/agent-roots'
 import { z } from 'zod'
 import { runEngine } from './engine'
 import { besideText } from './mark-position'
+import { recordFiling, routeUnfiled } from './filing'
 import { workingCopyPathFor } from '../main/persistence'
 import { acquireBinderLock, withBinderLock, type BinderLease } from '../shared/binder-lock'
 import {
@@ -1492,8 +1493,8 @@ function summaryMarkdown(narrative?: string, coverPages = 0): string {
         `- **${item.label}** (${at(item.pageIds)}): ${item.detail}`
       ) : ['No unresolved compilation items. Page review status is recorded separately.']), '',
       ...(review.active.length ? [`Page review flags: ${at(review.active.map((page) => page.pageId))}. Open those pages or Review for their notes.`, ''] : []),
-      '## Input dispositions', '', '| Input | Disposition | Location |', '| --- | --- | --- |',
-      ...h.inputs.map((input) => `| ${cell(baseName(input.path))} | ${input.disposition} | ${at(input.pageIds)} |`), '',
+      '## Input dispositions', '', '| Input | Disposition | Filing | Location |', '| --- | --- | --- | --- |',
+      ...h.inputs.map((input) => `| ${cell(baseName(input.path))} | ${input.disposition} | ${cell(input.filing?.section ?? (input.pageIds.length ? 'Not recorded' : 'Not included'))} | ${at(input.pageIds)} |`), '',
       '## Recorded checks', '',
       ...h.checks.flatMap((check) => [
         `**${check.label} — ${check.outcome}.** ${check.detail}`,
@@ -2039,11 +2040,12 @@ registerTool(
   'binder_record_handoff',
   {
     title: 'Record the compilation handoff',
-    description: 'Persist the input manifest, agent check outcomes with evidence, and findings in a fresh binder. Findings may have no page (e.g. a missing required document). File hashes and source provenance are recorded by LedgerPDF. This is an agent preparation snapshot, not human sign-off. Call once, before the first save, after assembly and checks. Use binder_find coordinates for evidence; never guess positions. Use findings for missing requirements and inputs for failed or ambiguous files; non-agreeing checks automatically require human review.',
+    description: 'Persist the input manifest, filing choices, checks and findings in a fresh binder before its cover or first save. Each retained input needs a filing section, business-purpose reason and verbatim supporting quotes (at least 12 characters) from its OWN retained pages. LedgerPDF verifies quotes against text/OCR and records hashes. Missing or unverifiable filing evidence automatically moves the input to a final Needs filing section and makes it needs-decision. This can reorder pages: inspect inventory afterwards and generate the cover last. Quote provenance is verified; semantic classification remains agent-reported, never human sign-off. Findings may have no page for missing requirements.',
     inputSchema: handoffDraftShape
   },
   async ({ inputs, checks, findings }) => {
     if (sessionPath || session.handoff) return fail('Record the handoff once in a fresh, unsaved binder. Recompilation is not supported.')
+    if (session.cover) return fail('Record the handoff before creating the cover; filing decisions may move pages.')
     if (!session.pages.length) return fail('Compile the binder pages before recording its handoff.')
     try {
       const ids = new Set(session.pages.map((page) => page.id))
@@ -2052,6 +2054,8 @@ registerTool(
       }
       const paths = new Set<string>()
       const recordedInputs = []
+      const accounted = new Set<string>()
+      const filingText = new Map<string, Promise<Awaited<ReturnType<typeof pageText>>>>()
       for (const input of inputs) {
         requirePages(input.pageIds)
         const file = resolveAllowedPath(input.path, { mustExist: true, purpose: 'recording a compilation input' })
@@ -2063,12 +2067,18 @@ registerTool(
           throw new Error('An excluded or failed input cannot claim included pages')
         }
         for (const id of input.pageIds) {
+          if (accounted.has(id)) throw new Error('Account for each included page exactly once')
+          accounted.add(id)
           const page = session.pages.find((p) => p.id === id)!
           const source = session.sources.find((s) => s.id === page.source)!
           if (realpathSync(source.path) !== file) throw new Error('Input pages belong to a different source file')
         }
-        recordedInputs.push({ ...input, path: file, sha256: await sha256File(file) })
+        recordedInputs.push(await recordFiling(session, { ...input, path: file, sha256: await sha256File(file) }, (id) => {
+          if (!filingText.has(id)) filingText.set(id, pageText(session.pages.find((p) => p.id === id)!, true))
+          return filingText.get(id)!
+        }))
       }
+      if (accounted.size !== session.pages.length) throw new Error('The manifest must account for every retained page before recording the handoff')
       const recordedChecks = checks.map((check) => ({ ...check, evidence: check.evidence.map((evidence) => {
         requirePages([evidence.pageId])
         const page = session.pages.find((p) => p.id === evidence.pageId)!
@@ -2077,12 +2087,14 @@ registerTool(
           ...(source.fingerprint ? { sourceSha256: source.fingerprint.sha256 } : {}) }
       }) }))
       findings.forEach((finding) => requirePages(finding.pageIds))
-      mutating('handoff', `Recorded ${inputs.length} input dispositions, ${checks.length} checks and ${findings.length} findings`)
-      const handoff = handoffSchema.parse({ version: 1, recordedAt: new Date().toISOString(),
-        by: 'agent', run: session.activeRun!, inputs: recordedInputs, checks: recordedChecks,
+      const prepared = routeUnfiled(session, recordedInputs)
+      const handoff = handoffSchema.parse({ version: 2, recordedAt: new Date().toISOString(),
+        by: 'agent', run: session.activeRun ?? 'pending', inputs: recordedInputs, checks: recordedChecks,
         findings, resolutions: {} })
-      session = { ...session, handoff }
-      return text(`Compilation handoff recorded in the binder. ${reviewSnapshot(session).handoffPending.length} item(s) need human review. Save the editable binder to preserve it.`)
+      const moved = prepared.pages.some((page, i) => page.id !== session.pages[i].id)
+      mutating('handoff', `Recorded ${inputs.length} input dispositions, ${checks.length} checks and ${findings.length} findings; ${recordedInputs.filter((input) => input.filing?.status === 'needs-decision').length} input(s) need filing`, moved)
+      session = { ...routeUnfiled(session, recordedInputs), handoff: { ...handoff, run: session.activeRun! } }
+      return text(`Compilation handoff recorded. ${reviewSnapshot(session).handoffPending.length} item(s) need human review. Unsupported filing choices were routed to Needs filing. Inspect binder_inventory and binder_bookmarks, then generate the cover and save.`)
     } catch (error) {
       return fail(String((error as Error).message))
     }

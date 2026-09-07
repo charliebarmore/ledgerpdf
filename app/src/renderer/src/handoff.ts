@@ -3,6 +3,20 @@ import type { Session } from './session'
 
 const description = z.string().trim().min(1).max(4000)
 const pageIds = z.array(z.string().min(1)).max(1000)
+const filingEvidenceDraft = z.object({ pageId: z.string().min(1), quote: description }).strict()
+export const filingDraft = z.object({
+  section: z.string().trim().min(1).max(200),
+  reason: description,
+  evidence: z.array(filingEvidenceDraft).max(20)
+}).strict()
+const filingRecord = filingDraft.extend({
+  status: z.enum(['supported', 'needs-decision']),
+  proposedSection: z.string().optional(),
+  evidence: z.array(filingEvidenceDraft.extend({
+    sourceName: z.string(), sourcePage: z.number().int().min(1), sourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    method: z.enum(['text', 'ocr'])
+  })).max(20)
+}).strict()
 export const handoffEvidenceDraft = z.object({
   pageId: z.string().min(1),
   quote: description,
@@ -15,7 +29,8 @@ export const handoffInputDraft = z.object({
   path: z.string().min(1),
   disposition: z.enum(['included', 'excluded', 'needs-decision', 'unreadable', 'unsupported']),
   reason: description,
-  pageIds
+  pageIds,
+  filing: filingDraft.optional().describe('For included pages: proposed section, business-purpose reason, and verbatim quotes from this input\'s own pages. Missing or unverifiable evidence routes the input to Needs filing. A filename is not evidence.')
 }).strict()
 export const handoffCheckDraft = z.object({
   label: description,
@@ -36,18 +51,22 @@ const sourceEvidence = handoffEvidenceDraft.extend({
   sourceSha256: z.string().regex(/^[a-f0-9]{64}$/).optional()
 })
 export const handoffSchema = z.object({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   recordedAt: z.string().datetime(),
   by: z.literal('agent'),
   run: z.string().min(1),
-  inputs: z.array(handoffInputDraft.extend({ sha256: z.string().regex(/^[a-f0-9]{64}$/) })).min(1).max(1000),
+  inputs: z.array(handoffInputDraft.extend({ sha256: z.string().regex(/^[a-f0-9]{64}$/), filing: filingRecord.optional() })).min(1).max(1000),
   checks: z.array(z.object({
     label: description, outcome: z.enum(['agrees', 'discrepancy', 'unchecked']),
     detail: description, evidence: z.array(sourceEvidence).max(100)
   }).strict().refine((check) => check.outcome === 'unchecked' || check.evidence.length > 0)).max(1000),
   findings: z.array(handoffFinding).max(1000),
   resolutions: z.record(z.string(), z.object({ by: z.string(), at: z.string().datetime() }).strict())
-}).strict()
+}).strict().refine((h) => h.version === 1 || h.inputs.every((input) => !input.pageIds.length ||
+  (input.filing && (input.filing.status === 'supported'
+    ? input.filing.evidence.length > 0 && input.filing.section !== 'Needs filing'
+    : input.disposition === 'needs-decision' && input.filing.section === 'Needs filing'))),
+  'Every retained input needs a filing decision; supported decisions need evidence')
 export type CompilationHandoff = z.infer<typeof handoffSchema>
 
 /** Display both bare and already-qualified references without altering evidence. */
@@ -83,8 +102,9 @@ export function handoffItems(session: Session): HandoffItem[] {
     items.push({ id, label, detail, pageIds: pages, resolved: !!h.resolutions[id] })
   }
   h.inputs.forEach((input, i) => {
-    if (['needs-decision', 'unreadable', 'unsupported'].includes(input.disposition)) {
-      add(`input:${i}`, `${input.path.split(/[\\/]/).pop()} · ${input.disposition}`, input.reason, input.pageIds)
+    if (['needs-decision', 'unreadable', 'unsupported'].includes(input.disposition) || input.filing?.status === 'needs-decision') {
+      add(`input:${i}`, `${input.path.split(/[\\/]/).pop()} · ${input.disposition}`,
+        input.filing?.status === 'needs-decision' ? `${input.reason} Filing: ${input.filing.reason}` : input.reason, input.pageIds)
     }
   })
   h.checks.forEach((check, i) => {
@@ -92,7 +112,7 @@ export function handoffItems(session: Session): HandoffItem[] {
   })
   h.findings.forEach((finding, i) => add(`finding:${i}`, finding.label, finding.detail, finding.pageIds))
   const live = new Set(session.pages.map((page) => page.id))
-  const refs = [...h.inputs.map((input) => input.pageIds), ...h.checks.map((check) => check.evidence.map((e) => e.pageId)), ...h.findings.map((f) => f.pageIds)]
+  const refs = [...h.inputs.map((input) => [...input.pageIds, ...(input.filing?.evidence.map((e) => e.pageId) ?? [])]), ...h.checks.map((check) => check.evidence.map((e) => e.pageId)), ...h.findings.map((f) => f.pageIds)]
   const missing = [...new Set(refs.flat().filter((page) => !live.has(page)))]
   if (missing.length) add(`missing:${missing.join(',')}`, 'Compilation evidence was removed',
     `${missing.length} referenced page(s) are no longer in this binder. Review the compilation record before relying on its checks.`, [])

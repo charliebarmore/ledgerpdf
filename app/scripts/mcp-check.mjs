@@ -1257,7 +1257,9 @@ check('duplicate and mid-document sections are refused',
   (await call('binder_add_section', { pageId: handoffIds[0], title: 'Duplicate' })).isError &&
   (await call('binder_add_section', { pageId: handoffIds[1], title: 'Split' })).isError)
 const draftHandoff = {
-  inputs: [{ path: a, disposition: 'included', reason: 'Synthetic current-year support', pageIds: handoffIds }],
+  inputs: [{ path: a, disposition: 'included', reason: 'Synthetic current-year support', pageIds: handoffIds,
+    filing: { section: '01 Administration', reason: 'Synthetic document used to test filing provenance', evidence: [{ pageId: handoffIds[0],
+      quote: (await engine({ cmd: 'text', path: a, pages: [0] })).text.pages[0].text.split('\n').find((line) => line.trim().length >= 12) }] } }],
   checks: [{ label: 'No comparison supplied', outcome: 'unchecked', detail: 'The requested second document has not arrived', evidence: [] }],
   findings: [{ label: 'Missing required statement', detail: 'Required by the synthetic engagement instructions', pageIds: [] }]
 }
@@ -1298,6 +1300,42 @@ check('missing-document findings survive reopen without the agent conversation',
   (await call('binder_review_queue')).text.includes('Missing required statement'))
 check('handoff appears in the generated binder summary',
   (await call('binder_summary')).text.includes('Missing required statement'))
+
+// Reproduce the filing failure: an image is placed before readable support in
+// a business section, and the agent asserts a quote the image cannot supply.
+await call('binder_new')
+const filingImage = path.join(FIXTURES, 'receipt.jpg')
+await call('binder_add_pdfs', { paths: [filingImage, a] })
+const filingIds = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+await call('binder_add_section', { pageId: filingIds[0], title: 'Administration' })
+const filingResult = await call('binder_record_handoff', {
+  inputs: [
+    { path: filingImage, disposition: 'included', reason: 'Agent guessed from a generic receipt name', pageIds: [filingIds[0]],
+      filing: { section: 'Administration', reason: 'Unverified assertion', evidence: [{ pageId: filingIds[0], quote: 'Invented business purpose in an unreadable image' }] } },
+    { ...draftHandoff.inputs[0], pageIds: filingIds.slice(1), filing: { ...draftHandoff.inputs[0].filing,
+      section: 'Administration', evidence: [{ ...draftHandoff.inputs[0].filing.evidence[0], pageId: filingIds[1] }] } }
+  ], checks: [], findings: []
+})
+check('unverifiable filing evidence is downgraded rather than accepted', !filingResult.isError, filingResult.text)
+const filingOutput = path.join(REPO, 'spike/out/mcp_filing.pdf')
+rmSync(filingOutput, { force: true })
+await call('binder_save', { path: filingOutput })
+const filingSaved = (await engine({ cmd: 'open_binder', path: filingOutput })).binder.session
+check('unverified filing is persisted with its proposal and one unresolved input',
+  filingSaved.handoff.version === 2 && filingSaved.handoff.inputs[0].disposition === 'needs-decision' &&
+  filingSaved.handoff.inputs[0].filing.section === 'Needs filing' && filingSaved.handoff.inputs[0].filing.proposedSection === 'Administration')
+check('filing routes the image last and preserves readable document order',
+  filingSaved.pages.map((p) => p.id).join(',') === [...filingIds.slice(1), filingIds[0]].join(','))
+check('supported filing preserves source quote provenance',
+  filingSaved.handoff.inputs[1].filing.status === 'supported' &&
+  filingSaved.handoff.inputs[1].filing.evidence[0].sourceSha256 === createHash('sha256').update(readFileSync(a)).digest('hex'))
+await call('binder_new')
+await call('binder_open', { path: filingOutput })
+const filingTree = (await call('binder_bookmarks')).text
+check('routing retargets the business divider and survives PDF reopen',
+  /Administration[^\n]*\n  fixture_a/.test(filingTree) && /Needs filing[^\n]*\n  receipt/.test(filingTree))
+check('filing explanation and unresolved item survive reopen',
+  (await call('binder_review_queue')).text.includes('Filing:') && (await call('binder_summary')).text.includes('Needs filing'))
 await client.close()
 
 // No root means no filesystem capability at all. This is the default when a

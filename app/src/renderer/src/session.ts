@@ -18,8 +18,8 @@
  */
 import { handoffSchema, type CompilationHandoff } from './handoff'
 
-// v5 preserves section hierarchy that older builds would render as flat bookmarks.
-export const SESSION_FORMAT_VERSION = 5
+// v6 preserves verified filing evidence in the compilation handoff.
+export const SESSION_FORMAT_VERSION = 6
 
 // ------------------------------------------------------------------- types
 

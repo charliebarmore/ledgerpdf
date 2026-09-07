@@ -241,6 +241,18 @@ export function ReviewCenter({
                 <div className="review-item handoff-item" key={input.path}>
                   <b>{input.path.split(/[\\/]/).pop()} · {input.disposition}</b>
                   <p>{input.reason}</p>
+                  {input.filing ? <details>
+                    <summary>Filing: {input.filing.section} · {input.filing.status === 'supported' ? 'source quote verified' : 'needs a decision'}</summary>
+                    <p>{input.filing.reason}</p>
+                    {input.filing.proposedSection && <p>Agent proposed: {input.filing.proposedSection}</p>}
+                    {input.filing.evidence.map((e, j) => <div key={j}>
+                      {snapshot.pageNumbers[e.pageId]
+                        ? <button onClick={() => onJump(e.pageId)}>Evidence p.{snapshot.pageNumbers[e.pageId]}</button>
+                        : <b>Evidence page removed</b>}
+                      <p>{e.quote} · {e.method === 'ocr' ? 'OCR reading' : 'Source text'}</p>
+                    </div>)}
+                    <p>Quote provenance is verified. The filing interpretation still needs human review.</p>
+                  </details> : input.pageIds.length > 0 && <p>Filing evidence was not recorded in this older handoff.</p>}
                   <details><summary>Source identity</summary><code className="handoff-hash">SHA-256 {input.sha256}</code></details>
                 </div>
               ))}

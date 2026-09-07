@@ -17,8 +17,14 @@ Versioning once a stable compatibility promise is published.
 
 ### Changed
 
-- Session format v5 preserves section dividers; this build continues to read
-  v1-v4 binders. Earlier builds refuse new editable saves.
+- Session format v6 preserves filing decisions in handoff version 2, alongside
+  section dividers; this build continues to read v1-v5 binders and older handoffs.
+  Earlier builds refuse new editable saves.
+- Compilation inputs retain filing reasons and quotes verified against their
+  own pages. Missing or unverifiable support moves the input to Needs filing
+  before the cover is generated and creates one unresolved input review item.
+  Review exposes the proposed section and source evidence; quote verification
+  does not establish the correctness of the agent's interpretation.
 - Shortened compilation covers by linking to page review notes instead of
   repeating them, and tightened compilation instructions around actionable
   findings, unreadable inputs and superseded versions.
