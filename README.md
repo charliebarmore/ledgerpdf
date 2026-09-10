@@ -11,6 +11,23 @@ tapes that show their addends, and link a figure to the page that supports it.
 
 ![LedgerPDF with a binder open](docs/screenshot.png)
 
+### Product direction
+
+The next workflow is **turn an engagement folder into a master file ready for
+human review**: an external agent compiles a fresh binder using the prior-year
+master as its organizing reference, performs specified checks, and leaves a
+handoff in the binder. Current releases provide the import, annotation, MCP,
+and review building blocks; the complete compilation workflow is under
+acceptance testing. [DECISIONS.md](DECISIONS.md) records the scope and ownership
+of the handoff. The desktop application's network behavior remains unchanged.
+
+The development build provides `binder_add_section` to nest imported document
+bookmarks beneath engagement sections. Filing choices retain source quotes and
+reasons; inputs without verifiable support move to Needs filing. Its editable
+saves use session format v6; use this build to open them. It also reads older
+v1-v5 binders. Quote provenance is checked; classification still needs human review. See the
+[acceptance results](docs/ENGAGEMENT-ACCEPTANCE.md) for tested behavior and limits.
+
 ## What it does
 
 - **One binder, one file.** The binder PDF *is* the document. Saving overwrites

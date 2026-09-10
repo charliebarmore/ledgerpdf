@@ -12,9 +12,9 @@ DESTINATION="$1"
 PUBLIC_ROOTS=(
   .github .gitignore .node-version .nvmrc
   CHANGELOG.md CODE_OF_CONDUCT.md CONTRIBUTING.md COPYRIGHT.md DATA-FLOW.md
-  DESIGN-PRINCIPLES.md DESIGN.md DISCLAIMER.md LICENSE PRIVACY.md README.md
+  DECISIONS.md DESIGN-PRINCIPLES.md DESIGN.md DISCLAIMER.md LICENSE PRIVACY.md README.md
   RELEASING.md SECURITY.md SUPPORT.md TERMS.md THIRD-PARTY-NOTICES.md
-  app docs engine spike tools
+  app docs engine skills spike tools
 )
 PRIVATE_ROOTS=(CLAUDE.md PROJECT.md ROADMAP.md references templates)
 

@@ -11,6 +11,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -114,7 +115,9 @@ check(
 
 /** Call a tool and return its text, asserting it did not error. */
 async function call(name, args = {}) {
-  const res = await client.callTool({ name, arguments: args })
+  const res = await client.callTool({ name, arguments: args }).catch((error) => {
+    throw new Error(`${name} failed: ${error.message}`, { cause: error })
+  })
   const body = (res.content ?? []).map((c) => c.text ?? '').join('\n')
   return { text: body, isError: !!res.isError }
 }
@@ -654,11 +657,29 @@ check(
   )
   const within = await call('binder_tie', {
     label: 'Rounding',
+    size: 18,
     a: { pageId: ids[0], amount: '1,000.00', nx: 0.3, ny: 0.3 },
     b: { pageId: ids[1], amount: '999.99', nx: 0.3, ny: 0.3 },
     toleranceCents: 1
   })
   check('a tolerance the reviewer sets is respected', within.text.startsWith('TIES'), within.text.split('\n')[0])
+  const tieOutput = path.join(REPO, 'spike/out/mcp_tie_sizes.pdf')
+  rmSync(tieOutput, { force: true })
+  await call('binder_save', { path: tieOutput })
+  const tieSaved = (await engine({ cmd: 'open_binder', path: tieOutput })).binder.session
+  const tieMarks = tieSaved.marks.filter((mark) => mark.refTarget)
+  check('saved automatic ties use compact marks for normal workpaper rows',
+    tieMarks.filter((mark) => !mark.note.startsWith('Rounding')).every((mark) => mark.size === 14))
+  check('an explicitly requested tie size survives save',
+    tieMarks.filter((mark) => mark.note.startsWith('Rounding')).every((mark) => mark.size === 18))
+  const footStamp = tieSaved.marks.find((mark) => mark.text === 'F')
+  const footTape = tieSaved.tapes.find((tape) => tape.page === footStamp.page)
+  check('the footing stamp is outside the tape that would otherwise paint over it',
+    (footTape.ny - footStamp.ny) * 792 > 78 / 2 + footStamp.size / 2)
+  const firstLink = tieSaved.links[0]
+  check('tie link hit areas fit the actual mark footprint',
+    Math.abs((firstLink.rect[2] - firstLink.rect[0]) * 612 - 14) < 0.001 &&
+    Math.abs((firstLink.rect[3] - firstLink.rect[1]) * 792 - 14) < 0.001)
 }
 
 // ------------------------------------------------------------ folder intake
@@ -1078,7 +1099,7 @@ check(
 )
 
 const found = await call('binder_find', { query: '84,200.00' })
-const hit = found.text.match(/\[page (pg_\d+)\s+nx ([\d.]+)\s+ny ([\d.]+)/)
+const hit = found.text.match(/\[page (pg_\d+)\s+nx ([\d.]+)\s+ny ([\d.]+)\s+beside nx ([\d.]+)/)
 check('binder_find locates a figure and reports where it is', !!hit, found.text.split('\n')[1] ?? found.text)
 check(
   'binder_find reports the page that actually holds the figure',
@@ -1088,14 +1109,22 @@ check(
 
 // The whole ergonomic claim — a hit's coordinates go straight into a mark.
 if (hit) {
+  const located = await engine({ cmd: 'text', path: a, pages: [0], words: true })
+  const words = located.text.pages[0].words
+  const left = Number(hit[4]) - 12 / 612
+  const right = Number(hit[4]) + 12 / 612
+  const top = Number(hit[3]) - 12 / 792
+  const bottom = Number(hit[3]) + 12 / 792
+  check('beside reserves clearance for the whole default mark, including adjacent rows',
+    !words.some(({ box }) => box[0] < right && box[2] > left && box[1] < bottom && box[3] > top))
   const placed = await call('binder_place_mark', {
     pageId: hit[1],
     kind: 'tick',
-    nx: Number(hit[2]),
+    nx: Number(hit[4]),
     ny: Number(hit[3])
   })
   check(
-    "a find hit's coordinates are directly usable as a mark position",
+    "a find hit's beside coordinates are directly usable as a mark position",
     !placed.isError && placed.text.includes('Placed tick'),
     placed.text
   )
@@ -1217,6 +1246,96 @@ check(
   `${atomicFailure.stdout}${atomicFailure.stderr}`.trim()
 )
 
+// Fresh compilation handoff crosses the real MCP -> model -> PDF -> reopen boundary.
+await call('binder_new')
+await call('binder_add_pdfs', { paths: [a] })
+const handoffIds = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+check('agent can group imported document bookmarks beneath a section',
+  !(await call('binder_add_section', { pageId: handoffIds[0], title: '01 Administration' })).isError &&
+  /01 Administration[^\n]*\n  fixture_a/.test((await call('binder_bookmarks')).text))
+check('duplicate and mid-document sections are refused',
+  (await call('binder_add_section', { pageId: handoffIds[0], title: 'Duplicate' })).isError &&
+  (await call('binder_add_section', { pageId: handoffIds[1], title: 'Split' })).isError)
+const draftHandoff = {
+  inputs: [{ path: a, disposition: 'included', reason: 'Synthetic current-year support', pageIds: handoffIds,
+    filing: { section: '01 Administration', reason: 'Synthetic document used to test filing provenance', evidence: [{ pageId: handoffIds[0],
+      quote: (await engine({ cmd: 'text', path: a, pages: [0] })).text.pages[0].text.split('\n').find((line) => line.trim().length >= 12) }] } }],
+  checks: [{ label: 'No comparison supplied', outcome: 'unchecked', detail: 'The requested second document has not arrived', evidence: [] }],
+  findings: [{ label: 'Missing required statement', detail: 'Required by the synthetic engagement instructions', pageIds: [] }]
+}
+const forbiddenHandoff = await call('binder_record_handoff', { ...draftHandoff,
+  inputs: [{ ...draftHandoff.inputs[0], path: path.join(APP, 'package.json'), pageIds: [] }]
+})
+check('handoff input hashes cannot read outside approved roots', forbiddenHandoff.isError)
+const wrongSourceHandoff = await call('binder_record_handoff', { ...draftHandoff,
+  inputs: [{ ...draftHandoff.inputs[0], path: b }]
+})
+check('handoff cannot attribute pages to a different source', wrongSourceHandoff.isError)
+const noEvidenceHandoff = await call('binder_record_handoff', { ...draftHandoff,
+  checks: [{ label: 'Unsupported assertion', outcome: 'agrees', detail: 'No evidence supplied', evidence: [] }]
+})
+check('a claimed performed check without evidence is refused', noEvidenceHandoff.isError)
+const handoffResult = await call('binder_record_handoff', draftHandoff)
+check('fresh binder accepts a structured compilation handoff', !handoffResult.isError, handoffResult.text)
+check('a second handoff cannot replace the first compilation record', (await call('binder_record_handoff', draftHandoff)).isError)
+const handoffQueue = await call('binder_review_queue')
+check('a missing document without a page is in the MCP review queue', handoffQueue.text.includes('Missing required statement'))
+const handoffOutput = path.join(REPO, 'spike/out/mcp_handoff.pdf')
+rmSync(handoffOutput, { force: true })
+const handoffCover = path.join(REPO, 'spike/out/mcp_handoff.md')
+rmSync(handoffCover, { force: true })
+check('structured handoff produces a cover without duplicating the action log',
+  !(await call('binder_add_cover', { path: handoffCover })).isError &&
+  !readFileSync(handoffCover, 'utf8').includes('## Agent activity'))
+check('handoff binder saves', !(await call('binder_save', { path: handoffOutput })).isError)
+const handoffOnDisk = await engine({ cmd: 'open_binder', path: handoffOutput })
+check('the saved PDF contains the handoff and an engine-computed input hash',
+  handoffOnDisk.ok && handoffOnDisk.binder.session?.handoff?.inputs[0]?.sha256 === createHash('sha256').update(readFileSync(a)).digest('hex') &&
+  handoffOnDisk.binder.session.handoff.findings[0].pageIds.length === 0)
+await call('binder_new')
+check('handoff binder reopens', !(await call('binder_open', { path: handoffOutput })).isError)
+check('section hierarchy survives PDF save and reopen',
+  /01 Administration[^\n]*\n  fixture_a/.test((await call('binder_bookmarks')).text))
+check('missing-document findings survive reopen without the agent conversation',
+  (await call('binder_review_queue')).text.includes('Missing required statement'))
+check('handoff appears in the generated binder summary',
+  (await call('binder_summary')).text.includes('Missing required statement'))
+
+// Reproduce the filing failure: an image is placed before readable support in
+// a business section, and the agent asserts a quote the image cannot supply.
+await call('binder_new')
+const filingImage = path.join(FIXTURES, 'receipt.jpg')
+await call('binder_add_pdfs', { paths: [filingImage, a] })
+const filingIds = [...(await call('binder_status')).text.matchAll(/\bpg_\d+\b/g)].map((m) => m[0])
+await call('binder_add_section', { pageId: filingIds[0], title: 'Administration' })
+const filingResult = await call('binder_record_handoff', {
+  inputs: [
+    { path: filingImage, disposition: 'included', reason: 'Agent guessed from a generic receipt name', pageIds: [filingIds[0]],
+      filing: { section: 'Administration', reason: 'Unverified assertion', evidence: [{ pageId: filingIds[0], quote: 'Invented business purpose in an unreadable image' }] } },
+    { ...draftHandoff.inputs[0], pageIds: filingIds.slice(1), filing: { ...draftHandoff.inputs[0].filing,
+      section: 'Administration', evidence: [{ ...draftHandoff.inputs[0].filing.evidence[0], pageId: filingIds[1] }] } }
+  ], checks: [], findings: []
+})
+check('unverifiable filing evidence is downgraded rather than accepted', !filingResult.isError, filingResult.text)
+const filingOutput = path.join(REPO, 'spike/out/mcp_filing.pdf')
+rmSync(filingOutput, { force: true })
+await call('binder_save', { path: filingOutput })
+const filingSaved = (await engine({ cmd: 'open_binder', path: filingOutput })).binder.session
+check('unverified filing is persisted with its proposal and one unresolved input',
+  filingSaved.handoff.version === 2 && filingSaved.handoff.inputs[0].disposition === 'needs-decision' &&
+  filingSaved.handoff.inputs[0].filing.section === 'Needs filing' && filingSaved.handoff.inputs[0].filing.proposedSection === 'Administration')
+check('filing routes the image last and preserves readable document order',
+  filingSaved.pages.map((p) => p.id).join(',') === [...filingIds.slice(1), filingIds[0]].join(','))
+check('supported filing preserves source quote provenance',
+  filingSaved.handoff.inputs[1].filing.status === 'supported' &&
+  filingSaved.handoff.inputs[1].filing.evidence[0].sourceSha256 === createHash('sha256').update(readFileSync(a)).digest('hex'))
+await call('binder_new')
+await call('binder_open', { path: filingOutput })
+const filingTree = (await call('binder_bookmarks')).text
+check('routing retargets the business divider and survives PDF reopen',
+  /Administration[^\n]*\n  fixture_a/.test(filingTree) && /Needs filing[^\n]*\n  receipt/.test(filingTree))
+check('filing explanation and unresolved item survive reopen',
+  (await call('binder_review_queue')).text.includes('Filing:') && (await call('binder_summary')).text.includes('Needs filing'))
 await client.close()
 
 // No root means no filesystem capability at all. This is the default when a

@@ -5,6 +5,59 @@ Versioning once a stable compatibility promise is published.
 
 ## [Unreleased]
 
+### Added
+
+- Added a binder-owned compilation handoff with input hashes/dispositions,
+  agent-reported checks and source references, and findings without page targets.
+  These findings appear in Review, MCP queues and send-out preflight; humans can
+  resolve them while retaining the preparation record. MCP records a handoff once
+  in a fresh unsaved binder with `binder_record_handoff`.
+- Added a reproducible synthetic engagement acceptance packet, an opt-in external
+  Claude Code runner, an independent artifact verifier, and a compilation skill.
+
+### Changed
+
+- Session format v6 preserves filing decisions in handoff version 2, alongside
+  section dividers; this build continues to read v1-v5 binders and older handoffs.
+  Earlier builds refuse new editable saves.
+- Compilation inputs retain filing reasons and quotes verified against their
+  own pages. Missing or unverifiable support moves the input to Needs filing
+  before the cover is generated and creates one unresolved input review item.
+  Review exposes the proposed section and source evidence; quote verification
+  does not establish the correctness of the agent's interpretation.
+- Shortened compilation covers by linking to page review notes instead of
+  repeating them, and tightened compilation instructions around actionable
+  findings, unreadable inputs and superseded versions.
+- Expanded the engagement verifier to check source hashes, dispositions,
+  evidence provenance, bookmark order and actual annotation footprints.
+- Advanced the embedded session format to v4 so earlier builds refuse the new
+  compilation record rather than silently discarding it. v1-v3 binders remain readable.
+
+- Added a visible Review binder entry above the document. Empty review queues
+  now say "No flagged findings" and show pages without review status; Coverage
+  separates AI-proposed statuses from human statuses. The review drawer receives
+  keyboard focus, contains Tab navigation, and returns focus when closed.
+- Recorded the engagement-compilation direction, external-agent boundary,
+  binder-owned handoff, prior-year reference, and fresh-binder scope in DECISIONS.md.
+
+### Fixed
+
+- Compilation section headings now group imported document bookmarks through
+  `binder_add_section`, preserving their nested outlines and page order.
+- Evidence references display the worksheet name once in Review and generated
+  covers, including references already qualified with a sheet name.
+- `binder_find` now reserves room for the whole mark and nearby text, using
+  displayed page dimensions. It reports when no nearby position fits instead
+  of clamping a mark onto the page edge. Optional `markSize` controls clearance.
+- Automatic ties use 14-point marks by default, with matching link areas, so
+  adjacent workpaper rows remain distinct. Callers can request another size.
+- Footing stamps sit outside their calculator tapes using the tape's actual
+  height; the tape no longer paints over the stamp.
+- Bundle the handoff validator into Electron main so the packaged app starts
+  without relying on development-only `node_modules`.
+- Prevented a delayed mark-size preference response from replacing a newer
+  placement size while a reviewer resizes and immediately places another mark.
+
 ## [0.3.1] - 2026-08-17
 
 ### Added

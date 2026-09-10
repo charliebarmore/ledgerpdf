@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookmarkPanel } from './components/BookmarkPanel'
 import { ReviewCenter, type ReviewTab } from './components/ReviewCenter'
+import { resolveHandoffItem } from './handoff'
 import { SendOutPreflight } from './components/SendOutPreflight'
 import { MarkInspector } from './components/MarkInspector'
 import { ShapeInspector } from './components/ShapeInspector'
@@ -433,7 +434,7 @@ export default function App(): React.JSX.Element {
     // moment it is visible again.
     void window.wpt.recentBinders().then(setRecents)
     void window.wpt.preparerInitials().then(setPreparerInitials)
-    void window.wpt.markSizes().then(setMarkSizes)
+    void window.wpt.markSizes().then((stored) => setMarkSizes((current) => ({ ...stored, ...current })))
     // Opened from Finder while already running: pushed to this listener.
     window.wpt.onOpenPath((target) => void openRef.current(target))
     // Opened from Finder on a COLD start: the path was waiting before this
@@ -999,7 +1000,11 @@ export default function App(): React.JSX.Element {
     // A preference write must not block editing. Main serializes preference
     // updates so a near-simultaneous initials write cannot overwrite this one.
     void window.wpt.setMarkSize(key, size).then((stored) => {
-      if (stored) setMarkSizes((current) => ({ ...current, [stored.key]: stored.size }))
+      // A slow acknowledgement of 16pt must not replace a newer local choice
+      // of 12pt while the reviewer is already placing the next mark.
+      if (stored) setMarkSizes((current) =>
+        current[key] === size ? { ...current, [stored.key]: stored.size } : current
+      )
     })
   }, [])
 
@@ -2647,6 +2652,28 @@ export default function App(): React.JSX.Element {
         </div>
       </header>
 
+      {pages.length > 0 && (
+        <div className="binder-review-bar">
+          <button
+            className={review.active.length || review.handoffPending.length ? 'has-open' : ''}
+            aria-haspopup="dialog"
+            onClick={() => {
+              setReviewTab('attention')
+              setReviewOpen(true)
+            }}
+          >
+            Review binder
+          </button>
+          <span>
+            {review.active.length
+              ? `${review.active.length} page${review.active.length === 1 ? '' : 's'} need${review.active.length === 1 ? 's' : ''} attention`
+              : review.handoffPending.length ? 'Compilation needs review' : 'No flagged findings'}
+            {review.handoffPending.length > 0 && ` · ${review.handoffPending.length} compilation item(s)`}
+            {' · '}{review.statuses.unset} page{review.statuses.unset === 1 ? '' : 's'} without review status
+          </span>
+        </div>
+      )}
+
       <div className="body" style={{ ['--side-w' as string]: `${sideW}px` }}>
         {pages.length === 0 ? (
           <div className="dropzone">
@@ -2806,6 +2833,7 @@ export default function App(): React.JSX.Element {
             )
           }}
           onRevert={revertAgentRun}
+          onResolveHandoff={(id) => apply(resolveHandoffItem(session, id, reviewerInitials), 'Compilation item resolved by reviewer.')}
         />
       )}
 
@@ -2948,14 +2976,14 @@ export default function App(): React.JSX.Element {
             <>
               {' '}·{' '}
               <button
-                className={`review-count link${review.active.length ? ' has-open' : ''}`}
+                className={`review-count link${review.active.length || review.handoffPending.length ? ' has-open' : ''}`}
                 onClick={() => {
                   setReviewTab('attention')
                   setReviewOpen(true)
                 }}
                 title="Open the Review Center: exceptions, coverage, and agent work"
               >
-                Review · {review.active.length} open
+                Review · {review.active.length + review.handoffPending.length} open
               </button>
             </>
           ) : null}

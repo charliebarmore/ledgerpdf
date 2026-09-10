@@ -4,7 +4,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { listPackage } from '@electron/asar'
+import { extractFile, listPackage } from '@electron/asar'
 import { FuseState, FuseV1Options, getCurrentFuseWire } from '@electron/fuses'
 import { isolatedAgentAccess } from './lib/isolated-agent-access.mjs'
 
@@ -68,6 +68,15 @@ const asarPath = path.join(resources, 'app.asar')
 // asar builds its listing with path.join, so on Windows the entries come back
 // backslash-separated even though the archive's own separator is always '/'.
 const entries = new Set(listPackage(asarPath).map((entry) => entry.split(path.sep).join('/')))
+// The app intentionally excludes node_modules. Catch an accidentally external
+// runtime dependency before Electron blocks on a native missing-module dialog.
+for (const entry of entries) {
+  if (!entry.startsWith('/out/main/') || !/\.[cm]?js$/.test(entry)) continue
+  const code = extractFile(asarPath, entry.slice(1)).toString('utf8')
+  if (/require\(["'](?:zod|proper-lockfile)(?:\/[^"']*)?["']\)/.test(code)) {
+    throw new Error(`Packaged main leaves a runtime dependency external: ${entry}`)
+  }
+}
 for (const required of [
   '/out/main/index.js',
   '/out/preload/index.js',
