@@ -206,8 +206,9 @@ Two other ways to run it, in order of effort:
    packaging and installed-app verification are release-candidate gates.
    Artifacts expire after 3 days and are **unsigned: for pilot testing, not for
    redistribution.**
-2. **From source**, below. Works on macOS and Windows and takes about five
-   minutes on a machine that already has Node and Python.
+2. **From source**, below. Works on macOS, Windows and Linux and takes about
+   five minutes on a machine that already has Node and Python. There is no
+   Linux installer; on Linux, from source is the way to run it.
 
 ## Build from source
 
@@ -253,6 +254,13 @@ npm run dev            # run it
 npm run verify         # the full check suite
 npm run package:dir    # a packaged app in app/release/
 ```
+
+**Linux** was verified on a clean install on 2026-09-22 (Arch-based Omarchy,
+Python 3.14.7, Node 26.7.0, empty home folder): the macOS / Linux source setup
+steps above, excluding the packaging dependencies, then `npm ci` and
+`npm run verify`, all pass unchanged, including the checks that launch the app
+window. Installing `requirements-build.lock`, running `npm run package:dir`, and
+interactive use of `npm run dev` were not tested there.
 
 Two notes on the steps above, both of which otherwise fail on a clean clone:
 
