@@ -121,6 +121,7 @@ function runApp(binder, response, label, exportTo) {
     let stdout = ''
     let stderr = ''
     let settled = false
+    let timedOut = false
     child.stdout.on('data', (data) => (stdout += data))
     child.stderr.on('data', (data) => (stderr += data))
     const finish = (result) => {
@@ -129,15 +130,34 @@ function runApp(binder, response, label, exportTo) {
       resolve(result)
     }
     const timer = setTimeout(() => {
+      timedOut = true
       void stopApp(child).then(() =>
         finish({ code: null, stdout, stderr: `${stderr}\n${label} timed out` })
       )
     }, 120_000)
     child.on('close', (code) => {
       clearTimeout(timer)
-      finish({ code, stdout, stderr })
+      if (!timedOut) finish({ code, stdout, stderr })
+    })
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      finish({ code: null, stdout, stderr: `${stderr}\n${label}: ${error.message}` })
     })
   })
+}
+
+function launchCompleted(run, response) {
+  const output = `${run.stdout}\n${run.stderr}`
+  const reachedPrompt = output.split(/\r?\n/).includes(`[dev] recovery choice: ${response}`)
+  // runApp deletes the screenshot before each launch. A fresh capture proves
+  // the renderer finished the reopen flow, including the Cancel path.
+  const rendered = existsSync(SHOT)
+  return {
+    ok: run.code === 0 && reachedPrompt && rendered,
+    detail:
+      `exit=${run.code}; recovery prompt reached=${reachedPrompt}; window rendered=${rendered}` +
+      (run.code === 0 && reachedPrompt && rendered ? '' : `\n${output.trim()}`)
+  }
 }
 
 const opened = await engine({ cmd: 'open_binder', path: SOURCE_BINDER })
@@ -168,11 +188,8 @@ const recoveredRun = await runApp(
   'recovery launch',
   RECOVERED
 )
-check(
-  'recovery launch exits cleanly',
-  recoveredRun.code === 0,
-  recoveredRun.stderr.trim() || recoveredRun.stdout.trim()
-)
+const recoveredLaunch = launchCompleted(recoveredRun, 'recover')
+check('recovery launch reaches the prompt and renders', recoveredLaunch.ok, recoveredLaunch.detail)
 check('recovered binder is exported', existsSync(RECOVERED), RECOVERED)
 if (existsSync(RECOVERED)) {
   const recoveredBinder = await engine({ cmd: 'open_binder', path: RECOVERED })
@@ -182,15 +199,12 @@ if (existsSync(RECOVERED)) {
 
 seedRecovery(CANCEL_BINDER, opened.binder.session)
 const canceledRun = await runApp(CANCEL_BINDER, 'cancel', 'cancel launch')
-check(
-  'cancel launch exits cleanly',
-  canceledRun.code === 0,
-  canceledRun.stderr.trim() || canceledRun.stdout.trim()
-)
+const canceledLaunch = launchCompleted(canceledRun, 'cancel')
+check('cancel launch reaches the prompt and renders', canceledLaunch.ok, canceledLaunch.detail)
 const canceledRecovery = recoveryPathFor(CANCEL_BINDER)
 check(
   'Cancel preserves the recovery sibling',
-  existsSync(canceledRecovery),
+  canceledLaunch.ok && existsSync(canceledRecovery),
   canceledRecovery
 )
 

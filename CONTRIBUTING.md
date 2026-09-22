@@ -115,6 +115,23 @@ Add `engine/requirements-build.lock` on top of either if you intend to run
 `npm run package:dir` — it carries PyInstaller. The `run_spike.py` line builds
 the gitignored fixtures that `npm run verify` checks against.
 
+Linux pull requests run the source suite on Ubuntu 22.04 with Node 22 and Python
+3.12. Xvfb provides a virtual display for the real Electron checks; the job also
+runs cross-viewer conformance with poppler and pdfium. This job does not verify
+Linux packaging or replace a manual check on your desktop distribution.
+
+After `npm run verify` has generated the roundtrip binder, run the Linux-only
+negative check from `app/`:
+
+```bash
+node scripts/recovery-headless-check.mjs
+```
+
+It removes the child process's display variables and requires both recovery
+launches to fail. Recovery success requires reaching the scripted prompt and
+capturing a fresh rendered window, not just a zero launcher exit code. The
+negative check saves its output in `spike/out/recovery-headless.log`.
+
 Architecture notes live in `DATA-FLOW.md`; scope and non-goals live in the
 README. Security defects belong in the private channel described in
 `SECURITY.md`.
