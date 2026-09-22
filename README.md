@@ -204,7 +204,8 @@ Two other ways to run it, in order of effort:
    uploading a ~140 MB installer each time burns storage. Pull requests still
    run the complete source and Electron smoke suites on Windows, macOS and
    Linux; Windows and macOS packaging and installed-app verification are
-   release-candidate gates. Linux CI covers source builds only.
+   release-candidate gates. The Linux workflow also offers an optional manual
+   build and verification of the unpacked app; it does not produce an installer.
    Artifacts expire after 3 days and are **unsigned: for pilot testing, not for
    redistribution.**
 2. **From source**, below. Works on macOS, Windows and Linux and takes about
@@ -260,8 +261,15 @@ npm run package:dir    # a packaged app in app/release/
 Python 3.14.7, Node 26.7.0, empty home folder): the macOS / Linux source setup
 steps above, excluding the packaging dependencies, then `npm ci` and
 `npm run verify`, all pass unchanged, including the checks that launch the app
-window. Installing `requirements-build.lock`, running `npm run package:dir`, and
-interactive use of `npm run dev` were not tested there.
+window.
+
+A follow-up on the same Linux machine also verified the packaging dependencies,
+`npm run package:dir`, and `npm run verify:package`: the frozen engine, PDF/image/
+spreadsheet imports, export, recent-binder reopen, and packaged MCP server. The
+unpacked executable is `app/release/linux-unpacked/ledgerpdf` on x64; keep its
+whole directory together. A walkthrough of that packaged app placed a tick and
+note, saved, quit, and reopened the binder with both intact. See
+[`docs/LINUX-VERIFICATION.md`](docs/LINUX-VERIFICATION.md) for the scope and limits.
 
 Two notes on the steps above, both of which otherwise fail on a clean clone:
 

@@ -117,8 +117,12 @@ the gitignored fixtures that `npm run verify` checks against.
 
 Linux pull requests run the source suite on Ubuntu 22.04 with Node 22 and Python
 3.12. Xvfb provides a virtual display for the real Electron checks; the job also
-runs cross-viewer conformance with poppler and pdfium. This job does not verify
-Linux packaging or replace a manual check on your desktop distribution.
+runs cross-viewer conformance with poppler and pdfium. To verify Linux packaging,
+manually dispatch the **Linux** workflow with `package` enabled. It installs the
+packaging lockfile, builds the unpacked app, then runs `npm run verify:package`
+under Xvfb. Ordinary pull requests run only the source checks. Desktop-specific
+behavior still needs a walkthrough on the target distribution; see
+[`docs/LINUX-VERIFICATION.md`](docs/LINUX-VERIFICATION.md).
 
 After `npm run verify` has generated the roundtrip binder, run the Linux-only
 negative check from `app/`:

@@ -5,6 +5,11 @@ permissions:
 
 on:
   workflow_dispatch:
+    inputs:
+      package:
+        description: 'Also build and verify the unpacked Linux app'
+        type: boolean
+        default: true
   pull_request:
     branches: [main]
 
@@ -16,7 +21,9 @@ jobs:
   verify:
     name: Verify source on Linux
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 45
+    env:
+      PACKAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.package }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -43,12 +50,16 @@ jobs:
       - name: Generate synthetic fixtures
         run: engine/.venv/bin/python spike/run_spike.py
 
+      - name: Install packaging dependencies
+        if: env.PACKAGE == 'true'
+        run: engine/.venv/bin/pip install --require-hashes -r engine/requirements-build.lock
+
       - name: Install app dependencies
         working-directory: app
         run: npm ci
 
       # Run the real Electron checks with a display and the sandbox enabled.
-      # Source coverage only: Linux packaging has a separate verification gap.
+      # Packaging is manual-only, matching the other platforms' cost controls.
       - name: Verify application with a virtual display
         working-directory: app
         run: xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' npm run verify
@@ -61,13 +72,22 @@ jobs:
         working-directory: app
         run: npm run verify:viewers
 
-      - name: Upload failure evidence
-        if: failure()
+      - name: Build and verify the unpacked Linux app
+        if: env.PACKAGE == 'true'
+        working-directory: app
+        run: |
+          npm run package:dir
+          xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' npm run verify:package
+
+      - name: Upload verification evidence
+        if: failure() || env.PACKAGE == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-evidence
           retention-days: 3
           if-no-files-found: warn
           path: |
+            app/build/package-smoke*.png
+            app/build/package-smoke.txt
             spike/out/*.png
             spike/out/recovery-headless.log

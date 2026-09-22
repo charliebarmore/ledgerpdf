@@ -18,7 +18,9 @@ module.exports = async function afterPack(context) {
       ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
       : path.join(
           context.appOutDir,
-          `${context.packager.appInfo.productFilename}${context.electronPlatformName === 'win32' ? '.exe' : ''}`
+          context.electronPlatformName === 'linux'
+            ? context.packager.executableName
+            : `${context.packager.appInfo.productFilename}.exe`
         )
   await flipFuses(executable, electronFuseConfig())
 

@@ -132,6 +132,11 @@ module.exports = {
   afterPack: 'scripts/after-pack.cjs',
   npmRebuild: false,
   forceCodeSigning: signedRelease,
+  linux: {
+    executableName: 'ledgerpdf',
+    icon: 'resources/icon.png',
+    category: 'Office'
+  },
   mac: {
     target: ['dmg', 'zip'],
     category: 'public.app-category.finance',

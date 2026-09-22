@@ -17,16 +17,24 @@ const arch = process.arch === 'arm64' ? 'arm64' : process.arch
 const packagedRoot =
   process.platform === 'darwin'
     ? path.join(appDir, 'release', `mac-${arch}`, 'LedgerPDF.app')
-    : path.join(appDir, 'release', 'win-unpacked')
+    : process.platform === 'linux'
+      ? path.join(appDir, 'release', `linux${arch === 'x64' ? '' : `-${arch}`}-unpacked`)
+      : path.join(appDir, 'release', 'win-unpacked')
 const executable =
   process.platform === 'darwin'
     ? path.join(packagedRoot, 'Contents', 'MacOS', 'LedgerPDF')
-    : path.join(packagedRoot, 'LedgerPDF.exe')
+    : path.join(packagedRoot, process.platform === 'linux' ? 'ledgerpdf' : 'LedgerPDF.exe')
 const resources =
   process.platform === 'darwin'
     ? path.join(packagedRoot, 'Contents', 'Resources')
     : path.join(packagedRoot, 'resources')
 const fixture = path.resolve(appDir, '..', 'spike', 'fixtures', 'fixture_a.pdf')
+const uiFixtures = [
+  fixture,
+  path.join(path.dirname(fixture), 'fixture_b.pdf'),
+  path.join(path.dirname(fixture), 'receipt.jpg'),
+  path.join(path.dirname(fixture), 'trial_balance.xlsx')
+]
 const screenshot = path.join(appDir, 'build', 'package-smoke.png')
 const exported = path.join(appDir, 'build', 'package-smoke-binder.pdf')
 const smokeReport = path.join(appDir, 'build', 'package-smoke.txt')
@@ -214,10 +222,11 @@ if (!health.includes(`[package-smoke] engine ${packageJson.version} ready`)) {
 }
 console.log(health.trim())
 
-await access(fixture)
+for (const source of uiFixtures) await access(source)
 await rm(exported, { force: true })
+await rm(screenshot, { force: true })
 const ui = await runPackaged(['--wpt-package-ui-smoke'], {
-  WPT_PACKAGE_SMOKE_OPEN: fixture,
+  WPT_PACKAGE_SMOKE_OPEN: uiFixtures.join(path.delimiter),
   WPT_PACKAGE_SMOKE_SHOT: screenshot,
   WPT_PACKAGE_SMOKE_EXPORT: exported
 })
@@ -231,14 +240,15 @@ if (!ui.stdout.includes('[package-smoke] renderer ledgerpdf://app/index.html')) 
 }
 // Exit code and a screenshot cannot tell a loaded binder from an empty window:
 // a wrong fixture path renders a clear FileNotFoundError in the status bar and
-// still exits 0. fixture_a.pdf is three pages from one source, so assert that.
+// still exits 0. Two PDFs, a receipt image, and a two-sheet workbook must become
+// nine pages from four sources, using the FROZEN import dependencies.
 const loaded = ui.stdout.match(/\[package-smoke\] loaded (\d+) pages from (\d+) sources/)
 if (!loaded) {
   throw new Error(`Packaged UI never reported what it loaded\n${ui.stdout}\n${ui.stderr}`)
 }
-if (Number(loaded[1]) !== 3 || Number(loaded[2]) !== 1) {
+if (Number(loaded[1]) !== 9 || Number(loaded[2]) !== 4) {
   throw new Error(
-    `Packaged UI loaded ${loaded[1]} pages from ${loaded[2]} sources; expected 3 from 1 (${fixture})\n${ui.stdout}`
+    `Packaged UI loaded ${loaded[1]} pages from ${loaded[2]} sources; expected 9 from 4\n${ui.stdout}`
   )
 }
 // The frozen sidecar writing a binder — not the venv Python the rest of the
@@ -285,11 +295,12 @@ console.log(
     throw new Error(`Packaged recents open failed (${recentUi.code})\n${recentUi.stdout}\n${recentUi.stderr}`)
   }
   const got = recentUi.stdout.match(/\[package-smoke\] loaded (\d+) pages from (\d+) sources/)
-  if (!got || Number(got[1]) < 1) {
+  // Reopening rebinds all pages to the saved binder, so it is now ONE source.
+  if (!got || Number(got[1]) !== 9 || Number(got[2]) !== 1) {
     throw new Error(
-      `Clicking a recent binder in the PACKAGED app opened nothing ` +
-        `(${got ? `${got[1]} pages` : 'no report'}). In a shipped build this is the file ` +
-        `picker appearing instead of the binder.\n${recentUi.stdout}\n${recentUi.stderr}`
+      `Packaged recent-binder reopen expected 9 pages from 1 saved source; got ` +
+        `${got ? `${got[1]} pages from ${got[2]} sources` : 'no report'}.\n` +
+        `${recentUi.stdout}\n${recentUi.stderr}`
     )
   }
   console.log(`Packaged "Pick up where you left off": opened ${got[1]} pages by clicking a recent — OK`)
