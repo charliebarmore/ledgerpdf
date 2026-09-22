@@ -1188,8 +1188,12 @@ function registerIpc(): void {
       // Focused UI checks can choose without automating a native dialog. This
       // seam is development-only and never exists in a packaged release.
       const scripted = isDev ? process.env.WPT_DEV_RECOVERY_RESPONSE : undefined
-      if (scripted === 'cancel' || scripted === 'saved') return scripted
-      if (scripted === 'recover' && canRecover) return scripted
+      if (scripted === 'cancel' || scripted === 'saved' || (scripted === 'recover' && canRecover)) {
+        // The harness must prove the renderer reached this prompt. The dev
+        // launcher can exit 0 even when Electron could not start at all.
+        console.log(`[dev] recovery choice: ${scripted}`)
+        return scripted
+      }
 
       if (!canRecover) {
         const result = await dialog.showMessageBox({

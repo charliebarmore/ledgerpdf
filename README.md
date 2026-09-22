@@ -202,8 +202,9 @@ Two other ways to run it, in order of effort:
    ticked — the installer is attached only on a manual dispatch, deliberately,
    because building installers for every pull request burns runner minutes and
    uploading a ~140 MB installer each time burns storage. Pull requests still
-   run the complete source and Electron smoke suites on Windows and macOS;
-   packaging and installed-app verification are release-candidate gates.
+   run the complete source and Electron smoke suites on Windows, macOS and
+   Linux; Windows and macOS packaging and installed-app verification are
+   release-candidate gates. Linux CI covers source builds only.
    Artifacts expire after 3 days and are **unsigned: for pilot testing, not for
    redistribution.**
 2. **From source**, below. Works on macOS, Windows and Linux and takes about
