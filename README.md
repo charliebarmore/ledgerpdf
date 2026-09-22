@@ -256,9 +256,11 @@ npm run package:dir    # a packaged app in app/release/
 ```
 
 **Linux** was verified on a clean install on 2026-09-22 (Arch-based Omarchy,
-Python 3.14.7, Node 26.7.0, empty home folder): the macOS / Linux steps above,
-then `npm ci` and `npm run verify`, all pass unchanged, including the checks that
-launch the app window. `npm run package:dir` was not tried there.
+Python 3.14.7, Node 26.7.0, empty home folder): the macOS / Linux source setup
+steps above, excluding the packaging dependencies, then `npm ci` and
+`npm run verify`, all pass unchanged, including the checks that launch the app
+window. Installing `requirements-build.lock`, running `npm run package:dir`, and
+interactive use of `npm run dev` were not tested there.
 
 Two notes on the steps above, both of which otherwise fail on a clean clone:
 
