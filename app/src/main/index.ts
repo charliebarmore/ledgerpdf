@@ -23,6 +23,7 @@ import {
 } from './persistence'
 import { restrictedProcessEnv, runJsonCommand } from '../shared/json-process'
 import { clearRecents, readRecents, rememberBinder } from './recents'
+import { configuredDocumentsDir } from './documents-dir'
 import {
   readMarkSizes,
   readPreparerInitials,
@@ -739,6 +740,7 @@ function registerIpc(): void {
     assertTrustedIpc(event)
     const res = await dialog.showOpenDialog({
       title: 'Add files to binder',
+      defaultPath: configuredDocumentsDir(),
       properties: ['openFile', 'multiSelections'],
       filters: [
         { name: 'Workpaper sources', extensions: [...SOURCE_EXTS] },
@@ -811,8 +813,11 @@ function registerIpc(): void {
    *   3. else home — deliberately NOT `getPath('documents')`, which is the
    *      redirected one.
    * A `suggested` value that already names a directory is left alone.
+   * `WPT_DOCUMENTS_DIR`, when set, outranks all three (see documents-dir.ts).
    */
   const defaultSaveDir = async (): Promise<string | undefined> => {
+    const pinned = configuredDocumentsDir()
+    if (pinned) return pinned
     try {
       const recents = await readRecents(app.getPath('userData'))
       const lastPresent = recents.find((r) => r.present !== false && existsSync(path.dirname(r.path)))
@@ -825,6 +830,11 @@ function registerIpc(): void {
       if (existsSync(dir)) return dir
     }
     return app.getPath('home')
+  }
+
+  if (isDev) {
+    const pinned = configuredDocumentsDir()
+    if (pinned) console.log(`[dev] file dialogs default to ${pinned}`)
   }
 
   ipcMain.handle('dialog:saveBinderAs', async (_e, suggested: unknown) => {
@@ -951,6 +961,7 @@ function registerIpc(): void {
     assertTrustedIpc(e)
     const res = await dialog.showOpenDialog({
       title: 'Approve a folder for agent access',
+      defaultPath: configuredDocumentsDir(),
       message:
         'A standalone agent will be able to read documents and create or update LedgerPDF files in this folder.',
       buttonLabel: 'Approve folder',
@@ -1130,6 +1141,7 @@ function registerIpc(): void {
     }
     const res = await dialog.showOpenDialog({
       title: 'Open binder',
+      defaultPath: configuredDocumentsDir(),
       properties: ['openFile'],
       filters: [
         { name: 'Workpaper binder', extensions: ['pdf'] },
@@ -1144,6 +1156,7 @@ function registerIpc(): void {
     assertTrustedIpc(_e)
     const res = await dialog.showOpenDialog({
       title: `Locate ${typeof sourceName === 'string' ? sourceName : 'missing source'}`,
+      defaultPath: configuredDocumentsDir(),
       properties: ['openFile'],
       filters: [
         { name: 'Workpaper sources', extensions: [...SOURCE_EXTS] },

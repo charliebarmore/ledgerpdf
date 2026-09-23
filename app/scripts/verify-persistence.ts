@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {
@@ -14,6 +14,7 @@ import {
   writePreparerInitials
 } from '../src/main/preferences'
 import { agentConnectCommand } from '../src/shared/agent-connect'
+import { configuredDocumentsDir, DOCUMENTS_DIR_ENV } from '../src/main/documents-dir'
 
 async function main(): Promise<void> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'wpt-persistence-'))
@@ -85,7 +86,22 @@ async function main(): Promise<void> {
       )
     }
 
-    console.log('17/17 persistence, preferences and registration checks passed')
+    // WPT_DOCUMENTS_DIR pins where every file dialog starts. Anything other
+    // than an existing absolute directory must be ignored, so an unset or
+    // mistyped value leaves the old defaults exactly as they were.
+    const docsDir = path.join(dir, 'demo documents')
+    await mkdir(docsDir)
+    const withDocs = (value: string | undefined): NodeJS.ProcessEnv => ({ [DOCUMENTS_DIR_ENV]: value })
+    assert.equal(configuredDocumentsDir({}), undefined)
+    assert.equal(configuredDocumentsDir(withDocs('')), undefined)
+    assert.equal(configuredDocumentsDir(withDocs('   ')), undefined)
+    assert.equal(configuredDocumentsDir(withDocs('relative/folder')), undefined)
+    assert.equal(configuredDocumentsDir(withDocs(path.join(dir, 'missing'))), undefined)
+    assert.equal(configuredDocumentsDir(withDocs(target)), undefined, 'a file is not a folder')
+    assert.equal(configuredDocumentsDir(withDocs(docsDir)), docsDir)
+    assert.equal(configuredDocumentsDir(withDocs(` ${docsDir}${path.sep} `)), docsDir)
+
+    console.log('18/18 persistence, preferences, registration and dialog-folder checks passed')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
