@@ -53,7 +53,7 @@
     "verify:finder-open": "node scripts/finder-open-check.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "pdfjs-dist": "^6.2.108",
     "proper-lockfile": "^4.1.2",
     "react": "^19.2.8",
