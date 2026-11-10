@@ -18,8 +18,8 @@
  */
 import { handoffSchema, type CompilationHandoff } from './handoff'
 
-// v6 preserves verified filing evidence in the compilation handoff.
-export const SESSION_FORMAT_VERSION = 6
+// v7 preserves human filing decisions independently of agent evidence and document quality.
+export const SESSION_FORMAT_VERSION = 7
 
 // ------------------------------------------------------------------- types
 
@@ -676,7 +676,7 @@ export interface Session {
    * references are wrong — so this is what lets the app say so rather than let
    * a reviewer follow a reference to the wrong page.
    */
-  cover?: { path: string; narrative?: string; pages: string }
+  cover?: { path: string; narrative?: string; pages: string; filingDecisions?: string }
 }
 
 export interface BookmarkNode {
@@ -1039,13 +1039,55 @@ export function rotateVisual(nx: number, ny: number, deg: number): { nx: number;
   return { nx, ny }
 }
 
+/**
+ * Rotate pages, carrying their annotations with them.
+ *
+ * Marks, tapes, shapes and link rects are stored in the binder's display
+ * space, and the engine draws them in the page's FINAL displayed orientation.
+ * Rotating a page therefore turns the content under every annotation unless
+ * the annotations turn with it — a tick placed on a sideways scan that is then
+ * straightened would float over a different figure and export there. Box
+ * corners are re-sorted to (min, max) afterwards, the convention the resize
+ * handles rely on; lines and arrows keep their direction.
+ */
 export function rotatePages(session: Session, ids: string[], delta: number): Session {
   const idSet = new Set(ids)
+  const r = ((delta % 360) + 360) % 360
+  const turn = <T extends { page: string; nx: number; ny: number }>(item: T): T =>
+    idSet.has(item.page) && r ? { ...item, ...rotateVisual(item.nx, item.ny, r) } : item
+  const turnShape = (sh: Shape): Shape => {
+    if (!idSet.has(sh.page) || !r) return sh
+    const a = rotateVisual(sh.nx, sh.ny, r)
+    const b = rotateVisual(sh.nx2, sh.ny2, r)
+    if (sh.kind === 'line' || sh.kind === 'arrow') {
+      return { ...sh, nx: a.nx, ny: a.ny, nx2: b.nx, ny2: b.ny }
+    }
+    return {
+      ...sh,
+      nx: Math.min(a.nx, b.nx),
+      ny: Math.min(a.ny, b.ny),
+      nx2: Math.max(a.nx, b.nx),
+      ny2: Math.max(a.ny, b.ny)
+    }
+  }
+  const turnLink = (l: Link): Link => {
+    if (!idSet.has(l.page) || !r) return l
+    const a = rotateVisual(l.rect[0], l.rect[1], r)
+    const b = rotateVisual(l.rect[2], l.rect[3], r)
+    return {
+      ...l,
+      rect: [Math.min(a.nx, b.nx), Math.min(a.ny, b.ny), Math.max(a.nx, b.nx), Math.max(a.ny, b.ny)]
+    }
+  }
   return {
     ...session,
     pages: session.pages.map((p) =>
       idSet.has(p.id) ? { ...p, rotate: (((p.rotate + delta) % 360) + 360) % 360 } : p
-    )
+    ),
+    ...(session.marks ? { marks: session.marks.map(turn) } : {}),
+    ...(session.tapes ? { tapes: session.tapes.map(turn) } : {}),
+    ...(session.shapes ? { shapes: session.shapes.map(turnShape) } : {}),
+    ...(session.links ? { links: session.links.map(turnLink) } : {})
   }
 }
 
@@ -2450,7 +2492,8 @@ function stripSourceExt(name: string): string {
  */
 export function coverIsStale(session: Session): boolean {
   if (!session.cover) return false
-  return session.cover.pages !== session.pages.map((p) => p.id).join(',')
+  return session.cover.pages !== session.pages.map((p) => p.id).join(',') ||
+    (session.cover.filingDecisions ?? '{}') !== JSON.stringify(session.handoff?.filingDecisions ?? {})
 }
 
 export function bookmarkSection(session: Session, key: string): string[] {
@@ -2631,6 +2674,24 @@ export function buildBookmarks(session: Session, opts: BookmarkOptions = {}): Bo
       else dividers[owner].children.push(node)
     }
     tree = [...unfiled, ...dividers]
+  }
+
+  // The agent's imported outline is a snapshot. A reviewer filing decision
+  // reparents the input bookmark in the live/exported outline without changing
+  // the source PDF or pretending that the agent originally filed it there.
+  for (const [index, decision] of Object.entries(session.handoff?.filingDecisions ?? {})) {
+    const input = session.handoff?.inputs[Number(index)]
+    if (!input) continue
+    const source = tree.find((node) => node.title === 'Needs filing')
+    const target = tree.find((node) => node.title === decision.section)
+    if (!source || !target || source === target) continue
+    const ids = new Set(input.pageIds)
+    const moving = source.children.filter((node) => ids.has(node.page))
+    if (!moving.length) continue
+    source.children = source.children.filter((node) => !moving.includes(node))
+    target.children = [...target.children, ...moving].sort((a, b) =>
+      (indexOf.get(a.page) ?? 0) - (indexOf.get(b.page) ?? 0))
+    if (!source.children.length) tree = tree.filter((node) => node !== source)
   }
 
   // A status colours the bookmark of the page it is on, so the outline reads

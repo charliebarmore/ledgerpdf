@@ -105,6 +105,9 @@ def export_binder(spec: dict) -> dict:
     """Materialize a binder spec to a single PDF. Returns a result summary.
 
     Source files are opened read-only and never modified.
+    To resume an editable binder, callers first run clean_copy and use its
+    pages as sources. Direct imports preserve all source annotations, including
+    marks produced by LedgerPDF, regardless of any embedded source session.
     """
     output = Path(spec["output"])
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -165,13 +168,14 @@ def export_binder(spec: dict) -> dict:
                     current = int(page_obj.get(Name.Rotate, 0))
                     page_obj.Rotate = (current + delta) % 360
 
-            # 2a. A source may be a previously saved binder, carrying our own
-            #     marks as annotations. They are re-drawn from the session in
-            #     step 3, so the old generation comes off first — otherwise
-            #     every save would stack another copy on top of the last.
-            #     Annotations the client's original PDF arrived with have no
-            #     /WPT_Data and are deliberately untouched.
-            session_store.strip_wpt_annotations(out)
+            # 2a. Source annotations are part of the imported document, even
+            #     when LedgerPDF originally produced them. Editable reopen
+            #     already removes its own generation through clean_copy before
+            #     rebinding sources. Move imported editable metadata to source
+            #     provenance so even older clean_copy implementations preserve
+            #     these annotations. Do this before
+            #     adding the current editable generation in steps 3 and 4.
+            session_store.preserve_source_annotations(out)
 
             #     A source binder also carries an embedded session, and the
             #     page-level copy of it rides along on the page dictionary. It

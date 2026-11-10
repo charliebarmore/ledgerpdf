@@ -343,3 +343,9 @@ packet. This is not evidence of general semantic classification accuracy or
 practitioner usability. Next, measure a human's orientation, evidence navigation,
 filing correction and resolution time, then test an unseen packet. No release
 or installed-app update was performed here.
+
+### September 8, 2026: reviewer walkthrough attempt
+
+The timed UI walkthrough has not been run. A source-and-screenshot assessment
+identified the combined receipt filing/amount resolution gap and the navigation
+and persistence questions to test. No human timing, UI correction, or review signoff is claimed.

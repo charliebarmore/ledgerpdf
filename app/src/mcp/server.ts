@@ -1302,9 +1302,15 @@ async function pageText(
   if (!readable.some((e) => src.path.toLowerCase().endsWith(e))) {
     return { text: '', words: [], hasText: false, source: 'none' }
   }
+  // Content, not metadata: the folder gate the header promises has to be
+  // checked here, at the read, not only when a path was first added. A source
+  // can enter a session without passing through this process (a binder the
+  // person built in the app, then shared live), and an approved folder can be
+  // narrowed after the import.
+  const sourcePath = resolveAllowedPath(src.path, { mustExist: true, purpose: 'reading page text' })
   const res = await runEngine({
     cmd: 'text',
-    path: src.path,
+    path: sourcePath,
     pages: [page.index],
     ...(useOcr ? { ocr: true } : {})
   })
@@ -1494,7 +1500,13 @@ function summaryMarkdown(narrative?: string, coverPages = 0): string {
       ) : ['No unresolved compilation items. Page review status is recorded separately.']), '',
       ...(review.active.length ? [`Page review flags: ${at(review.active.map((page) => page.pageId))}. Open those pages or Review for their notes.`, ''] : []),
       '## Input dispositions', '', '| Input | Disposition | Filing | Location |', '| --- | --- | --- | --- |',
-      ...h.inputs.map((input) => `| ${cell(baseName(input.path))} | ${input.disposition} | ${cell(input.filing?.section ?? (input.pageIds.length ? 'Not recorded' : 'Not included'))} | ${at(input.pageIds)} |`), '',
+      ...h.inputs.map((input, index) => `| ${cell(baseName(input.path))} | ${input.disposition} | ${cell(h.filingDecisions?.[String(index)]?.section ?? input.filing?.section ?? (input.pageIds.length ? 'Not recorded' : 'Not included'))} | ${at(input.pageIds)} |`), '',
+      ...(h.filingDecisions && Object.keys(h.filingDecisions).length ? [
+        '## Reviewer filing decisions', '',
+        ...Object.entries(h.filingDecisions).map(([index, decision]) =>
+          `- **${cell(baseName(h.inputs[Number(index)]?.path ?? 'Unknown input'))}** filed under **${cell(decision.section)}** by ${cell(decision.by)} on ${decision.at}: ${cell(decision.reason)}. Document-quality findings remain separate.`
+        ), ''
+      ] : []),
       '## Recorded checks', '',
       ...h.checks.flatMap((check) => [
         `**${check.label} — ${check.outcome}.** ${check.detail}`,
@@ -2147,6 +2159,16 @@ registerTool(
           `Refusing to overwrite an existing memo: ${target}. Choose a new path instead.`
         )
       }
+      // writeFile follows symlinks. A link at the memo path — dangling, so the
+      // existence check above passes — would carry the summary outside the
+      // approved folder. Refuse the link itself.
+      try {
+        if (lstatSync(target).isSymbolicLink()) {
+          return fail(`Refusing to write the cover through a symbolic link: ${target}`)
+        }
+      } catch {
+        // Nothing at the path: a fresh memo.
+      }
 
       // Replace rather than stack: a binder with three covers has none.
       const existing = session.sources.find((x) => path.resolve(x.path) === target)
@@ -2191,7 +2213,8 @@ registerTool(
         cover: {
           path: target,
           ...(story?.trim() ? { narrative: story.trim() } : {}),
-          pages: session.pages.map((p) => p.id).join(',')
+          pages: session.pages.map((p) => p.id).join(','),
+          filingDecisions: JSON.stringify(session.handoff?.filingDecisions ?? {})
         }
       }
       return text(
@@ -2310,7 +2333,14 @@ registerTool(
     if (!/\.(xlsx|xlsm|csv)$/i.test(src.path)) {
       return fail(`${pageId} is not a spreadsheet — use binder_read_page for ${baseName(src.path)}`)
     }
-    const res = await runEngine({ cmd: 'cells', path: src.path })
+    // Same folder gate as page text: cells are content.
+    let sourcePath: string
+    try {
+      sourcePath = resolveAllowedPath(src.path, { mustExist: true, purpose: 'reading cells' })
+    } catch (e) {
+      return fail(String((e as Error).message ?? e))
+    }
+    const res = await runEngine({ cmd: 'cells', path: sourcePath })
     if (!res.ok) return fail(`could not read cells: ${String(res.error)}`)
     const data = res.cells as {
       sheets: Array<{

@@ -10,19 +10,25 @@ on:
         description: 'Also build and verify the packaged app'
         type: boolean
         default: true
-  # Pull requests run the complete source suite, including the real Electron
-  # smoke and cross-viewer checks. Packaging is a release-candidate gate below,
-  # not something to pay for again on every intermediate commit.
+  # On a pull request the complete source suite, including the real Electron
+  # smoke and cross-viewer checks, runs only when the PR is ready for review
+  # (not a draft) AND carries the `full-ci` label. Adding the label starts a
+  # run; later pushes to a labelled PR run again. Linux covers every other
+  # ready PR. Packaging is a release-candidate gate below, not something to
+  # pay for again on every intermediate commit.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     branches: [main]
-
-concurrency:
-  group: macos-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   verify:
     name: Verify and package on macOS
+    if: github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'full-ci') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci'))
+    # Job-level, not workflow-level: a skipped run (a draft push, or some other
+    # label being added) must not cancel a full-ci run already in flight.
+    concurrency:
+      group: macos-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: macos-15
     timeout-minutes: 50
     env:

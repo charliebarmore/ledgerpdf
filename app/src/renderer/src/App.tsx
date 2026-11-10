@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookmarkPanel } from './components/BookmarkPanel'
 import { ReviewCenter, type ReviewTab } from './components/ReviewCenter'
 import { resolveHandoffItem } from './handoff'
+import { filingSections, recordReviewerFiling } from './review-filing'
 import { SendOutPreflight } from './components/SendOutPreflight'
 import { MarkInspector } from './components/MarkInspector'
 import { ShapeInspector } from './components/ShapeInspector'
@@ -325,6 +326,29 @@ export default function App(): React.JSX.Element {
       return next
     })
     if (note) setStatus(note)
+  }, [])
+
+  // Inspector keystrokes are durable immediately but share one undo entry.
+  // A different mutation breaks the group, including an intervening agent edit.
+  const inspectorHistory = useRef<{ group: symbol; before: Session; after: Session } | null>(null)
+  const applyInspector = useCallback((mutate: (prev: Session) => Session, group?: symbol, cancel = false) => {
+    setSession((prev) => {
+      const prior = inspectorHistory.current
+      const continuing = group !== undefined && prior?.group === group && prior.after === prev
+      if (cancel && continuing) {
+        past.current.pop()
+        inspectorHistory.current = null
+        return prior.before
+      }
+      const next = mutate(prev)
+      if (next === prev) return prev
+      const before = continuing ? prior.before : prev
+      if (!continuing) past.current = [...past.current.slice(-49), prev]
+      future.current = []
+      inspectorHistory.current = group ? { group, before, after: next } : null
+      return next
+    })
+    setStatus('Annotation updated.')
   }, [])
 
   const undo = useCallback(() => {
@@ -1008,20 +1032,19 @@ export default function App(): React.JSX.Element {
     })
   }, [])
 
-  /** Inspector edits — note, author, letters, size — on the selected mark. */
+  /** Inspector edits target the selected object's identity against current state. */
   const editMark = useCallback(
-    (patch: Partial<Mark>) => {
+    (patch: Partial<Mark>, group?: symbol, cancel = false) => {
       if (!selectedMarkId) return
-      const mark = (session.marks ?? []).find((candidate) => candidate.id === selectedMarkId)
-      if (!mark) return
-      const next = updateMark(session, selectedMarkId, patch)
-      if (typeof patch.size === 'number') {
-        const updated = (next.marks ?? []).find((candidate) => candidate.id === selectedMarkId)
-        if (updated) rememberMarkSize(mark, updated.size)
-      }
-      apply(next, 'Mark updated.')
+      if (typeof patch.size === 'number' && selectedMark) rememberMarkSize(selectedMark, patch.size)
+      applyInspector((prev) => {
+        const mark = prev.marks?.find((candidate) => candidate.id === selectedMarkId)
+        if (!mark || Object.entries(patch).every(([key, value]) =>
+          mark[key as keyof Mark] === value || (value === '' && mark[key as keyof Mark] === undefined))) return prev
+        return updateMark(prev, selectedMarkId, patch)
+      }, group, cancel)
     },
-    [selectedMarkId, session, apply, rememberMarkSize]
+    [selectedMarkId, selectedMark, applyInspector, rememberMarkSize]
   )
 
   // ---------------------------------------------------------- calculator tape
@@ -1187,11 +1210,16 @@ export default function App(): React.JSX.Element {
   )
 
   const editShape = useCallback(
-    (patch: Partial<Shape>) => {
+    (patch: Partial<Shape>, group?: symbol, cancel = false) => {
       if (!selectedShapeId) return
-      apply(updateShape(session, selectedShapeId, patch), 'Shape updated.')
+      applyInspector((prev) => {
+        const shape = prev.shapes?.find((candidate) => candidate.id === selectedShapeId)
+        if (!shape || Object.entries(patch).every(([key, value]) =>
+          shape[key as keyof Shape] === value || (value === '' && shape[key as keyof Shape] === undefined))) return prev
+        return updateShape(prev, selectedShapeId, patch)
+      }, group, cancel)
     },
-    [selectedShapeId, session, apply]
+    [selectedShapeId, applyInspector]
   )
 
   // Dragging fires continuously; fold the gesture into one undo entry.
@@ -1738,6 +1766,20 @@ export default function App(): React.JSX.Element {
           'the scripted view to see the imported pages',
           () => devPlay.current.session.pages.length >= (imported?.pages.length ?? 0)
         )
+        // Background CI windows may not emit focus events from focus()/blur().
+        // Deliver the same DOM event to React if the OS did not do so.
+        let focusedField: HTMLElement | null = null
+        const fieldFocus = (field: HTMLElement, focus: boolean): void => {
+          focusedField = focus ? field : null
+          const event = focus ? 'focusin' : 'focusout'
+          let delivered = false
+          const observe = (): void => { delivered = true }
+          field.addEventListener(event, observe)
+          if (focus) field.focus()
+          else field.blur()
+          field.removeEventListener(event, observe)
+          if (!delivered) field.dispatchEvent(new FocusEvent(event, { bubbles: true }))
+        }
         let currentStep = ''
         try {
         for (const raw of place.split(';').map((x) => x.trim()).filter(Boolean)) {
@@ -1754,6 +1796,123 @@ export default function App(): React.JSX.Element {
             )
             devPlay.current.commitInitials()
             await until('the question to close', () => !devPlay.current.initialsPrompt)
+            continue
+          }
+          // Exercise real inspector fields and selection changes, not model setters.
+          const inspectorSelect = raw.match(/^inspect:(mark|shape):(\d+)$/)
+          if (inspectorSelect) {
+            const kind = inspectorSelect[1]
+            const item = (kind === 'mark' ? devPlay.current.session.marks : devPlay.current.session.shapes)?.[Number(inspectorSelect[2])]
+            if (!item) throw new Error(`dev inspector: missing ${kind}`)
+            setSelectedMarkId(kind === 'mark' ? item.id : null)
+            setSelectedShapeId(kind === 'shape' ? item.id : null)
+            await until('inspector selection', () => document.querySelector('.mi-row-note textarea')?.getAttribute('data-inspector-id') === item.id)
+            continue
+          }
+          if (raw === 'note:escape-clean') {
+            const field = document.querySelector<HTMLTextAreaElement>('.mi-row-note textarea')
+            if (!field) throw new Error('dev inspector: no note field')
+            const before = devPlay.current.session
+            field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+            await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 5)))
+            if (devPlay.current.session !== before) throw new Error('Escape changed an untouched note')
+            continue
+          }
+          if (raw === 'note:escape' || raw === 'note:blur') {
+            const field = document.querySelector<HTMLTextAreaElement>('.mi-row-note textarea')
+            if (!field) throw new Error('dev inspector: no note field')
+            if (raw.endsWith('escape')) field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+            else fieldFocus(field, false)
+            await new Promise((r) => requestAnimationFrame(r))
+            continue
+          }
+          const inspectorType = raw.match(/^note:(.*)$/)
+          if (inspectorType) {
+            const field = document.querySelector<HTMLTextAreaElement>('.mi-row-note textarea')
+            if (!field) throw new Error('dev inspector: no note field')
+            if (focusedField !== field) fieldFocus(field, true)
+            const before = devPlay.current.session
+            Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, inspectorType[1])
+            field.dispatchEvent(new Event('input', { bubbles: true }))
+            await until('typed note to reach the session', () => devPlay.current.session !== before)
+            continue
+          }
+          const inputStep = raw.match(/^input:(letters|author):(.*)$/)
+          if (inputStep) {
+            const field = document.querySelector<HTMLInputElement>(`[data-inspector-field="${inputStep[1]}"]`)
+            if (!field) throw new Error('dev inspector: missing input')
+            if (focusedField !== field) fieldFocus(field, true)
+            const action = inputStep[2]
+            if (action === 'blur') fieldFocus(field, false)
+            else if (action === 'escape') field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+            else {
+              Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, action)
+              field.dispatchEvent(new Event('input', { bubbles: true }))
+            }
+            await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 5)))
+            continue
+          }
+          const inputValue = raw.match(/^assertinput:(letters|author)=(.*)$/)
+          if (inputValue) {
+            const field = document.querySelector<HTMLInputElement>(`[data-inspector-field="${inputValue[1]}"]`)
+            if (field?.value !== inputValue[2]) throw new Error('Inspector input differs from expected value')
+            continue
+          }
+          const externalNote = raw.match(/^externalnote:(mark|shape):(\d+)=(.*)$/)
+          if (externalNote) {
+            const before = devPlay.current.session
+            const kind = externalNote[1]
+            const item = (kind === 'mark' ? before.marks : before.shapes)?.[Number(externalNote[2])]
+            if (!item) throw new Error('dev inspector: missing external target')
+            applyWith((prev) => kind === 'mark'
+              ? updateMark(prev, item.id, { note: externalNote[3] })
+              : updateShape(prev, item.id, { note: externalNote[3] }))
+            await until('external note update', () => devPlay.current.session !== before)
+            continue
+          }
+          const fieldValue = raw.match(/^fieldnote:(.*)$/)
+          if (fieldValue) {
+            const actual = document.querySelector<HTMLTextAreaElement>('.mi-row-note textarea')?.value
+            if (actual !== fieldValue[1]) throw new Error('Inspector field differs from expected note')
+            continue
+          }
+          if (raw === 'inspector:save') {
+            if (!exportTo) throw new Error('dev inspector: save requires an output')
+            // Seed a destination through the real writer, then exercise Ctrl+S
+            // while the note owns focus. No file-dialog bypass in production.
+            const saved = await devRefs.current.writeBinder(devPlay.current.session, exportTo)
+            if (!saved.ok) throw new Error('dev inspector: initial save failed')
+            setBinderPath(exportTo)
+            await until('save destination', () => devPlay.current.binderPath === exportTo)
+            const field = document.querySelector<HTMLTextAreaElement>('.mi-row-note textarea')
+            if (!field) throw new Error('dev inspector: no note field to save')
+            if (focusedField !== field) fieldFocus(field, true)
+            const before = devPlay.current.session
+            Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Saved with keyboard focus')
+            field.dispatchEvent(new Event('input', { bubbles: true }))
+            await until('last typed note', () => devPlay.current.session !== before)
+            field.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }))
+            if (!saving.current) throw new Error('Save shortcut did not run from note field')
+            await until('keyboard save', () => !saving.current)
+            // Reopen the actual saved file before the enclosing dev export can
+            // rewrite it; this catches a stale snapshot in saveBinder itself.
+            await devRefs.current.openBinderAt(exportTo, true)
+            await until('saved note reopened', () => devPlay.current.session.shapes?.[1]?.note === 'Saved with keyboard focus')
+            continue
+          }
+          const inspectorAssert = raw.match(/^assertnote:(mark|shape):(\d+)=(.*)$/)
+          if (inspectorAssert) {
+            const items = inspectorAssert[1] === 'mark' ? devPlay.current.session.marks : devPlay.current.session.shapes
+            const actual = items?.[Number(inspectorAssert[2])]?.note ?? ''
+            if (actual !== inspectorAssert[3]) throw new Error(`inspector note: expected ${JSON.stringify(inspectorAssert[3])}, got ${JSON.stringify(actual)}`)
+            continue
+          }
+          if (raw === 'inspector:undo' || raw === 'inspector:redo') {
+            const field = document.querySelector<HTMLTextAreaElement>('.mi-row-note textarea')
+            if (field && focusedField === field) fieldFocus(field, false)
+            await new Promise((r) => requestAnimationFrame(r))
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: raw.endsWith('redo'), bubbles: true }))
+            await new Promise((r) => requestAnimationFrame(r))
             continue
           }
           // lock:on / lock:off — the Keep tool toggle, driven for real rather
@@ -2221,7 +2380,12 @@ export default function App(): React.JSX.Element {
       // — much worse — deleted a binder page on Backspace. The bookmark rename
       // input guards itself with stopPropagation; this covers every field.
       const el = e.target as HTMLElement | null
-      if (el && (el.isContentEditable || /^(input|textarea|select)$/i.test(el.tagName))) return
+      const saveKey = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's'
+      if (el && (el.isContentEditable || /^(input|textarea|select)$/i.test(el.tagName))) {
+        // Inspector fields already update the session while typing. Other
+        // dialogs/fields keep their own drafts and still own every shortcut.
+        if (!(saveKey && el.hasAttribute('data-inspector-id'))) return
+      }
 
       // A modal owns the keyboard for as long as it is up, whatever happens to
       // have focus. The field guard above is not enough on its own: the click
@@ -2237,7 +2401,7 @@ export default function App(): React.JSX.Element {
         e.preventDefault()
         return e.shiftKey ? redo() : undo()
       }
-      if (mod && e.key.toLowerCase() === 's') {
+      if (saveKey) {
         e.preventDefault()
         void saveBinder(e.shiftKey)
         return
@@ -2266,7 +2430,11 @@ export default function App(): React.JSX.Element {
       // routed here at the WINDOW rather than on the tape card, because the
       // moment you touch a keypad button focus leaves the card and typing
       // would otherwise go dead. That is exactly the bug this fixes.
-      if (activeTapeId && !mod) {
+      // Gate on the DERIVED tape, not the id: after an undo, a revert or an
+      // agent push removes the tape, the id lingers and every plain key
+      // (Esc, Delete, arrows, tool letters) was swallowed by a tape that no
+      // longer existed.
+      if (activeTape && !mod) {
         e.preventDefault()
         return tapeKey(e.key)
       }
@@ -2307,6 +2475,9 @@ export default function App(): React.JSX.Element {
         if (e.key === '+' || e.key === '=') return resizeMark(4)
         if (e.key === '_' || e.key === '-') return resizeMark(-4)
       }
+      // Held keys must not cascade: auto-repeat on Delete removed page after
+      // page, and on [ ] spun the page.
+      if (e.repeat) return
       if (e.key === '[') return rotate(-90)
       if (e.key === ']') return rotate(90)
       if (e.key === 'Backspace' || e.key === 'Delete') {
@@ -2762,10 +2933,10 @@ export default function App(): React.JSX.Element {
                 }}
               />
               {selectedMark && (
-                <MarkInspector mark={selectedMark} onChange={editMark} onDelete={deleteMark} />
+                <MarkInspector key={selectedMark.id} mark={selectedMark} onChange={editMark} onDelete={deleteMark} />
               )}
               {selectedShape && (
-                <ShapeInspector shape={selectedShape} onChange={editShape} onDelete={deleteShape} />
+                <ShapeInspector key={selectedShape.id} shape={selectedShape} onChange={editShape} onDelete={deleteShape} />
               )}
             </aside>
             <div
@@ -2834,6 +3005,13 @@ export default function App(): React.JSX.Element {
           }}
           onRevert={revertAgentRun}
           onResolveHandoff={(id) => apply(resolveHandoffItem(session, id, reviewerInitials), 'Compilation item resolved by reviewer.')}
+          filingSections={filingSections(session)}
+          reviewerInitials={reviewerInitials}
+          onRecordFiling={(inputIndex, sectionId, reason, by) => {
+            const result = recordReviewerFiling(session, inputIndex, sectionId, reason, by)
+            if ('error' in result) return setStatus(result.error)
+            apply(result.session, 'Filing decision recorded. The document-quality issue remains open; review the cover before saving.')
+          }}
         />
       )}
 

@@ -29,7 +29,7 @@
  */
 
 import { createServer, type Server as NetServer, type Socket } from 'node:net'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { chmod, writeFile, rm, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { liveDir, liveEndpointFile } from '../shared/live-endpoint'
@@ -75,7 +75,38 @@ function socketPathFor(dir: string): string {
   return path.join(dir, 'live.sock')
 }
 
-export async function startLive(hooks: LiveHooks): Promise<LiveHandle> {
+/**
+ * Start and stop are chained on one promise. Each has awaits between checking
+ * the module state and changing it, so an unserialized off-then-on could let a
+ * fresh start finish while the old stop was still running — the stop then
+ * nulled the server and deleted the endpoint file under a handle that said on.
+ */
+let transitions: Promise<unknown> = Promise.resolve()
+function serialized<T>(work: () => Promise<T>): Promise<T> {
+  const run = transitions.then(work, work)
+  transitions = run.then(
+    () => undefined,
+    () => undefined
+  )
+  return run
+}
+
+export function startLive(hooks: LiveHooks): Promise<LiveHandle> {
+  return serialized(() => startLiveNow(hooks))
+}
+
+export function stopLive(): Promise<void> {
+  return serialized(stopLiveNow)
+}
+
+function tokenMatches(presented: unknown, expected: string): boolean {
+  if (typeof presented !== 'string') return false
+  const a = Buffer.from(presented, 'utf8')
+  const b = Buffer.from(expected, 'utf8')
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+async function startLiveNow(hooks: LiveHooks): Promise<LiveHandle> {
   if (handle) return handle
 
   const dir = liveDir()
@@ -130,7 +161,7 @@ export async function startLive(hooks: LiveHooks): Promise<LiveHandle> {
         if (!authed) {
           // The token must be the first thing said. Anything else and the
           // connection ends without revealing whether the token was close.
-          if (msg.verb !== 'hello' || msg.token !== token) {
+          if (msg.verb !== 'hello' || !tokenMatches(msg.token, token)) {
             reply({ id: msg.id, ok: false, error: 'unauthorized' })
             socket.end()
             return
@@ -190,7 +221,7 @@ export async function startLive(hooks: LiveHooks): Promise<LiveHandle> {
   return handle
 }
 
-export async function stopLive(): Promise<void> {
+async function stopLiveNow(): Promise<void> {
   const current = handle
   handle = null
   for (const socket of open) socket.destroy()

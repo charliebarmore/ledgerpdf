@@ -1,6 +1,6 @@
 ---
 version: "alpha"
-name: "workpaper-tool-design"
+name: "ledgerpdf-design"
 description: "Visual identity and functional layout rules for the LedgerPDF desktop app."
 colors:
   primary: "#1D434E"

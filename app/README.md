@@ -1,4 +1,4 @@
-# app — Electron shell (Phase 1: binder organizer)
+# app — Electron shell
 
 Electron + React + TypeScript front end. **PDF.js renders; it never writes.**
 Every byte written to disk goes through the Python engine (`../engine`) over a
@@ -612,6 +612,33 @@ navigates (and the page number is editable — type to jump). The `Move ↑` /
 it; they disable at the ends of the binder rather than silently doing nothing.
 The thumbnail rail scrolls to keep the current page visible.
 
+## Default folder for file dialogs
+
+By default, **Save binder as** and **Save a copy to send out** start in the
+folder of the last binder you saved, then the folder of the documents you added
+this session, then your home folder. **Open binder**, **Add files**, **Locate** (relink
+a missing source) and **Approve a folder for agent access** name no folder, so
+the operating system opens wherever its dialog last was.
+
+| Env var | Effect |
+|---|---|
+| `WPT_DOCUMENTS_DIR` | every file dialog above starts in this folder, ahead of the last-binder and this-session guesses |
+
+It must be an existing absolute folder; anything else is ignored and the
+defaults above apply unchanged. It changes only where a dialog **starts** — the
+suggested file name is the same, you can still browse anywhere, and it grants no
+access by itself. It is useful when one machine keeps two separate sets of files
+(a synthetic demo set and real engagements, each launched with its own
+`XDG_CONFIG_HOME`), so a dialog's shared memory cannot open the wrong set, and
+for anyone who keeps all client work under one folder. Unlike the dev seams
+below, it is honoured by packaged builds too.
+
+```bash
+WPT_DOCUMENTS_DIR="$HOME/Documents/binders" npm run dev
+```
+
+Dev builds log the folder at startup: `[dev] file dialogs default to …`.
+
 ## Dev seams
 
 Dev builds only (ignored when packaged), used by `npm run smoke`:
@@ -1050,10 +1077,11 @@ it correctly — this second, older copy further down the file was missed. Worth
 a look whenever the MCP surface changes: there is more than one place here that
 describes it.)
 
-Tools — all 36: `probe_pdf` · `binder_new` / `binder_open` / `binder_save` /
+Tools — all 38: `probe_pdf` · `binder_new` / `binder_open` / `binder_save` /
 `binder_status` · `binder_add_pdfs` / `binder_add_folder` · `binder_move_pages`
 / `binder_rotate_pages` / `binder_delete_pages` · `binder_bookmarks` /
-`binder_add_bookmark` / `binder_rename_bookmark` · `binder_set_reviewer` /
+`binder_add_bookmark` / `binder_add_section` / `binder_rename_bookmark` ·
+`binder_record_handoff` · `binder_set_reviewer` /
 `binder_place_mark` / `binder_draw` / `binder_annotations` /
 `binder_remove_marks` / `binder_add_note` · `binder_add_tape` / `binder_foot` /
 `binder_tie` · `binder_set_status` / `binder_review_queue` · `binder_read_page`

@@ -56,8 +56,7 @@ compilation without exposing that key. Inspect the saved artifact independently.
 Record omissions, version choices, evidence quality, and review effort, including
 failed or unavailable checks. A scripted MCP replay is an integration test, not
 an autonomous-agent acceptance result. Implementation and run results belong in
-the acceptance documentation; the exploratory review is in
-[docs/UX-REVIEW-2026-09-05.md](docs/UX-REVIEW-2026-09-05.md).
+the [acceptance documentation](docs/ENGAGEMENT-ACCEPTANCE.md).
 
 ## 7. Filing choices need source evidence
 

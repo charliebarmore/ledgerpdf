@@ -37,10 +37,12 @@ from . import __version__
 PAYLOAD_NAME = "workpaper.session.json"
 SESSION_ENVELOPE_VERSION = 1
 
-#: Every annotation this application writes carries `/WPT_Data`. That is what
-#: makes ours identifiable and separable from annotations a client's own PDF
-#: arrived with, which must always be left alone.
+#: Annotations generated from the editable session carry `/WPT_Data`.
 WPT_DATA = Name("/WPT_Data")
+#: Imported review data is provenance, not part of this binder's editable
+#: session. Separate keys also keep older engines from deleting these marks.
+WPT_SOURCE_DATA = Name("/WPT_SourceData")
+WPT_SOURCE_NAME = Name("/WPT_SourceName")
 
 #: Non-sensitive document marker on a copy whose LedgerPDF annotations were
 #: painted into page content. It carries no session, client name, source path,
@@ -183,12 +185,17 @@ def read_session(pdf: pikepdf.Pdf) -> dict:
     an ordinary PDF someone imported, which is a normal thing to open, not an
     error. The caller decides what to do with `found=False`.
     """
-    raw = _read_catalog_attachment(pdf)
-    anchor = "document"
-    if raw is None:
-        raw = _read_page_attachment(pdf)
-        anchor = "page"
-    if raw is None:
+    # Two anchors exist so that one surviving copy is enough. Each is parsed on
+    # its own: a truncated or hash-failed document-level payload used to end
+    # the search while an intact page-level copy sat unused, which turned a
+    # recoverable binder into "no session" — and a plain-PDF reopen strips its
+    # marks on the next save.
+    candidates = [
+        ("document", _read_catalog_attachment(pdf)),
+        ("page", _read_page_attachment(pdf)),
+    ]
+    present = [(anchor, raw) for anchor, raw in candidates if raw is not None]
+    if not present:
         flattened = is_flattened_copy(pdf)
         return {
             "found": False,
@@ -200,29 +207,45 @@ def read_session(pdf: pikepdf.Pdf) -> dict:
             "flattened": flattened,
         }
 
-    try:
-        envelope = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return {"found": False, "reason": f"embedded session was unreadable: {exc}"}
+    parsed: list[dict] = []
+    reasons: list[str] = []
+    for anchor, raw in present:
+        try:
+            envelope = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            reasons.append(f"{anchor}: embedded session was unreadable: {exc}")
+            continue
+        session = envelope.get("session") if isinstance(envelope, dict) else None
+        if session is None:
+            reasons.append(f"{anchor}: embedded session envelope had no session")
+            continue
+        body = json.dumps(session, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        parsed.append(
+            {
+                "anchor": anchor,
+                "payload_intact": hashlib.sha256(body).hexdigest() == envelope.get("payload_sha256"),
+                "envelope": envelope,
+                "session": session,
+            }
+        )
+    if not parsed:
+        return {"found": False, "reason": "; ".join(reasons)}
 
-    session = envelope.get("session")
-    if session is None:
-        return {"found": False, "reason": "embedded session envelope had no session"}
-
-    body = json.dumps(session, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    payload_intact = hashlib.sha256(body).hexdigest() == envelope.get("payload_sha256")
+    # Prefer a copy whose hash still checks out; otherwise the first that parses.
+    best = next((c for c in parsed if c["payload_intact"]), parsed[0])
+    envelope = best["envelope"]
     recorded = (envelope.get("binder_fingerprint") or {}).get("sha256")
     actual = page_geometry_fingerprint(pdf)
 
     return {
         "found": True,
-        "anchor": anchor,
-        "payload_intact": payload_intact,
+        "anchor": best["anchor"],
+        "payload_intact": best["payload_intact"],
         "geometry_matches": recorded == actual,
         "recorded_fingerprint": recorded,
         "actual_fingerprint": actual,
         "written_by": envelope.get("written_by"),
-        "session": session,
+        "session": best["session"],
     }
 
 
@@ -261,20 +284,39 @@ def is_flattened_copy(pdf: pikepdf.Pdf) -> bool:
 # ------------------------------------------------------------------ stripping
 
 
+def preserve_source_annotations(pdf: pikepdf.Pdf) -> None:
+    """Retain imported LedgerPDF marks when this binder later reopens.
+
+    Call after assembling source pages and before adding the current session's
+    annotations. Move editable ownership metadata to provenance keys, keeping
+    appearance, content and author untouched. Older engines also leave these
+    annotations alone because neither of their cleanup identifiers remains.
+    """
+    for page in pdf.pages:
+        for annot in page.obj.get(Name.Annots) or []:
+            if not isinstance(annot, pikepdf.Dictionary):
+                continue
+            if WPT_DATA in annot:
+                annot[WPT_SOURCE_DATA] = annot[WPT_DATA]
+                del annot[WPT_DATA]
+            name = str(annot.get(Name.NM, ""))
+            if annot.get(Name.Subtype, None) == Name.Link and name.startswith("wpt-link-"):
+                annot[WPT_SOURCE_NAME] = annot[Name.NM]
+                annot[Name.NM] = String(f"source-{name}")
+
+
 def strip_wpt_annotations(pdf: pikepdf.Pdf) -> int:
     """Remove annotations this application wrote. Returns how many went.
 
-    Necessary because in the single-file model a binder is re-exported from
-    itself on every save. Our marks are re-drawn from the session each time, so
-    the previous generation has to come off first or every save would stack
-    another copy on top.
+    clean_copy removes the previous editable generation before the app renders
+    it or reuses its pages as export sources. Our marks are re-drawn from the
+    session each time, so they must come off before that interactive layer.
 
     Identified by `/WPT_Data`, which only our own annotations carry. LedgerPDF
     versions through 0.2.1 omitted that marker from generated links, so their
     reserved `wpt-link-` annotation name is also recognized during cleanup.
-    Annotations that arrived on the client's original PDF have neither marker
-    and are left exactly where they were — the app must never quietly delete
-    someone else's review notes.
+    Imported LedgerPDF annotations have their original metadata moved to
+    provenance keys during export, so neither cleanup identifier remains.
 
     Flattened marks cannot be removed by anything, because flattening paints
     them into the page content on purpose. That is why the working file is never

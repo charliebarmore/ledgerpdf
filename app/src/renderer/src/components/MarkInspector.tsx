@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useInspectorField } from './useInspectorField'
 import {
   MARK_SIZE_MAX,
   MARK_SIZE_MIN,
@@ -16,8 +16,8 @@ import { MARK_COLOR, MARK_GLYPH } from './MarkLayer'
  * re-placing it. The timestamp is deliberately NOT editable: it records when
  * the mark was placed, and a record you can backdate is not a record.
  *
- * Text fields commit on blur or Enter rather than per keystroke, so typing a
- * note leaves one undo entry instead of forty.
+ * Text fields update the session while typing. One focus gesture is one undo
+ * entry, so changing selection cannot discard a note still in the panel.
  */
 export function MarkInspector({
   mark,
@@ -25,43 +25,22 @@ export function MarkInspector({
   onDelete
 }: {
   mark: Mark
-  onChange: (patch: Partial<Mark>) => void
+  onChange: (patch: Partial<Mark>, group?: symbol, cancel?: boolean) => void
   onDelete: () => void
 }): React.JSX.Element {
-  const [draft, setDraft] = useState({
-    text: mark.text ?? '',
-    author: mark.author ?? '',
-    note: mark.note ?? ''
-  })
-
-  // Selecting a different mark replaces the draft — otherwise the previous
-  // mark's half-typed note would leak onto this one.
-  useEffect(() => {
-    setDraft({ text: mark.text ?? '', author: mark.author ?? '', note: mark.note ?? '' })
-  }, [mark.id])
-
-  const commit = (field: 'text' | 'author' | 'note') => (): void => {
-    const value = draft[field].trim()
-    if (value === (mark[field] ?? '')) return
-    // A lettered mark with no letters would export as "?" — keep the old text.
-    if (field === 'text' && value === '') return setDraft((d) => ({ ...d, text: mark.text ?? '' }))
-    onChange({ [field]: value })
-  }
-
-  const onKey =
-    (field: 'text' | 'author' | 'note') =>
-    (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
-    // A note is real prose: plain Enter belongs to the text. The modified
-    // shortcut still gives keyboard users an explicit way to commit it.
-    if (e.key === 'Enter' && (field !== 'note' || e.metaKey || e.ctrlKey)) {
-      e.preventDefault()
-      e.currentTarget.blur()
-    }
-    if (e.key === 'Escape') {
-      setDraft((d) => ({ ...d, [field]: mark[field] ?? '' }))
-      e.currentTarget.blur()
-    }
-  }
+  const text = useInspectorField(
+    mark.text ?? '',
+    (value, group, cancel) => onChange({ text: value }, group, cancel),
+    false
+  )
+  const author = useInspectorField(
+    mark.author ?? '',
+    (value, group, cancel) => onChange({ author: value }, group, cancel)
+  )
+  const note = useInspectorField(
+    mark.note ?? '',
+    (value, group, cancel) => onChange({ note: value }, group, cancel)
+  )
 
   return (
     <div className="panel">
@@ -101,11 +80,10 @@ export function MarkInspector({
           <label className="mi-row">
             <span>Letters</span>
             <input
-              value={draft.text}
+              data-inspector-id={mark.id}
+              data-inspector-field="letters"
+              {...text}
               maxLength={STAMP_MAX_LEN}
-              onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
-              onBlur={commit('text')}
-              onKeyDown={onKey('text')}
             />
           </label>
         )}
@@ -134,13 +112,16 @@ export function MarkInspector({
         <label className="mi-row">
           <span>Author</span>
           <input
-            value={draft.author}
+            data-inspector-id={mark.id}
+            data-inspector-field="author"
+            {...author}
             maxLength={4}
             placeholder="—"
             title="Who placed this mark"
-            onChange={(e) => setDraft((d) => ({ ...d, author: e.target.value.toUpperCase() }))}
-            onBlur={commit('author')}
-            onKeyDown={onKey('author')}
+            onChange={(e) => {
+              e.target.value = e.target.value.toUpperCase()
+              author.onChange(e)
+            }}
           />
         </label>
 
@@ -154,13 +135,11 @@ export function MarkInspector({
         <label className="mi-row mi-row-note">
           <span>Note</span>
           <textarea
-            value={draft.note}
+            data-inspector-id={mark.id}
+            {...note}
             rows={3}
             placeholder="Agreed to source…"
-            title="Shown as the annotation's comment in any PDF viewer. Command/Ctrl+Enter saves."
-            onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}
-            onBlur={commit('note')}
-            onKeyDown={onKey('note')}
+            title="Comment shown in PDF viewers. Escape cancels the current edit."
           />
         </label>
 

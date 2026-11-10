@@ -1615,6 +1615,19 @@ button.link {
   font-size: 12px;
 }
 
+/* a page that failed to render says so in its own slot; the rest of the binder stays up */
+.sheet-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  background: rgb(255 255 255 / 0.85);
+  pointer-events: none;
+}
+
 
 /* ---------------------------------------------------------------- 10 key */
 
@@ -2464,6 +2477,44 @@ button.review-page-link {
 .review-actions button {
   padding: 3px 7px;
   font-size: 11px;
+}
+
+.review-filing {
+  display: grid;
+  gap: var(--sm);
+  padding: var(--sm);
+  border-top: 1px solid var(--border);
+}
+
+.review-filing label {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.review-filing select,
+.review-filing textarea,
+.review-filing input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.review-filing textarea {
+  min-height: 56px;
+  resize: vertical;
+}
+
+.review-filing p {
+  margin: 0;
+  color: var(--warning);
+  font-size: 12px;
 }
 
 .review-resolved {

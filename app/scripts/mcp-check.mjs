@@ -1321,7 +1321,7 @@ const filingOutput = path.join(REPO, 'spike/out/mcp_filing.pdf')
 rmSync(filingOutput, { force: true })
 await call('binder_save', { path: filingOutput })
 const filingSaved = (await engine({ cmd: 'open_binder', path: filingOutput })).binder.session
-check('unverified filing is persisted with its proposal and one unresolved input',
+check('unverified filing is persisted with its proposal and unresolved input',
   filingSaved.handoff.version === 2 && filingSaved.handoff.inputs[0].disposition === 'needs-decision' &&
   filingSaved.handoff.inputs[0].filing.section === 'Needs filing' && filingSaved.handoff.inputs[0].filing.proposedSection === 'Administration')
 check('filing routes the image last and preserves readable document order',
@@ -1334,8 +1334,11 @@ await call('binder_open', { path: filingOutput })
 const filingTree = (await call('binder_bookmarks')).text
 check('routing retargets the business divider and survives PDF reopen',
   /Administration[^\n]*\n  fixture_a/.test(filingTree) && /Needs filing[^\n]*\n  receipt/.test(filingTree))
-check('filing explanation and unresolved item survive reopen',
-  (await call('binder_review_queue')).text.includes('Filing:') && (await call('binder_summary')).text.includes('Needs filing'))
+const reopenedFilingQueue = (await call('binder_review_queue')).text
+check('filing question and input issue survive reopen as separate open items',
+  reopenedFilingQueue.includes('Compilation input:0:') &&
+  reopenedFilingQueue.includes('Compilation filing:0:') &&
+  (await call('binder_summary')).text.includes('Needs filing'))
 await client.close()
 
 // No root means no filesystem capability at all. This is the default when a

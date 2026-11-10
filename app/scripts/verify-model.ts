@@ -43,6 +43,7 @@ import {
   addStamp,
   addTape,
   buildBookmarks,
+  coverIsStale,
   deletePages,
   formatAmount,
   movePages,
@@ -115,6 +116,7 @@ import {
   reviewSnapshot
 } from '../src/renderer/src/review'
 import { evidenceLocation, handoffItems, handoffSchema, resolveHandoffItem } from '../src/renderer/src/handoff'
+import { filingSections, recordReviewerFiling } from '../src/renderer/src/review-filing'
 import {
   markSizePreferenceKey,
   preferredMarkSize
@@ -294,6 +296,56 @@ async function main(): Promise<number> {
   )
   t = rotatePages(s, [aIds[0]], -270)
   check('negative rotation normalizes', t.pages.find((p) => p.id === aIds[0])!.rotate === 270)
+
+  // --- rotating a page carries its annotations with it. A tick on a figure
+  //     must still sit on that figure after the page is straightened; before
+  //     this the page turned under the mark and the export put it elsewhere.
+  {
+    let r = addMark(s, { page: aIds[1], kind: 'tick', nx: 0.1, ny: 0.2, size: 24 }).session
+    r = addShape(r, {
+      page: aIds[1],
+      kind: 'rect',
+      nx: 0.6,
+      ny: 0.1,
+      nx2: 0.8,
+      ny2: 0.3,
+      color: 'red',
+      width: 1.5
+    }).session
+    r = addLink(r, { page: aIds[1], target: aIds[0], rect: [0.1, 0.1, 0.2, 0.2], label: 'l' }).session
+    const otherBefore = JSON.stringify((r.marks ?? []).filter((m) => m.page !== aIds[1]))
+    r = rotatePages(r, [aIds[1]], 90)
+    const mk = (r.marks ?? []).find((m) => m.page === aIds[1])!
+    const expected = rotateVisual(0.1, 0.2, 90)
+    check(
+      'rotating a page turns its marks with it',
+      Math.abs(mk.nx - expected.nx) < 1e-9 && Math.abs(mk.ny - expected.ny) < 1e-9,
+      `${mk.nx},${mk.ny} vs ${expected.nx},${expected.ny}`
+    )
+    const sh = (r.shapes ?? []).find((x) => x.page === aIds[1])!
+    check(
+      'a rotated box keeps (min, max) corners',
+      sh.nx <= sh.nx2 && sh.ny <= sh.ny2 && Math.abs(sh.nx - 0.7) < 1e-9 && Math.abs(sh.nx2 - 0.9) < 1e-9,
+      JSON.stringify([sh.nx, sh.ny, sh.nx2, sh.ny2])
+    )
+    const ln = (r.links ?? []).find((x) => x.page === aIds[1])!
+    check(
+      'a rotated link rect keeps (min, max) corners',
+      ln.rect[0] <= ln.rect[2] && ln.rect[1] <= ln.rect[3] && Math.abs(ln.rect[0] - 0.8) < 1e-9,
+      JSON.stringify(ln.rect)
+    )
+    check(
+      'marks on other pages do not move',
+      JSON.stringify((r.marks ?? []).filter((m) => m.page !== aIds[1])) === otherBefore
+    )
+    const back = rotatePages(r, [aIds[1]], 270)
+    const mk2 = (back.marks ?? []).find((m) => m.page === aIds[1])!
+    check(
+      'a full turn returns the mark to where it was',
+      Math.abs(mk2.nx - 0.1) < 1e-9 && Math.abs(mk2.ny - 0.2) < 1e-9,
+      `${mk2.nx},${mk2.ny}`
+    )
+  }
 
   // --- money. A figure read wrong in a tie-out does not fail, it AGREES
   // confidently, so every shape a workpaper writes is pinned down.
@@ -2479,6 +2531,50 @@ async function main(): Promise<number> {
     check('a damaged handoff is refused rather than silently dropped',
       'error' in parseSession({ ...compiled, handoff: { ...handoff, version: 99 } }))
     check('older binders without a handoff remain readable', 'session' in parseSession({ ...reviewBase, formatVersion: 3 }))
+  }
+  {
+    const receipt = reviewBase.pages.at(-1)!.id
+    const fixture: Session = {
+      ...reviewBase,
+      bookmarks: [
+        { id: 'expense_section', page: reviewBase.pages[2].id, title: '04 Expenses', depth: 0, section: true },
+        { id: 'needs_filing', page: receipt, title: 'Needs filing', depth: 0, section: true }
+      ],
+      handoff: handoffSchema.parse({
+        version: 2, recordedAt: '2026-09-07T09:00:00Z', by: 'agent', run: 'receipt_run',
+        inputs: [{
+          path: '/synthetic/receipt.png', sha256: 'b'.repeat(64),
+          disposition: 'needs-decision', reason: 'The amount is obscured and cannot be verified.',
+          pageIds: [receipt], filing: {
+            status: 'needs-decision', section: 'Needs filing',
+            reason: 'Business purpose requires a reviewer decision.', evidence: []
+          }
+        }],
+        checks: [], findings: [], resolutions: {}
+      }),
+      cover: { path: '/synthetic/cover.md', pages: reviewBase.pages.map((page) => page.id).join(',') }
+    }
+    const section = filingSections(fixture).find((item) => item.title === '04 Expenses')!
+    const filed = recordReviewerFiling(fixture, 0, section.id, 'The image says office supplies.', 'RV')
+    if ('error' in filed) throw new Error(filed.error)
+    const open = handoffItems(filed.session)
+    check('reviewer filing is separate from the unreadable amount',
+      open.some((item) => item.id === 'input:0' && !item.resolved) &&
+      open.some((item) => item.id === 'filing:0' && item.resolved) &&
+      filed.session.handoff?.filingDecisions?.['0']?.section === '04 Expenses')
+    check('receipt is filed in Expenses and empty Needs filing tab is removed',
+      bookmarkSection(filed.session, 'u:expense_section').includes(receipt) &&
+      !filed.session.bookmarks?.some((bookmark) => bookmark.title === 'Needs filing'))
+    check('filing makes the printed cover stale even when page order is unchanged',
+      coverIsStale(filed.session))
+    const reopened = parseSession(JSON.parse(JSON.stringify(toSaved(filed.session))))
+    check('reviewer decision and open amount survive session save and reopen',
+      'session' in reopened &&
+      reopened.session.handoff?.filingDecisions?.['0']?.reason === 'The image says office supplies.' &&
+      handoffItems(reopened.session).some((item) => item.id === 'input:0' && !item.resolved))
+    check('filing refuses missing reviewer identity and unknown section',
+      'error' in recordReviewerFiling(fixture, 0, section.id, 'Office supplies', '') &&
+      'error' in recordReviewerFiling(fixture, 0, 'missing', 'Office supplies', 'RV'))
   }
   {
     const page = reviewBase.pages[0].id

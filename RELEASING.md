@@ -7,6 +7,11 @@ only and must never be distributed.
 
 ## 1. Prepare the source release
 
+Prepare and review product changes in the private engineering repository.
+Check `git remote -v` before pushing and confirm that development PRs target
+that repository. `charliebarmore/ledgerpdf` is the sanitized release mirror;
+publish there only through the separate export checkout in step 3.
+
 1. Update the version in `app/package.json`, its lockfile, and `CHANGELOG.md`.
 2. Regenerate Python locks with `uv pip compile --universal --python-version 3.12
    --generate-hashes` for both requirement input files.
@@ -43,13 +48,14 @@ Keep a release-only environment and point `WPT_BUILD_PYTHON` at it, rather than
 rebuilding the development venv:
 
 ```bash
+RELEASE_VENV="${XDG_DATA_HOME:-$HOME/.local/share}/ledgerpdf/release-venv"
 uv python install 3.12
-uv venv --managed-python --python 3.12 ~/.local/share/ledgerpdf/release-venv
-uv pip install --python ~/.local/share/ledgerpdf/release-venv/bin/python \
+uv venv --managed-python --python 3.12 "$RELEASE_VENV"
+uv pip install --python "$RELEASE_VENV/bin/python" \
   --require-hashes -r engine/requirements.lock
-uv pip install --python ~/.local/share/ledgerpdf/release-venv/bin/python \
+uv pip install --python "$RELEASE_VENV/bin/python" \
   --require-hashes -r engine/requirements-build.lock
-uv pip install --python ~/.local/share/ledgerpdf/release-venv/bin/python pip
+uv pip install --python "$RELEASE_VENV/bin/python" pip
 ```
 
 Two traps that cost a build each. `uv venv --python 3.12` **discovers system
@@ -57,7 +63,7 @@ interpreters first** and will hand back Anaconda's; `--managed-python` is what
 forces a clean one, and the guard only reports the base prefix, so confirm it:
 
 ```bash
-~/.local/share/ledgerpdf/release-venv/bin/python \
+"$RELEASE_VENV/bin/python" \
   -c 'import sys; print(sys.base_prefix)'
 ```
 
@@ -68,7 +74,7 @@ tool only; PyInstaller bundles what the engine imports, so it never ships.
 Then, from `app/`:
 
 ```bash
-WPT_BUILD_PYTHON=~/.local/share/ledgerpdf/release-venv/bin/python \
+WPT_BUILD_PYTHON="$RELEASE_VENV/bin/python" \
 APPLE_KEYCHAIN_PROFILE=ledgerpdf-notary \
 WPT_SIGNED_RELEASE=true npm run dist
 ```
@@ -109,28 +115,43 @@ tools/release/prepare-public-tree.sh /absolute/path/to/ledgerpdf-public-export
 
 The public repository already exists. Clone it separately, replace its tracked
 tree with the sanitized export while preserving only its `.git` directory, and
-review the resulting incremental diff:
+create a release branch from public `main`, and review the resulting incremental diff:
 
 ```bash
 git clone https://github.com/charliebarmore/ledgerpdf.git \
   /absolute/path/to/ledgerpdf-public-checkout
+git -C /absolute/path/to/ledgerpdf-public-checkout switch -c release/public-update
 rsync -a --delete --exclude .git \
   /absolute/path/to/ledgerpdf-public-export/ \
   /absolute/path/to/ledgerpdf-public-checkout/
 node /absolute/path/to/ledgerpdf-public-checkout/tools/release/check-public-tree.mjs \
+  --private-terms /absolute/path/to/private-terms.json \
   /absolute/path/to/ledgerpdf-public-checkout
 git -C /absolute/path/to/ledgerpdf-public-checkout diff --check
 git -C /absolute/path/to/ledgerpdf-public-checkout status --short
 ```
 
-Review and secret-scan the exported tree before committing it normally on the
-public repository's `main` branch. Confirm that the public commit contains the
-same application source used for the final binaries, then tag that public
-commit. Never force-push or replace the public repository's existing history.
+Review and secret-scan the exported tree before committing it on the release
+branch. In this separate reviewed export checkout, enable the publication
+guard's release mode as the maintainer instructions describe.
+Push only that branch and open a pull request targeting public `main`;
+merge only after the required checks pass and the sanitized diff is reviewed.
+Confirm that the merged public commit contains the same application source used
+for the final binaries, then tag that public commit. Never push engineering
+branches, backup refs, private tags, or private history to the public remote.
+Never force-push or replace the public repository's existing history.
+
+The tree validator independently enforces the approved export roots and rejects
+private working directories, credential and saved-book filenames, personal paths,
+private workspace/session URLs, concrete vault references, and symlinks. Run the
+export regression suite before releasing; it is kept outside the public export. These checks complement secret
+scanning and human review: they do not prove that arbitrary prose, binary assets,
+or Git history are safe. The exporter copies a tree only; the separate public
+checkout and release PR preserve the boundary around private history.
 
 `tools/release/check-initial-public-history.mjs` is retained only for recreating
 the one-time initial public root in a brand-new repository. It must not be run
 for subsequent releases because it intentionally rejects incremental history.
 
-Push the incremental public commit, tag the source commit matching the binaries,
-and attach only the verified artifacts and their checksums.
+After merging the sanitized release PR, tag the source commit matching the
+binaries and attach only the verified artifacts and their checksums.
