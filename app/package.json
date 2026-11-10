@@ -42,7 +42,7 @@
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --outfile=out/mcp-server.cjs --log-level=warning",
     "mcp": "npm run build:mcp && node out/mcp-server.cjs",
     "verify:mcp": "npm run build:mcp && node scripts/mcp-check.mjs",
-    "verify": "npm run typecheck && npm run verify:release-config && npm run verify:disclosures && npm run verify:security && npm run verify:teardown && npm run verify:icon && npm run verify:persistence && npm run verify:model && npm run verify:recovery && npm run verify:text && npm run verify:mcp && npm run smoke && npm run verify:closed-window && npm run verify:live",
+    "verify": "npm run typecheck && npm run verify:release-config && npm run verify:disclosures && npm run verify:security && npm run verify:teardown && npm run verify:icon && npm run verify:persistence && npm run verify:model && npm run verify:single-file && npm run verify:recovery && npm run verify:text && npm run verify:mcp && npm run smoke && npm run verify:inspectors && npm run verify:closed-window && npm run verify:live",
     "verify:viewers": "node scripts/verify-viewers.mjs",
     "verify:text": "node scripts/verify-text.mjs",
     "verify:live": "npm run build:mcp && node scripts/live-check.mjs",
@@ -50,7 +50,9 @@
     "verify:icon": "node scripts/check-icon.mjs",
     "build:icon": "node scripts/build-icon.mjs",
     "verify:closed-window": "npm run build:mcp && node scripts/closed-window-check.mjs",
-    "verify:finder-open": "node scripts/finder-open-check.mjs"
+    "verify:finder-open": "node scripts/finder-open-check.mjs",
+    "verify:single-file": "node scripts/verify-single-file.mjs",
+    "verify:inspectors": "node scripts/inspector-check.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

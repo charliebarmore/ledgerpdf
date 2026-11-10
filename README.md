@@ -1,5 +1,9 @@
 # LedgerPDF
 
+[![CI](https://github.com/charliebarmore/ledgerpdf/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/charliebarmore/ledgerpdf/actions/workflows/linux.yml)
+[![Release](https://img.shields.io/github/v/release/charliebarmore/ledgerpdf)](https://github.com/charliebarmore/ledgerpdf/releases/latest)
+[![Licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue)](LICENSE)
+
 **A local-first workpaper binder, built for tax and accounting professionals to
 use alongside AI agents. A human and an agent can work in the same binder at the
 same time.**
@@ -10,23 +14,6 @@ them into one ordered, bookmarked PDF binder. Place tick marks, drop calculator
 tapes that show their addends, and link a figure to the page that supports it.
 
 ![LedgerPDF with a binder open](docs/screenshot.png)
-
-### Product direction
-
-The next workflow is **turn an engagement folder into a master file ready for
-human review**: an external agent compiles a fresh binder using the prior-year
-master as its organizing reference, performs specified checks, and leaves a
-handoff in the binder. Current releases provide the import, annotation, MCP,
-and review building blocks; the complete compilation workflow is under
-acceptance testing. [DECISIONS.md](DECISIONS.md) records the scope and ownership
-of the handoff. The desktop application's network behavior remains unchanged.
-
-The development build provides `binder_add_section` to nest imported document
-bookmarks beneath engagement sections. Filing choices retain source quotes and
-reasons; inputs without verifiable support move to Needs filing. Its editable
-saves use session format v6; use this build to open them. It also reads older
-v1-v5 binders. Quote provenance is checked; classification still needs human review. See the
-[acceptance results](docs/ENGAGEMENT-ACCEPTANCE.md) for tested behavior and limits.
 
 ## What it does
 
@@ -56,6 +43,181 @@ v1-v5 binders. Quote provenance is checked; classification still needs human rev
   and crosses, source coverage, page statuses, connector integrity, and every
   agent run. Creating a permanent send-out copy shows those same checks first;
   it does not quietly turn unfinished work into a delivery file.
+
+## How it is built
+
+An Electron + React front end over a **Python engine** (`pikepdf`/`qpdf`) that
+does every PDF operation, spoken to as a JSON-over-stdio subprocess. The engine
+is the same one the MCP server drives, so an agent and a person cannot produce
+different artefacts. Annotation appearance streams are hand-authored, and page
+geometry is resolved through one definition so a word's coordinates and a tick's
+coordinates cannot mean different things.
+
+| Path | What lives there |
+| --- | --- |
+| `app/src/main` | Electron main process: window, IPC handlers, the per-session file allowlist, the live agent host |
+| `app/src/preload` | The only bridge the renderer is given |
+| `app/src/renderer` | React UI. `session.ts` is the binder model; PDF.js renders pages and never writes |
+| `app/src/mcp` | The MCP server an agent connects to |
+| `app/src/shared` | Code the app and the MCP server share: folder containment, the binder lock, the engine subprocess |
+| `engine/workpaper_engine` | The Python PDF engine: import, annotation appearance, outline, session storage, export |
+| `app/scripts` | The verification suite |
+| `spike/` | Synthetic fixtures and the cross-viewer conformance checks. Named for the feasibility spike it began as; CI depends on it |
+| `tools/release` | Builds and validates the source tree published here |
+
+The decisions that shape the code:
+
+- **One PDF writer.** The renderer never touches a file; it asks the main
+  process over IPC. Every PDF written to disk is written by the engine, which
+  runs out of process with a scrubbed environment, a timeout and an output cap
+  ([`app/src/shared/json-process.ts`](app/src/shared/json-process.ts)).
+- **A locked-down renderer.** Context isolation on, Node integration off,
+  sandbox on. The packaged UI loads from a custom `ledgerpdf://` scheme, not
+  `file://`. Every IPC call checks its sender, and a file path is accepted only
+  if the main process itself recorded it: from a dialog, a drag-and-drop, the
+  operating system's open request, the recent-binder list, or an agent folder
+  the user approved
+  ([`app/src/main/index.ts`](app/src/main/index.ts)).
+- **Agent access is local and opt-in.** A unix socket or named pipe, a fresh
+  256-bit token each time agent access is switched on, compared in constant
+  time
+  ([`app/src/main/live-host.ts`](app/src/main/live-host.ts)), and folder
+  containment resolved through real paths
+  ([`app/src/shared/agent-roots.ts`](app/src/shared/agent-roots.ts)).
+  [`DATA-FLOW.md`](DATA-FLOW.md) sets out every process and file boundary.
+
+### How it is checked
+
+- `npm run verify` type-checks the app, then drives the binder model, the
+  engine, the MCP server and the real Electron app, GUI smoke test included.
+- `npm run verify:viewers` renders a conformance binder in two unrelated
+  engines, pdfium (what Chrome and Edge use) and poppler, and requires every
+  mark to land within tolerance in both. If a mark lands in the same place in
+  both, the geometry is a property of the PDF, not of one renderer.
+  [`spike/README.md`](spike/README.md) records the original results, PDFKit
+  (macOS Preview) included.
+- CI runs the suite on Linux for every non-draft pull request and on `main`;
+  macOS and Windows run on pull requests labelled `full-ci` and on manual runs.
+  Actions are pinned by commit SHA and Python dependencies are hash-locked.
+
+Known debt, stated rather than hidden: the checks are purpose-written scripts,
+with no unit-test framework or linter configuration yet, and `App.tsx`,
+`session.ts` and the MCP server are each a few thousand lines and due to be
+split.
+
+### How it is developed
+
+LedgerPDF is designed, specified and reviewed by a practising CPA and written
+with AI coding agents; the commit trailers say which. Day-to-day work happens in
+a private engineering repository. This repository receives a reviewed source
+export for each public update, which is why its history is a short series of
+large commits. [`RELEASING.md`](RELEASING.md) describes the export and its
+checks.
+
+## Status
+
+**Alpha.** Used daily by its author on real engagements. Expect rough edges, and
+do not make it the only copy of anything.
+
+- **Released:** [v0.3.1](https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.3.1).
+  The macOS build is Apple silicon only (the frozen Python engine is arm64),
+  signed with a Ledger Labs LLC Developer ID certificate, notarized by Apple and
+  stapled. The Windows installer is not
+  code-signed yet. On Linux, run from source.
+- **On `main`, not yet released:** engagement compilation. An external agent
+  compiles a fresh binder from an engagement folder, using the prior-year master
+  as its organizing reference, and leaves a handoff in the binder for human
+  review. Filing choices keep their source quotes and reasons; inputs without
+  verifiable support move to Needs filing. Quote provenance is checked;
+  classification still needs human review. The workflow is under acceptance
+  testing: see the [acceptance results](docs/ENGAGEMENT-ACCEPTANCE.md) for
+  tested behavior and limits, and [DECISIONS.md](DECISIONS.md) for scope.
+  Editable saves from this build use session format v7 and read v1-v6 binders;
+  earlier builds refuse v7 files rather than drop what they cannot read.
+
+### Getting a build
+
+Download the installers and checksums from the
+**[v0.3.1 release](https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.3.1)**.
+
+On **macOS**, open the `.dmg` or `.zip` and drag LedgerPDF to Applications. It
+launches with no warning, offline included.
+
+On **Windows**, run the installer. Because it is not signed yet, SmartScreen
+**may** show an "unrecognised publisher" warning once. That prompt is about
+*identity verification*, not about anything the software does.
+[`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md) walks the install, says
+plainly what the prompt means, and covers uninstalling.
+
+In CI, packaging runs only on a manual workflow run, so pull requests do not
+pay for it; those artifacts are unsigned, expire after 3 days, and are for
+pilot testing, not redistribution. The signed macOS release is built and
+notarized outside CI (see [`RELEASING.md`](RELEASING.md)). There is no Linux
+installer; on Linux, build from source.
+
+## Build from source
+
+Requires Node 22.12+ and Python 3.12+. Expect roughly 1.3 GB on
+disk once `node_modules`, the venv and a packaged build are all present.
+
+**macOS / Linux**
+
+```bash
+git clone https://github.com/charliebarmore/ledgerpdf.git
+cd ledgerpdf
+
+python3 -m venv engine/.venv
+engine/.venv/bin/pip install --require-hashes -r engine/requirements.lock
+engine/.venv/bin/pip install --require-hashes -r engine/requirements-build.lock # packaging only
+
+engine/.venv/bin/python spike/run_spike.py                      # build fixtures
+```
+
+**Windows (PowerShell)**
+
+A virtual environment puts its interpreter in `Scripts\` on Windows rather than
+`bin/`, and there is no `python3` on the PATH — `python3` there is a Microsoft
+Store stub that will not create a venv.
+
+```powershell
+git clone https://github.com/charliebarmore/ledgerpdf.git
+cd ledgerpdf
+
+python -m venv engine\.venv
+engine\.venv\Scripts\pip install --require-hashes -r engine\requirements.lock
+engine\.venv\Scripts\pip install --require-hashes -r engine\requirements-build.lock # packaging only
+
+engine\.venv\Scripts\python spike\run_spike.py                      # build fixtures
+```
+
+**Then, on either platform**
+
+```bash
+cd app
+npm ci
+npm run dev            # run it
+npm run verify         # the full check suite
+npm run package:dir    # a packaged app in app/release/
+```
+
+**Linux** was verified on a clean install on 2026-09-22 (Arch-based Omarchy,
+Python 3.14.7, Node 26.7.0, empty home folder): the steps above, `npm ci` and
+`npm run verify` all pass unchanged, including the checks that launch the app
+window. A follow-up verified the unpacked packaged app as well. See
+[`docs/LINUX-VERIFICATION.md`](docs/LINUX-VERIFICATION.md) for the scope and limits.
+
+Two notes on the steps above, both of which otherwise fail on a clean clone:
+
+- **Fixtures are gitignored** — they are synthetic and never committed — so
+  `spike/run_spike.py` has to run once before `npm run verify` has anything to
+  check. CI regenerates them the same way.
+- **`requirements-build.lock` is separate** and holds PyInstaller, which freezes
+  the Python engine into the packaged app. Skip it and `npm run dev` still
+  works; `npm run package:dir` fails with `No module named PyInstaller`.
+
+`npm run dev` takes roughly fifteen seconds to show a window the first time —
+Vite builds the main and renderer bundles before Electron launches. It is not
+hung.
 
 ## Where your data goes
 
@@ -151,139 +313,6 @@ independent backups. Before using it with client data, read:
 - [`SUPPORT.md`](SUPPORT.md) — how to report an issue without disclosing client
   information. Suspected vulnerabilities belong in the private channel in
   [`SECURITY.md`](SECURITY.md), not a public issue.
-
-## Status
-
-**Alpha.** Used daily by its author on real engagements. Expect rough edges, and
-do not make it the only copy of anything.
-
-The **macOS** release is Apple silicon only, and is signed with a Ledger Labs LLC
-Developer ID certificate, notarized by Apple, and stapled — so it opens with no
-warning and no right-click dance, offline included. Unsigned or ad-hoc local
-packages are never release artifacts.
-
-**Windows releases are not code-signed yet, and ship anyway.** Microsoft now
-calls its service [Azure Artifact Signing](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart#prerequisites),
-and public-trust onboarding is available to U.S. organizations. LedgerPDF has
-not completed that identity-validation and signing setup, so the current
-installer still carries no verified publisher identity. Signing is a
-fast-follow, not a release gate, because the functional blocker was
-mark-of-the-web and the installer already solves that — what remains is one
-publisher warning, described below.
-
-### Getting a build
-
-Download the current installers and checksums from the
-**[LedgerPDF v0.3.1 release](https://github.com/charliebarmore/ledgerpdf/releases/tag/v0.3.1)**.
-
-On **macOS**, download the `.dmg` or the `.zip`, open it, and drag LedgerPDF to
-Applications. It is notarized and stapled, so it launches with no warning.
-Apple silicon only — the frozen Python engine is arm64.
-
-On **Windows**, run the installer. Because it is not signed yet, SmartScreen
-**may** show an "unrecognised publisher" warning once: click **More info →
-Run anyway**. That prompt is about *identity verification* — the installer does
-not yet carry a certificate that verifies the publisher's name — and not about
-anything the software does. Signing will remove it; until then
-[`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md) walks the install and says
-plainly what the prompt means rather than telling anyone to click through it. On
-a first real test (2026-08-07, Windows 11, Defender on, mark-of-the-web applied)
-it did not appear at all; a stricter machine may still show it.
-
-Uninstalling removes the application and shortcuts but retains preferences and
-the recent-binder list in `%APPDATA%\LedgerPDF`; see
-[`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md#uninstalling) for what that
-folder contains and how to remove it without touching binder PDFs.
-
-Two other ways to run it, in order of effort:
-
-1. **A test CI build**, if you have access to this repository. Go to the **Windows
-   x64** workflow under the Actions tab and **"Run workflow"** with `package`
-   ticked — the installer is attached only on a manual dispatch, deliberately,
-   because building installers for every pull request burns runner minutes and
-   uploading a ~140 MB installer each time burns storage. Pull requests still
-   run the complete source and Electron smoke suites on Windows, macOS and
-   Linux; Windows and macOS packaging and installed-app verification are
-   release-candidate gates. Linux CI covers source builds only.
-   Artifacts expire after 3 days and are **unsigned: for pilot testing, not for
-   redistribution.**
-2. **From source**, below. Works on macOS, Windows and Linux and takes about
-   five minutes on a machine that already has Node and Python. There is no
-   Linux installer; on Linux, from source is the way to run it.
-
-## Build from source
-
-Requires Node 22.12+ and Python 3.12+. Expect roughly 1.3 GB on
-disk once `node_modules`, the venv and a packaged build are all present.
-
-**macOS / Linux**
-
-```bash
-git clone https://github.com/charliebarmore/ledgerpdf.git
-cd ledgerpdf
-
-python3 -m venv engine/.venv
-engine/.venv/bin/pip install --require-hashes -r engine/requirements.lock
-engine/.venv/bin/pip install --require-hashes -r engine/requirements-build.lock # packaging only
-
-engine/.venv/bin/python spike/run_spike.py                      # build fixtures
-```
-
-**Windows (PowerShell)**
-
-A virtual environment puts its interpreter in `Scripts\` on Windows rather than
-`bin/`, and there is no `python3` on the PATH — `python3` there is a Microsoft
-Store stub that will not create a venv.
-
-```powershell
-git clone https://github.com/charliebarmore/ledgerpdf.git
-cd ledgerpdf
-
-python -m venv engine\.venv
-engine\.venv\Scripts\pip install --require-hashes -r engine\requirements.lock
-engine\.venv\Scripts\pip install --require-hashes -r engine\requirements-build.lock # packaging only
-
-engine\.venv\Scripts\python spike\run_spike.py                      # build fixtures
-```
-
-**Then, on either platform**
-
-```bash
-cd app
-npm ci
-npm run dev            # run it
-npm run verify         # the full check suite
-npm run package:dir    # a packaged app in app/release/
-```
-
-**Linux** was verified on a clean install on 2026-09-22 (Arch-based Omarchy,
-Python 3.14.7, Node 26.7.0, empty home folder): the macOS / Linux source setup
-steps above, excluding the packaging dependencies, then `npm ci` and
-`npm run verify`, all pass unchanged, including the checks that launch the app
-window. Installing `requirements-build.lock`, running `npm run package:dir`, and
-interactive use of `npm run dev` were not tested there.
-
-Two notes on the steps above, both of which otherwise fail on a clean clone:
-
-- **Fixtures are gitignored** — they are synthetic and never committed — so
-  `spike/run_spike.py` has to run once before `npm run verify` has anything to
-  check. CI regenerates them the same way.
-- **`requirements-build.lock` is separate** and holds PyInstaller, which freezes
-  the Python engine into the packaged app. Skip it and `npm run dev` still
-  works; `npm run package:dir` fails with `No module named PyInstaller`.
-
-`npm run dev` takes roughly fifteen seconds to show a window the first time —
-Vite builds the main and renderer bundles before Electron launches. It is not
-hung.
-
-## How it is built
-
-An Electron + React front end over a **Python engine** (`pikepdf`/`qpdf`) that
-does every PDF operation, spoken to as a JSON-over-stdio subprocess. The engine
-is the same one the MCP server drives, so an agent and a person cannot produce
-different artefacts. Annotation appearance streams are hand-authored, and page
-geometry is resolved through one definition so a word's coordinates and a tick's
-coordinates cannot mean different things.
 
 ## Licence
 

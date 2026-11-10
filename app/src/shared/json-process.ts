@@ -2,7 +2,21 @@ import { spawn } from 'node:child_process'
 
 export function restrictedProcessEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
-  for (const key of ['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL']) {
+  for (const key of [
+    'PATH',
+    'SYSTEMROOT',
+    'WINDIR',
+    'TEMP',
+    'TMP',
+    'TMPDIR',
+    'LANG',
+    'LC_ALL',
+    // OCR configuration the engine reads and its own error text tells the
+    // user to set; the allowlist silently dropped all three.
+    'WPT_TESSERACT',
+    'WPT_OCR_ENGINE',
+    'TESSDATA_PREFIX'
+  ]) {
     if (process.env[key] !== undefined) env[key] = process.env[key]
   }
   return { ...env, ...extra }

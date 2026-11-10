@@ -33,3 +33,6 @@ app/release/
 !app/build/
 app/build/*
 !app/build/entitlements.mac.plist
+
+# Local project progress map
+.project-map/

@@ -164,7 +164,7 @@ def ocr_page(page) -> tuple[list[dict], str | None, str | None]:
     bitmap = page.render(scale=_scale_for(page))
     image = bitmap.to_pil().convert("L")
     if not image.size[0] or not image.size[1]:
-        return [], "page rendered empty", chosen
+        return [], "page rendered empty", candidates[0][0]
 
     with tempfile.TemporaryDirectory() as tmp:
         png = os.path.join(tmp, "page.png")

@@ -23,6 +23,7 @@ import {
 } from './persistence'
 import { restrictedProcessEnv, runJsonCommand } from '../shared/json-process'
 import { clearRecents, readRecents, rememberBinder } from './recents'
+import { configuredDocumentsDir } from './documents-dir'
 import {
   readMarkSizes,
   readPreparerInitials,
@@ -212,9 +213,10 @@ if (!packageSmoke) {
       app.quit()
     }
   } else {
-    app.on('second-instance', (_e, argv) => {
+    app.on('second-instance', (_e, argv, workingDirectory) => {
       const target = argvOpenTarget(argv)
-      if (target) requestOpen(path.resolve(target))
+      // A relative path belongs to the SECOND launch's directory, not ours.
+      if (target) requestOpen(path.resolve(workingDirectory || process.cwd(), target))
     })
   }
 }
@@ -739,6 +741,7 @@ function registerIpc(): void {
     assertTrustedIpc(event)
     const res = await dialog.showOpenDialog({
       title: 'Add files to binder',
+      defaultPath: configuredDocumentsDir(),
       properties: ['openFile', 'multiSelections'],
       filters: [
         { name: 'Workpaper sources', extensions: [...SOURCE_EXTS] },
@@ -811,8 +814,11 @@ function registerIpc(): void {
    *   3. else home — deliberately NOT `getPath('documents')`, which is the
    *      redirected one.
    * A `suggested` value that already names a directory is left alone.
+   * `WPT_DOCUMENTS_DIR`, when set, outranks all three (see documents-dir.ts).
    */
   const defaultSaveDir = async (): Promise<string | undefined> => {
+    const pinned = configuredDocumentsDir()
+    if (pinned) return pinned
     try {
       const recents = await readRecents(app.getPath('userData'))
       const lastPresent = recents.find((r) => r.present !== false && existsSync(path.dirname(r.path)))
@@ -825,6 +831,11 @@ function registerIpc(): void {
       if (existsSync(dir)) return dir
     }
     return app.getPath('home')
+  }
+
+  if (isDev) {
+    const pinned = configuredDocumentsDir()
+    if (pinned) console.log(`[dev] file dialogs default to ${pinned}`)
   }
 
   ipcMain.handle('dialog:saveBinderAs', async (_e, suggested: unknown) => {
@@ -951,6 +962,7 @@ function registerIpc(): void {
     assertTrustedIpc(e)
     const res = await dialog.showOpenDialog({
       title: 'Approve a folder for agent access',
+      defaultPath: configuredDocumentsDir(),
       message:
         'A standalone agent will be able to read documents and create or update LedgerPDF files in this folder.',
       buttonLabel: 'Approve folder',
@@ -1130,6 +1142,7 @@ function registerIpc(): void {
     }
     const res = await dialog.showOpenDialog({
       title: 'Open binder',
+      defaultPath: configuredDocumentsDir(),
       properties: ['openFile'],
       filters: [
         { name: 'Workpaper binder', extensions: ['pdf'] },
@@ -1144,6 +1157,7 @@ function registerIpc(): void {
     assertTrustedIpc(_e)
     const res = await dialog.showOpenDialog({
       title: `Locate ${typeof sourceName === 'string' ? sourceName : 'missing source'}`,
+      defaultPath: configuredDocumentsDir(),
       properties: ['openFile'],
       filters: [
         { name: 'Workpaper sources', extensions: [...SOURCE_EXTS] },
@@ -1435,6 +1449,13 @@ function createWindow(): void {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
   let closePromptOpen = false
+  // Set while a quit is in progress so a dirty-close "Discard changes" can
+  // finish the quit instead of leaving a windowless app running on macOS.
+  let quitRequested = false
+  const noteQuit = (): void => {
+    quitRequested = true
+  }
+  app.on('before-quit', noteQuit)
   const startClosing = (): void => {
     liveWindowReady = false
     liveWindowBlock = 'the binder window is closing; retry after reopening the binder and enabling live access'
@@ -1479,11 +1500,13 @@ function createWindow(): void {
       closePromptOpen = false
       if (choice === 0) {
         liveWindowBlock = null
+        quitRequested = false
         return
       }
       allowWindowClose = true
       startClosing()
-      win.close()
+      if (quitRequested) app.quit()
+      else win.close()
     })().catch(() => {
       closePromptOpen = false
       liveWindowBlock = null
@@ -1491,6 +1514,7 @@ function createWindow(): void {
   })
 
   win.on('closed', () => {
+    app.removeListener('before-quit', noteQuit)
     if (liveWindow !== win) return
     liveWindow = null
     liveWindowReady = false
@@ -1581,15 +1605,18 @@ app.whenReady().then(async () => {
 })
 
 // Never leave a live socket or its token behind for the next process to find.
-// `before-quit` misses a signalled shutdown, which is exactly how a socket
-// survived a killed dev run — so the signals are handled too. SIGKILL cannot
+// `will-quit` misses a signalled shutdown, which is exactly how a socket
+// survived a killed dev run — so the signals are handled too. (It is
+// `will-quit` rather than `before-quit` so a cancelled quit at the
+// unsaved-changes prompt does not leave the socket closed while the
+// indicator still says on.) SIGKILL cannot
 // be caught; a client that dials a dead socket falls back to standalone.
 const stopLiveQuietly = (): void => {
   void import('./live-host')
     .then(({ stopLive }) => stopLive())
     .catch(() => {})
 }
-app.on('before-quit', stopLiveQuietly)
+app.on('will-quit', stopLiveQuietly)
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     stopLiveQuietly()
@@ -1606,10 +1633,26 @@ app.on('window-all-closed', () => {
  * synchronous-ish: a crash can still strand one, which is why opening a binder
  * overwrites any working copy already sitting beside it.
  */
-app.on('before-quit', () => {
-  // Not an async handler: a rejection from one has nothing to catch it, which
-  // surfaces as an unhandled-rejection warning and, with a dead stderr, as a
-  // crash dialog. Failing to tidy up is not worth interrupting a quit.
+// `will-quit`, not `before-quit`: Electron fires `before-quit` BEFORE it asks
+// each window to close, so a cleanup there ran before the unsaved-changes
+// prompt and still ran when the person chose "Keep editing" — deleting the
+// autosave, releasing the binder lease and dropping the working copy under a
+// window that stayed open. `will-quit` fires only once every window has
+// actually closed and the quit is committed.
+let quitCleanupDone = false
+app.on('will-quit', (event) => {
+  if (quitCleanupDone) return
   const openBinders = new Set([...openWorkingCopies.keys(), ...binderLocks.keys()])
-  void Promise.all([...openBinders].map((binder) => releaseBinder(binder))).catch(() => {})
+  if (openBinders.size === 0) return
+  // Hold the quit just long enough for the deletes to land; a sibling left
+  // behind by a slow disk is the thing this handler exists to prevent.
+  event.preventDefault()
+  const cleanup = Promise.all([...openBinders].map((binder) => releaseBinder(binder))).catch(
+    () => {}
+  )
+  const deadline = new Promise<void>((resolve) => setTimeout(resolve, 3000))
+  void Promise.race([cleanup, deadline]).then(() => {
+    quitCleanupDone = true
+    app.quit()
+  })
 })

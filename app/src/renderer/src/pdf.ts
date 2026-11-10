@@ -47,6 +47,12 @@ export function getDoc(sourceId: string, filePath: string): Promise<PDFDocumentP
       return pdfjs.getDocument({ ...DOC_OPTS, data: new Uint8Array(bytes) }).promise
     })()
     docs.set(sourceId, existing)
+    // A failed load must not be remembered: a transient read failure (an
+    // antivirus scan holding the file, a sync client mid-write) would
+    // otherwise be permanent for the rest of the session.
+    existing.catch(() => {
+      if (docs.get(sourceId) === existing) docs.delete(sourceId)
+    })
   }
   return existing
 }
@@ -67,16 +73,27 @@ function getBitmap(sourceId: string, filePath: string): Promise<ImageBitmap> {
       return createImageBitmap(blob, { imageOrientation: 'from-image' })
     })()
     bitmaps.set(sourceId, existing)
+    existing.catch(() => {
+      if (bitmaps.get(sourceId) === existing) bitmaps.delete(sourceId)
+    })
   }
   return existing
 }
 
 export function forgetDoc(sourceId: string): void {
+  // Release the worker-side document too; deleting the map entry alone kept
+  // every binder ever opened in this window alive in the pdf.js worker.
+  docs.get(sourceId)?.then((d) => d.loadingTask.destroy()).catch(() => {})
   docs.delete(sourceId)
   bitmaps.get(sourceId)?.then((b) => b.close()).catch(() => {})
   bitmaps.delete(sourceId)
   for (const key of [...thumbs.keys()]) {
     if (key.startsWith(`${sourceId}:`)) thumbs.delete(key)
+  }
+  // Link hit regions are keyed by source id as well. Reopened binders reuse
+  // the id `binder`, so without this binder B showed binder A's links.
+  for (const key of [...linkCache.keys()]) {
+    if (key.startsWith(`${sourceId}:`)) linkCache.delete(key)
   }
 }
 
@@ -354,5 +371,8 @@ export function pageLinks(
     return out
   })()
   linkCache.set(key, existing)
+  existing.catch(() => {
+    if (linkCache.get(key) === existing) linkCache.delete(key)
+  })
   return existing
 }

@@ -50,19 +50,22 @@ function stepFrom(current: number, dir: 1 | -1): number {
 function PageCanvas({
   session,
   page,
-  zoom,
-  onError
+  zoom
 }: {
   session: Session
   page: BinderPage
   zoom: number
-  onError: (msg: string | null) => void
 }): React.JSX.Element {
   const canvas = useRef<HTMLCanvasElement>(null)
+  // The error belongs to this page. It used to be lifted into one shared
+  // slot that replaced the whole column: one unreadable page blanked every
+  // other page, and with no canvas left mounted nothing could ever clear it.
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const src = sourceOf(session, page)
     if (!src || !canvas.current) return
+    let live = true
     renderInto(
       canvas.current,
       src.id,
@@ -72,11 +75,23 @@ function PageCanvas({
       { mode: 'scale', factor: zoom },
       src.kind
     )
-      .then(() => onError(null))
-      .catch((e) => onError(String(e?.message ?? e)))
+      .then(() => live && setError(null))
+      .catch((e) => live && setError(String(e?.message ?? e)))
+    return () => {
+      live = false
+    }
   }, [page.id, page.rotate, zoom, session.sources])
 
-  return <canvas ref={canvas} className="sheet" />
+  return (
+    <>
+      <canvas ref={canvas} className="sheet" />
+      {error && (
+        <div className="error sheet-error" role="alert">
+          Could not render this page: {error}
+        </div>
+      )}
+    </>
+  )
 }
 
 export function PageView({
@@ -145,7 +160,6 @@ export function PageView({
   const [scrollTop, setScrollTop] = useState(0)
   /** Where a programmatic scroll is headed, so arrival can be detected. */
   const programmaticTarget = useRef<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
   /** Set while WE scroll, so the scroll handler doesn't fight the jump. */
   const programmatic = useRef(false)
   /** The one pending arrival fallback, so a stale one cannot clear a live jump. */
@@ -379,10 +393,7 @@ export function PageView({
           </div>
 
           <div className="sheet-scroll" ref={scroller} onScroll={onScroll}>
-            {error ? (
-              <div className="error">{error}</div>
-            ) : (
-              <div className="sheet-column" style={{ height: totalHeight }}>
+            <div className="sheet-column" style={{ height: totalHeight }}>
                 {pages.map((p, i) => {
                   const top = tops[i]
                   const h = heights[i]
@@ -397,12 +408,7 @@ export function PageView({
                     >
                       {near ? (
                         <div className="sheet-stack">
-                          <PageCanvas
-                            session={session}
-                            page={p}
-                            zoom={effective}
-                            onError={setError}
-                          />
+                          <PageCanvas session={session} page={p} zoom={effective} />
                           <MarkLayer
                             marks={marksOnPage(session, p.id)}
                             width={w}
@@ -461,8 +467,7 @@ export function PageView({
                     </div>
                   )
                 })}
-              </div>
-            )}
+            </div>
           </div>
         </>
       ) : (

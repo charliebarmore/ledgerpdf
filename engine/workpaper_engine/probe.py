@@ -109,7 +109,11 @@ def _annot_summary(annot, page_map) -> dict:
     if Name("/WPT_Kind") in annot:
         summary["wpt_kind"] = str(annot[Name("/WPT_Kind")])
     if Name("/WPT_Data") in annot:
-        summary["wpt_data"] = json.loads(str(annot[Name("/WPT_Data")]))
+        # Foreign or damaged data must not make the file unimportable.
+        try:
+            summary["wpt_data"] = json.loads(str(annot[Name("/WPT_Data")]))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            summary["wpt_data"] = None
     if subtype == Name.Link and Name.Dest in annot:
         summary["dest_page"] = _resolve_dest_page(annot.Dest, page_map)
     return summary
@@ -143,7 +147,13 @@ def probe_pdf(path: str) -> dict:
             crop = [float(v) for v in obj.CropBox] if Name.CropBox in obj else None
             annots = []
             if Name.Annots in obj:
-                annots = [_annot_summary(a, page_map) for a in obj.Annots]
+                # /Annots arrays in the wild carry nulls and stray non-dictionary
+                # entries; a null used to crash the probe and block the import.
+                annots = [
+                    _annot_summary(a, page_map)
+                    for a in obj.Annots
+                    if isinstance(a, pikepdf.Dictionary)
+                ]
             pages.append(
                 {
                     "index": i,

@@ -20,6 +20,7 @@ Windows the default did not carry them.
 from __future__ import annotations
 
 import json
+import signal
 import sys
 import traceback
 
@@ -115,6 +116,13 @@ def _write_result(result: dict) -> None:
 
 
 def main() -> int:
+    # The host kills a stalled or oversized engine with SIGTERM. Python's
+    # default handler terminates without running `finally` blocks, which left
+    # a hidden export or working-copy temp file of client pages in the
+    # engagement folder. Turning the signal into SystemExit lets the
+    # context managers in binder.py and session_store.py clean up.
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         command = _read_command()
         result = handle(command)

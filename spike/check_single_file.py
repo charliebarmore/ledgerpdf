@@ -18,6 +18,7 @@ Fixtures are synthetic. No client data, ever.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -25,7 +26,7 @@ import sys
 from pathlib import Path
 
 import pikepdf
-from pikepdf import Name
+from pikepdf import Array, Dictionary, Name, String
 
 SPIKE = Path(__file__).resolve().parent
 ROOT = SPIKE.parent
@@ -95,6 +96,153 @@ def annot_names(path: Path) -> set[str]:
                 if nm is not None:
                     names.add(str(nm))
     return names
+
+
+def annotation_records(path: Path) -> list[str]:
+    """Compare original review content and appearance without object numbers."""
+    records = []
+    with pikepdf.open(path) as pdf:
+        for index, page in enumerate(pdf.pages):
+            for annot in page.obj.get(Name.Annots) or []:
+                record = {key: str(annot.get(Name(key), "")) for key in
+                          ("/NM", "/Subtype", "/Contents", "/T", "/Rect", "/WPT_Data")}
+                # Imported editable identifiers move to provenance keys. Only
+                # normalize those keys; visual/content fields stay literal.
+                if Name("/WPT_SourceName") in annot:
+                    record["/NM"] = str(annot[Name("/WPT_SourceName")])
+                if Name("/WPT_SourceData") in annot:
+                    record["/WPT_Data"] = str(annot[Name("/WPT_SourceData")])
+                record["page"] = index
+                ap = annot.get(Name.AP)
+                if ap is not None and isinstance(ap.get(Name.N), pikepdf.Stream):
+                    record["appearance"] = hashlib.sha256(ap.N.read_bytes()).hexdigest()
+                records.append(json.dumps(record, sort_keys=True))
+    return sorted(records)
+
+
+def legacy_strip_wpt_annotations(pdf: pikepdf.Pdf) -> int:
+    """Frozen pre-fix cleanup logic: older applications know no source keys.
+
+    Keep this independent of session_store so backward preservation cannot
+    accidentally pass because the test invokes a newer cleanup implementation.
+    """
+    removed = 0
+    for page in pdf.pages:
+        annots = page.obj.get(Name("/Annots"))
+        if annots is None:
+            continue
+        keep = []
+        for annot in annots:
+            try:
+                is_legacy_link = (
+                    annot.get(Name.Subtype, None) == Name.Link
+                    and str(annot.get(Name.NM, "")).startswith("wpt-link-")
+                )
+                is_ours = Name("/WPT_Data") in annot or is_legacy_link
+            except Exception:
+                is_ours = False
+            if is_ours:
+                removed += 1
+            else:
+                keep.append(annot)
+        if len(keep) == len(annots):
+            continue
+        if keep:
+            page.obj[Name("/Annots")] = pdf.make_indirect(Array(keep))
+        else:
+            del page.obj[Name("/Annots")]
+    return removed
+
+
+def check_imported_review_work(binder: Path) -> None:
+    """A PDF's LedgerPDF producer does not make its marks ours to delete."""
+    from workpaper_engine import session_store
+
+    plain = OUT_DIR / "imported-review.pdf"
+    with pikepdf.open(binder) as pdf:
+        session_store.strip_embedded_session(pdf)
+        # Older LedgerPDF links predate /WPT_Data but still belong to the
+        # imported document. A URI keeps the test independent of link remapping.
+        pdf.pages[0].obj.Annots.append(pdf.make_indirect(Dictionary(
+            Type=Name.Annot, Subtype=Name.Link, Rect=Array([10, 10, 30, 30]),
+            NM=String("wpt-link-0042"),
+            A=Dictionary(S=Name.URI, URI=String("https://example.com/review")),
+        )))
+        pdf.save(plain)
+    original = annotation_records(plain)
+    source_digest = hashlib.sha256(plain.read_bytes()).hexdigest()
+    info = engine_cli({"cmd": "open_binder", "path": str(plain)})
+    check("marked source opens as a plain PDF", info.get("binder", {}).get("found") is False)
+
+    pages = [{"id": f"pg{i + 1}", "source": "A", "index": i} for i in range(2)]
+    empty_session = {**sample_session(["pg1", "pg2"]), "marks": []}
+    first = OUT_DIR / "imported-review-first.pdf"
+    spec = build_spec({"A": str(plain)}, pages, empty_session, first)
+    spec["annotations"] = []
+    res = engine_cli({"cmd": "export", "binder": spec})
+    check("plain marked PDF saves without adding new marks", res.get("ok"), str(res.get("error", "")))
+    if not res.get("ok"):
+        return
+    check("plain-PDF save retains every original annotation and appearance",
+          annotation_records(first) == original)
+
+    previous = first
+    expected_session = empty_session
+    for cycle in range(2):
+        reopened = engine_cli({"cmd": "open_binder", "path": str(previous)})
+        check(f"imported review cycle {cycle + 1}: editable session reopens",
+              reopened.get("binder", {}).get("session") == expected_session)
+        clean = OUT_DIR / f"imported-review-clean-{cycle}.pdf"
+        res = engine_cli({"cmd": "clean_copy", "path": str(previous), "output": str(clean)})
+        check(f"imported review cycle {cycle + 1}: clean copy preserves source marks",
+              res.get("ok") and annotation_records(clean) == original)
+        check(f"imported review cycle {cycle + 1}: cleanup removes only current annotations",
+              res.get("result", {}).get("annotations_removed") == (0 if cycle == 0 else 2))
+        saved = OUT_DIR / f"imported-review-save-{cycle}.pdf"
+        spec = build_spec({"A": str(clean)}, pages, empty_session, saved)
+        # Simulate newly created editable marks, then their replacement/removal
+        # after reopen. Source marks must survive both operations.
+        spec["annotations"] = ([{"kind": "note", "page": "pg1", "nx": 0.1,
+                                 "ny": 0.2, "note": "Current editable note"}]
+                               if cycle == 0 else [])
+        if cycle == 0:
+            spec["links"] = [{"page": "pg1", "rect_n": [0.1, 0.1, 0.2, 0.2],
+                              "target_page": "pg2"}]
+        expected_session = {**empty_session, "marks": [
+            {**mark, "id": "current-note"} for mark in spec["annotations"]
+        ], "links": ([{"id": "current-link", "page": "pg1", "target": "pg2",
+                       "rect": [0.1, 0.1, 0.2, 0.2]}] if cycle == 0 else [])}
+        spec["session"] = expected_session
+        res = engine_cli({"cmd": "export", "binder": spec})
+        records = annotation_records(saved)
+        check(f"imported review cycle {cycle + 1}: only current marks are replaced",
+              res.get("ok") and all(record in records for record in original)
+              and len(records) == len(original) + (2 if cycle == 0 else 0))
+        legacy_clean = OUT_DIR / f"imported-review-legacy-clean-{cycle}.pdf"
+        with pikepdf.open(saved) as pdf:
+            removed = legacy_strip_wpt_annotations(pdf)
+            pdf.save(legacy_clean)
+        check(f"imported review cycle {cycle + 1}: older engine preserves imported work",
+              removed == (2 if cycle == 0 else 0)
+              and annotation_records(legacy_clean) == original)
+        previous = saved
+
+    flat = OUT_DIR / "imported-review-flat.pdf"
+    spec = build_spec({"A": str(plain)}, pages, empty_session, flat, flatten=True)
+    res = engine_cli({"cmd": "export", "binder": spec})
+    check("flattened export preserves imported review annotations",
+          res.get("ok") and annotation_records(flat) == original)
+    check("imported marked source is unchanged",
+          hashlib.sha256(plain.read_bytes()).hexdigest() == source_digest)
+
+    # Importing an entire editable binder as source pages is equally valid;
+    # its embedded session must not grant ownership to the receiving binder.
+    imported = OUT_DIR / "imported-editable-binder.pdf"
+    spec = build_spec({"A": str(binder)}, pages, empty_session, imported)
+    spec["annotations"] = []
+    res = engine_cli({"cmd": "export", "binder": spec})
+    check("importing a session-bearing PDF also preserves its original marks",
+          res.get("ok") and annotation_records(imported) == annotation_records(binder))
 
 
 def sample_session(pages: list[str]) -> dict:
@@ -194,15 +342,15 @@ def main() -> int:
 
     # ------------------------------------------- 4. save again, from the binder
     # The real cycle: the app reopened a binder and the user pressed Save. The
-    # source is now the binder itself, marks and all. If export did not strip
-    # the previous generation, this is where marks would double.
+    # app/MCP clean_copy removes the previous editable generation before
+    # rebindToBinder uses it as the source. Export must preserve source marks.
     again = OUT_DIR / "binder-again.pdf"
     binder_pages = [
         {"id": "pg1", "source": "A", "index": 0, "rotate": 0},
         {"id": "pg2", "source": "A", "index": 1, "rotate": 0},
     ]
     res = engine_cli({"cmd": "export", "binder": build_spec(
-        {"A": str(binder)}, binder_pages, session, again)})
+        {"A": str(clean)}, binder_pages, session, again)})
     check("saving a reopened binder succeeds", res.get("ok"), str(res.get("error", ""))[:200])
     ours, theirs = count_annots(again)
     check("marks did NOT double on the second save", ours == 2, f"ours={ours} (expected 2)")
@@ -210,15 +358,19 @@ def main() -> int:
 
     # A third save, because an off-by-one in the strip would show up as 2 -> 2 -> 3
     third = OUT_DIR / "binder-third.pdf"
+    again_clean = OUT_DIR / "binder-again-clean.pdf"
+    res = engine_cli({"cmd": "clean_copy", "path": str(again), "output": str(again_clean)})
+    check("second editable reopen removes only its previous generation", res.get("ok")
+          and res.get("result", {}).get("annotations_removed") == 2)
     res = engine_cli({"cmd": "export", "binder": build_spec(
-        {"A": str(again)}, binder_pages, session, third)})
+        {"A": str(again_clean)}, binder_pages, session, third)})
     ours, _ = count_annots(third)
     check("marks stay put across a third save", ours == 2, f"ours={ours} (expected 2)")
 
     # ------------------------------------------------- 5. the distribution copy
     flat = OUT_DIR / "binder-flat.pdf"
     res = engine_cli({"cmd": "export", "binder": build_spec(
-        {"A": str(binder)}, binder_pages, session, flat, flatten=True)})
+        {"A": str(clean)}, binder_pages, session, flat, flatten=True)})
     check("flattened copy is written", res.get("ok"), str(res.get("error", ""))[:200])
     check("flattened copy embeds NO session",
           res.get("result", {}).get("session_bytes") == 0,
@@ -273,6 +425,7 @@ def main() -> int:
     check("an ordinary PDF is not mislabeled as a flattened LedgerPDF copy",
           res.get("binder", {}).get("flattened") is False)
 
+    check_imported_review_work(binder)
     return report()
 
 

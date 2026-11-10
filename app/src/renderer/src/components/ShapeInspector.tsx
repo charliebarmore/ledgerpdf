@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useInspectorField } from './useInspectorField'
 import {
   SHAPE_COLORS,
   SHAPE_COLOR_NAMES,
@@ -27,11 +27,13 @@ export function ShapeInspector({
   onDelete
 }: {
   shape: Shape
-  onChange: (patch: Partial<Shape>) => void
+  onChange: (patch: Partial<Shape>, group?: symbol, cancel?: boolean) => void
   onDelete: () => void
 }): React.JSX.Element {
-  const [note, setNote] = useState(shape.note ?? '')
-  useEffect(() => setNote(shape.note ?? ''), [shape.id])
+  const note = useInspectorField(
+    shape.note ?? '',
+    (value, group, cancel) => onChange({ note: value }, group, cancel)
+  )
 
   const stroked = shape.kind !== 'highlight'
 
@@ -88,22 +90,11 @@ export function ShapeInspector({
         <label className="mi-row mi-row-note">
           <span>Note</span>
           <textarea
-            value={note}
+            data-inspector-id={shape.id}
+            {...note}
             rows={3}
             placeholder="Why this is here…"
-            title="Shown as the annotation's comment in any PDF viewer. Command/Ctrl+Enter saves."
-            onChange={(e) => setNote(e.target.value)}
-            onBlur={() => note.trim() !== (shape.note ?? '') && onChange({ note: note.trim() })}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault()
-                e.currentTarget.blur()
-              }
-              if (e.key === 'Escape') {
-                setNote(shape.note ?? '')
-                e.currentTarget.blur()
-              }
-            }}
+            title="Comment shown in PDF viewers. Escape cancels the current edit."
           />
         </label>
 

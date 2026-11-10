@@ -42,6 +42,59 @@ Versioning once a stable compatibility promise is published.
 
 ### Fixed
 
+- Inspector notes, author initials and stamp text now update the binder while
+  typing, so changing selection cannot discard an edit. Each focused edit is
+  one undo step; Escape cancels it without overwriting a later external update.
+  Cmd/Ctrl+S also saves from a focused inspector field.
+- Saving a plain PDF or importing another binder now preserves its existing
+  LedgerPDF annotations. Imported ownership metadata is retained as provenance,
+  so both current and older cleanup logic leave those source marks alone on
+  reopen. Current editable marks still replace their prior generation, and
+  deleting one does not restore it on the next save.
+
+- Review pass 2026-10-20 (fresh-eyes review):
+  - Quitting no longer deletes the autosave, drops the working copy and
+    releases the binder lease *before* the unsaved-changes prompt; cleanup
+    moved from `before-quit` to `will-quit`, and Cmd+Q followed by "Discard
+    changes" now finishes quitting on macOS instead of leaving a windowless app.
+  - A lost binder lock (sync client removing the hidden lock folder, a share
+    stalling past 30 s) logs instead of raising an uncaught exception that
+    showed a crash dialog in the app or killed the MCP process.
+  - Live agent access start/stop is serialized, so a double-click on the
+    toggle cannot orphan a socket or delete the endpoint file under a handle
+    that says on. The live token is compared in constant time.
+  - Rotating a page now carries its marks, tapes, shapes and link rects with
+    it. Before, the page turned under the annotations and the export drew
+    them over different content. Covered by five new model checks.
+  - One page that fails to render shows its error in its own slot; it no
+    longer blanks the whole binder until reopen. Failed document, image and
+    link loads are no longer cached as permanent failures.
+  - Closing a binder destroys its pdf.js document in the worker and clears
+    its link hit regions, so a reopened binder no longer shows the previous
+    binder's links.
+  - After an undo or revert removed the active tape, Esc, Delete, arrows and
+    the tool letters were swallowed; the keyboard gate now follows the tape
+    that exists. Modifier shortcuts and Tab pass through a focused tape card.
+    Holding Delete or `[`/`]` no longer cascades through pages.
+  - MCP `binder_read_page`, `binder_find` and `binder_read_cells` now check
+    the approved folders at read time, as the server header and README state;
+    sources that entered a live session from outside those folders, or whose
+    folder was removed later, were readable. `binder_add_cover` refuses to
+    write through a symbolic link. README tool count corrected to 38.
+  - Engine: `read_session` falls back to the page-level copy when the
+    document-level copy is damaged, instead of reporting "no session" with an
+    intact copy present. Probe tolerates null `/Annots` entries and non-JSON
+    private data. CSV row and column truncation is reported, chart sheets
+    are skipped with a warning instead of aborting the import, and read-only
+    workbooks re-measure their own dimensions so a wrong `<dimension>` tag no
+    longer drops rows. A sheet that would exceed the per-sheet page cap is
+    refused loudly instead of silently truncated. A killed engine now runs
+    its cleanup and removes temp files. OCR settings (`WPT_TESSERACT`,
+    `WPT_OCR_ENGINE`, `TESSDATA_PREFIX`) reach the engine. Fixed an unbound
+    variable when a page rendered empty for OCR.
+  - A second launch with a relative path resolves it against that launch's
+    working directory.
+
 - Compilation section headings now group imported document bookmarks through
   `binder_add_section`, preserving their nested outlines and page order.
 - Evidence references display the worksheet name once in Review and generated
@@ -57,6 +110,18 @@ Versioning once a stable compatibility promise is published.
   without relying on development-only `node_modules`.
 - Prevented a delayed mark-size preference response from replacing a newer
   placement size while a reviewer resizes and immediately places another mark.
+
+### Security
+
+- Updated Electron to 43.8.7, the MCP SDK to 1.32.2, Vite to 7.3.8 and their
+  transitive dependencies within the existing version ranges; only the lockfile
+  changed. `npm audit --omit=dev` reports no known vulnerabilities.
+
+### Documentation
+
+- Reordered the README so the architecture, verification approach and
+  development model come before the professional-considerations sections, and
+  added a source map. The Linux suite now also runs on `main`.
 
 ## [0.3.1] - 2026-08-17
 

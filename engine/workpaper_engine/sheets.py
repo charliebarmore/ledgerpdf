@@ -163,10 +163,13 @@ def read_grids(path: str | Path) -> tuple[list[tuple[str, list[list[str]]]], lis
         text, guess = _decode_csv(p.read_bytes())
         if guess:
             warnings.append(f"{p.name}: {guess}")
-        rows = [
-            [_clean(cell) for cell in row[:MAX_COLS]]
-            for row in list(csvlib.reader(io.StringIO(text, newline="")))[:MAX_ROWS]
-        ]
+        all_rows = list(csvlib.reader(io.StringIO(text, newline="")))
+        if len(all_rows) > MAX_ROWS:
+            warnings.append(f"{p.name}: stopped at {MAX_ROWS} rows ({len(all_rows)} in the file)")
+        widest = max((len(r) for r in all_rows), default=0)
+        if widest > MAX_COLS:
+            warnings.append(f"{p.name}: stopped at {MAX_COLS} columns ({widest} in the file)")
+        rows = [[_clean(cell) for cell in row[:MAX_COLS]] for row in all_rows[:MAX_ROWS]]
         return [(p.stem, rows)], warnings
 
     import openpyxl
@@ -183,10 +186,23 @@ def read_grids(path: str | Path) -> tuple[list[tuple[str, list[list[str]]]], lis
         for name in values.sheetnames:
             vsheet = values[name]
             fsheet = formulas[name] if name in formulas.sheetnames else None
+            # A chart sheet has no cells. It used to abort the whole import
+            # with an AttributeError on iter_rows.
+            if not hasattr(vsheet, "iter_rows"):
+                warnings.append(f"{name}: skipped (chart sheet, no cells)")
+                continue
+            # Read-only mode trusts the sheet's <dimension> tag, which some
+            # exporters write wrong, and rows past it vanish silently. Making
+            # openpyxl measure the sheet itself is its documented remedy.
+            for ws in (vsheet, fsheet):
+                if ws is not None and hasattr(ws, "reset_dimensions"):
+                    ws.reset_dimensions()
             rows: list[list[str]] = []
             frows = fsheet.iter_rows(values_only=True) if fsheet else iter(())
             for row, frow in zip(vsheet.iter_rows(), frows):
                 out: list[str] = []
+                if len(row) > MAX_COLS and not any(w.startswith(f"{name}: stopped at {MAX_COLS} columns") for w in warnings):
+                    warnings.append(f"{name}: stopped at {MAX_COLS} columns ({len(row)} in the sheet)")
                 for i, cell in enumerate(row[:MAX_COLS]):
                     text = _clean(cell.value, getattr(cell, "number_format", ""))
                     if not text and i < len(frow):
@@ -451,6 +467,19 @@ def sheet_to_pdf(path: str | Path) -> pikepdf.Pdf:
     """Render a spreadsheet to an in-memory PDF. The file on disk is untouched."""
     grids, _warnings = read_grids(path)
     pdf = pikepdf.new()
+    # Refuse rather than truncate: a sheet too large for the page cap would
+    # otherwise import as its first pages only, with nothing anywhere saying
+    # so. Same policy as a multi-frame TIFF in images.py.
+    for name, raw in grids:
+        rows = _trim(raw)
+        _shape, _size, _cols, per_page, bands = _plan(rows)
+        needed = max(1, -(-len(rows) // per_page)) * max(1, len(bands))
+        if needed > MAX_PAGES_PER_SHEET:
+            raise ValueError(
+                f"{Path(path).name}: sheet {name!r} needs {needed} pages, more than the "
+                f"{MAX_PAGES_PER_SHEET} LedgerPDF will render; importing it would silently "
+                "drop the rest. Split the sheet or print it to PDF first."
+            )
     font = pdf.make_indirect(
         Dictionary(
             Type=Name.Font,

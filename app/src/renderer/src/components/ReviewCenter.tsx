@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { SHAPE_COLORS } from '../session'
 import type { ReviewSnapshot } from '../review'
 import { evidenceLocation } from '../handoff'
+import type { FilingSection } from '../review-filing'
 
 export type ReviewTab = 'attention' | 'coverage' | 'ai' | 'handoff'
 
@@ -31,6 +32,9 @@ export function ReviewCenter({
   onResolve,
   onRevert,
   onResolveHandoff,
+  filingSections,
+  reviewerInitials,
+  onRecordFiling,
   onClose
 }: {
   snapshot: ReviewSnapshot
@@ -40,12 +44,16 @@ export function ReviewCenter({
   onResolve: (pageId: string, status: 'reviewed' | 'na') => void
   onRevert: (run: string) => void
   onResolveHandoff: (id: string) => void
+  filingSections: FilingSection[]
+  reviewerInitials: string
+  onRecordFiling: (inputIndex: number, sectionId: string, reason: string, by: string) => void
   onClose: () => void
 }): React.JSX.Element {
   const attentionChecks = snapshot.readiness.filter((finding) => finding.level === 'attention')
   const advisoryChecks = snapshot.readiness.filter((finding) => finding.level === 'advisory')
   const agentRuns = snapshot.runs.filter((run) => run.run !== 'you')
   const drawer = useRef<HTMLElement>(null)
+  const [filingDraft, setFilingDraft] = useState({ id: '', section: '', reason: '', by: reviewerInitials })
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
@@ -98,7 +106,8 @@ export function ReviewCenter({
           <div className={snapshot.active.length || snapshot.handoffPending.length ? 'has-attention' : ''}>
             <b>{snapshot.active.length + snapshot.handoffPending.length}</b><span>open items</span>
           </div>
-          <div><b>{snapshot.resolved.length + Object.keys(snapshot.handoff?.resolutions ?? {}).length}</b><span>resolved</span></div>
+          <div><b>{snapshot.resolved.length + Object.keys(snapshot.handoff?.resolutions ?? {}).length +
+            Object.keys(snapshot.handoff?.filingDecisions ?? {}).length}</b><span>resolved</span></div>
           <div><b>{snapshot.statuses.unset}</b><span>without status</span></div>
         </div>
 
@@ -155,8 +164,61 @@ export function ReviewCenter({
                     {[...new Set(item.pageIds)].filter((id) => snapshot.pageNumbers[id]).map((id) => (
                       <button key={id} onClick={() => onJump(id)}>Evidence p.{snapshot.pageNumbers[id]}</button>
                     ))}
-                    <button onClick={() => onResolveHandoff(item.id)}>Resolve item</button>
+                    {!item.id.startsWith('filing:') && (
+                      <button onClick={() => onResolveHandoff(item.id)}>Resolve item</button>
+                    )}
                   </div>
+                  {item.id.startsWith('filing:') && (
+                    <div className="review-filing">
+                      <label>
+                        File under
+                        <select
+                          aria-label="Filing section"
+                          value={filingDraft.id === item.id ? filingDraft.section : ''}
+                          onChange={(event) => setFilingDraft({
+                            ...(filingDraft.id === item.id ? filingDraft : { id: item.id, section: '', reason: '', by: reviewerInitials }),
+                            id: item.id, section: event.target.value
+                          })}
+                        >
+                          <option value="">Choose a section</option>
+                          {filingSections.map((section) => (
+                            <option key={section.id} value={section.id}>{section.title}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Why it belongs there
+                        <textarea
+                          aria-label="Filing reason"
+                          value={filingDraft.id === item.id ? filingDraft.reason : ''}
+                          onChange={(event) => setFilingDraft({
+                            ...(filingDraft.id === item.id ? filingDraft : { id: item.id, section: '', reason: '', by: reviewerInitials }),
+                            id: item.id, reason: event.target.value
+                          })}
+                        />
+                      </label>
+                      <label>
+                        Your initials
+                        <input
+                          aria-label="Reviewer initials"
+                          value={filingDraft.id === item.id ? filingDraft.by : reviewerInitials}
+                          onChange={(event) => setFilingDraft({
+                            ...(filingDraft.id === item.id ? filingDraft : { id: item.id, section: '', reason: '', by: reviewerInitials }),
+                            id: item.id, by: event.target.value
+                          })}
+                        />
+                      </label>
+                      <button
+                        disabled={filingDraft.id !== item.id || !filingDraft.section ||
+                          !filingDraft.reason.trim() || !filingDraft.by.trim()}
+                        onClick={() => onRecordFiling(
+                          Number(item.id.slice('filing:'.length)), filingDraft.section,
+                          filingDraft.reason, filingDraft.by
+                        )}
+                      >Record filing decision</button>
+                      <p>The document-quality issue stays open.</p>
+                    </div>
+                  )}
                 </article>
               ))}
 
@@ -237,12 +299,20 @@ export function ReviewCenter({
               <h3>Compilation record</h3>
               <p>Agent preparation snapshot · {shortTime(snapshot.handoff.recordedAt)}. Outcomes are agent-reported; inspect the evidence. Human review is separate.</p>
               <h3>{snapshot.handoff.inputs.length} input dispositions</h3>
-              {snapshot.handoff.inputs.map((input) => (
+              {snapshot.handoff.inputs.map((input, index) => (
                 <div className="review-item handoff-item" key={input.path}>
                   <b>{input.path.split(/[\\/]/).pop()} · {input.disposition}</b>
                   <p>{input.reason}</p>
+                  {snapshot.handoff?.filingDecisions?.[String(index)] && (
+                    <p>
+                      Reviewer filed under <b>{snapshot.handoff.filingDecisions[String(index)].section}</b>:
+                      {' '}{snapshot.handoff.filingDecisions[String(index)].reason}
+                      {' · '}{snapshot.handoff.filingDecisions[String(index)].by}
+                      {' · '}{shortTime(snapshot.handoff.filingDecisions[String(index)].at)}
+                    </p>
+                  )}
                   {input.filing ? <details>
-                    <summary>Filing: {input.filing.section} · {input.filing.status === 'supported' ? 'source quote verified' : 'needs a decision'}</summary>
+                    <summary>Agent filing: {input.filing.section} · {input.filing.status === 'supported' ? 'source quote verified' : 'needed a decision'}</summary>
                     <p>{input.filing.reason}</p>
                     {input.filing.proposedSection && <p>Agent proposed: {input.filing.proposedSection}</p>}
                     {input.filing.evidence.map((e, j) => <div key={j}>
@@ -271,7 +341,7 @@ export function ReviewCenter({
                   ))}
                 </div>
               ))}
-              <p>{Object.keys(snapshot.handoff.resolutions).length} compilation item(s) resolved by a human. The original record is retained.</p>
+              <p>{Object.keys(snapshot.handoff.resolutions).length + Object.keys(snapshot.handoff.filingDecisions ?? {}).length} compilation item(s) resolved by a human. The original record is retained.</p>
             </section>
           )}
 

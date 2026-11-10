@@ -40,6 +40,7 @@ async function hideLockOnWindows(target: string): Promise<void> {
 export async function acquireBinderLock(binder: string): Promise<BinderLease> {
   const absolute = path.resolve(binder)
   const lockPath = binderLockPathFor(absolute)
+  let held = true
   let rawRelease: () => Promise<void>
   try {
     rawRelease = await lock(absolute, {
@@ -50,7 +51,16 @@ export async function acquireBinderLock(binder: string): Promise<BinderLease> {
       lockfilePath: lockPath,
       stale: 30_000,
       update: 10_000,
-      retries: 0
+      retries: 0,
+      // The library default rethrows from its refresh timer, which is an
+      // uncaught exception: a crash dialog in the app or a dead MCP process,
+      // either one over unsaved work. A sync client deleting the hidden lock
+      // directory or a share stalling past the stale window is enough to
+      // trigger it. Losing the lease is worth logging, not dying for.
+      onCompromised: (error) => {
+        held = false
+        console.error(`binder lock lost for ${path.basename(absolute)}: ${error.message}`)
+      }
     })
   } catch (error) {
     const code = (error as { code?: unknown }).code
@@ -65,7 +75,6 @@ export async function acquireBinderLock(binder: string): Promise<BinderLease> {
 
   await chmod(lockPath, 0o700).catch(() => {})
   await hideLockOnWindows(lockPath)
-  let held = true
   return {
     binder: absolute,
     lockPath,

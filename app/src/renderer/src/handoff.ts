@@ -61,7 +61,11 @@ export const handoffSchema = z.object({
     detail: description, evidence: z.array(sourceEvidence).max(100)
   }).strict().refine((check) => check.outcome === 'unchecked' || check.evidence.length > 0)).max(1000),
   findings: z.array(handoffFinding).max(1000),
-  resolutions: z.record(z.string(), z.object({ by: z.string(), at: z.string().datetime() }).strict())
+  resolutions: z.record(z.string(), z.object({ by: z.string(), at: z.string().datetime() }).strict()),
+  filingDecisions: z.record(z.string(), z.object({
+    section: z.string().trim().min(1).max(200), reason: description,
+    by: z.string().trim().min(1).max(100), at: z.string().datetime()
+  }).strict()).optional()
 }).strict().refine((h) => h.version === 1 || h.inputs.every((input) => !input.pageIds.length ||
   (input.filing && (input.filing.status === 'supported'
     ? input.filing.evidence.length > 0 && input.filing.section !== 'Needs filing'
@@ -102,9 +106,15 @@ export function handoffItems(session: Session): HandoffItem[] {
     items.push({ id, label, detail, pageIds: pages, resolved: !!h.resolutions[id] })
   }
   h.inputs.forEach((input, i) => {
-    if (['needs-decision', 'unreadable', 'unsupported'].includes(input.disposition) || input.filing?.status === 'needs-decision') {
-      add(`input:${i}`, `${input.path.split(/[\\/]/).pop()} · ${input.disposition}`,
-        input.filing?.status === 'needs-decision' ? `${input.reason} Filing: ${input.filing.reason}` : input.reason, input.pageIds)
+    if (['needs-decision', 'unreadable', 'unsupported'].includes(input.disposition)) {
+      add(`input:${i}`, `${input.path.split(/[\\/]/).pop()} · ${input.disposition}`, input.reason, input.pageIds)
+    }
+    if (input.filing?.status === 'needs-decision') {
+      items.push({
+        id: `filing:${i}`, label: `${input.path.split(/[\\/]/).pop()} · filing decision`,
+        detail: input.filing.reason, pageIds: input.pageIds,
+        resolved: !!h.filingDecisions?.[String(i)]
+      })
     }
   })
   h.checks.forEach((check, i) => {
@@ -120,7 +130,7 @@ export function handoffItems(session: Session): HandoffItem[] {
 }
 
 export function resolveHandoffItem(session: Session, id: string, by: string): Session {
-  if (!session.handoff || session.activeRun || !handoffItems(session).some((item) => item.id === id)) return session
+  if (!session.handoff || session.activeRun || id.startsWith('filing:') || !handoffItems(session).some((item) => item.id === id)) return session
   return { ...session, handoff: { ...session.handoff, resolutions: {
     ...session.handoff.resolutions, [id]: { by, at: new Date().toISOString() }
   } } }

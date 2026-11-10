@@ -152,7 +152,10 @@ export function TapeLayer({
                 }
                 return
               }
-              // The tape owns the keyboard while it is active.
+              // The tape owns the plain keys while it is active. Shortcuts
+              // with a modifier (save, undo, open) and Tab keep going to the
+              // window, or Ctrl+S right after keying a tape did nothing.
+              if (e.metaKey || e.ctrlKey || e.key === 'Tab') return
               e.stopPropagation()
               e.preventDefault()
               onKey(e.key)

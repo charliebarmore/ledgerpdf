@@ -12,11 +12,11 @@ DESTINATION="$1"
 PUBLIC_ROOTS=(
   .github .gitignore .node-version .nvmrc
   CHANGELOG.md CODE_OF_CONDUCT.md CONTRIBUTING.md COPYRIGHT.md DATA-FLOW.md
-  DECISIONS.md DESIGN-PRINCIPLES.md DESIGN.md DISCLAIMER.md LICENSE PRIVACY.md README.md
+  DECISIONS.md DESIGN.md DISCLAIMER.md LICENSE PRIVACY.md README.md
   RELEASING.md SECURITY.md SUPPORT.md TERMS.md THIRD-PARTY-NOTICES.md
   app docs engine skills spike tools
 )
-PRIVATE_ROOTS=(CLAUDE.md PROJECT.md ROADMAP.md references templates)
+PRIVATE_ROOTS=(AGENTS.md CLAUDE.md DESIGN-PRINCIPLES.md PROJECT.md ROADMAP.md references templates)
 
 listed_in() {
   local needle="$1"
@@ -52,7 +52,15 @@ done < <(git -C "$SOURCE_ROOT" ls-tree -z --name-only HEAD)
 
 mkdir -p "$DESTINATION"
 git -C "$SOURCE_ROOT" archive --format=tar HEAD "${PUBLIC_ROOTS[@]}" | tar -xf - -C "$DESTINATION"
-node "$DESTINATION/tools/release/check-public-tree.mjs" "$DESTINATION"
+# The private-name list lives in the unpublished tree. Refuse to export without
+# it rather than produce a tree that was never checked for those names.
+PRIVATE_TERMS="${LEDGERPDF_PRIVATE_TERMS:-$SOURCE_ROOT/references/private-terms.json}"
+if [ ! -f "$PRIVATE_TERMS" ]; then
+  echo "refusing public export: private term list not found: $PRIVATE_TERMS" >&2
+  rm -rf "$DESTINATION"
+  exit 2
+fi
+node "$DESTINATION/tools/release/check-public-tree.mjs" --private-terms "$PRIVATE_TERMS" "$DESTINATION"
 
 echo "Public tree prepared at $DESTINATION"
 echo "Review and secret-scan it, then sync it into a clean checkout of the existing public repository."
